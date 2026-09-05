@@ -15,7 +15,7 @@ Nothing has to be installed on the listening devices.
 ## Contents
 
 - [What you need](#what-you-need)
-- [The quick way, on macOS and Linux](#the-quick-way-on-macos-and-linux)
+- [The quick way](#the-quick-way)
 - [Step 1: download](#step-1-download)
 - [Step 2: run it](#step-2-run-it)
 - [Step 3: open it](#step-3-open-it)
@@ -45,12 +45,20 @@ Nothing has to be installed on the listening devices.
 
 Nothing else. There is no database to install, no runtime, no web server. The whole thing is one file.
 
-## The quick way, on macOS and Linux
+## The quick way
 
-One command does all three steps below. Run it from whatever folder you want the installation to live in:
+One command does all three steps below. Run it from whatever folder you want the installation to live in.
+
+**macOS and Linux**, in a terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh
+```
+
+**Windows**, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1 | iex
 ```
 
 It works out which build your machine needs, downloads the latest release, checks it against the published
@@ -60,7 +68,7 @@ created right there:
 ```
 on-air-record/
   on-air-record     the program
-  start.sh          starts it again with your settings
+  start.sh          starts it again with your settings   (start.cmd on Windows)
   config            your settings
   data/             recordings and the database
 ```
@@ -68,28 +76,43 @@ on-air-record/
 Nothing is written anywhere else on the machine. To start it again later:
 
 ```sh
-./on-air-record/start.sh
+./on-air-record/start.sh          # macOS and Linux
+```
+
+```powershell
+.\on-air-record\start.cmd         # Windows, or just double click it in Explorer
 ```
 
 That reads `config`, so the port is only chosen once. Useful options:
 
-| Option | What it does |
-| --- | --- |
-| `--port 9000` | Use this port without asking |
-| `--reconfigure` | Ask for the port again |
-| `--update` | Fetch a newer release over the top |
-| `--no-start` | Install and configure, but do not start |
-| `--dir <path>` | Install somewhere other than the current folder |
+| macOS and Linux | Windows | What it does |
+| --- | --- | --- |
+| `--port 9000` | `-Port 9000` | Use this port without asking |
+| `--reconfigure` | `-Reconfigure` | Ask for the port again |
+| `--update` | `-Update` | Fetch a newer release over the top |
+| `--no-start` | `-NoStart` | Install and configure, but do not start |
+| `--dir <path>` | `-Dir <path>` | Install somewhere other than the current folder |
 
-Pass them after `--`, like `curl -fsSL ... | sh -s -- --port 9000`.
+On macOS and Linux, pass them after `--`:
 
-On a Mac this also sidesteps the "unidentified developer" warning, because a file fetched with `curl` is
-not quarantined the way a browser download is.
+```sh
+curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh -s -- --port 9000
+```
+
+On Windows, `iex` cannot take parameters, so use the script block form:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1))) -Port 9000
+```
+
+This also sidesteps the "unidentified developer" warning on macOS and SmartScreen on Windows, because a
+file fetched with `curl` or `irm` is not quarantined the way a browser download is. Windows will still ask
+about the firewall the first time the service starts; say yes for private networks.
 
 It will refuse to run on ARM Linux, such as a Raspberry Pi, because there is no prebuilt binary for it.
 That needs [building from source](#building-from-source).
 
-The rest of this section is the same thing done by hand, and is what to follow on Windows.
+The rest of this section is the same thing done by hand.
 
 ## Step 1: download
 

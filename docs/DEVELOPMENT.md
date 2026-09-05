@@ -140,18 +140,31 @@ Everything in `scripts/` is plain Node with no dependencies, run as `node script
 already required to build the UI, so it is the one toolchain every workflow can assume is present, and
 nothing else has to be installed to check a version or preview the wiki.
 
-The exception is `scripts/install.sh`, which is POSIX `sh` because it runs on a machine that has nothing
-installed yet, which is the whole point of it. It is served straight from `raw.githubusercontent.com` on
-`master`, so **a change to it is live the moment it is pushed**, with no release needed and no way to
-stage it. Test it against a scratch directory before pushing:
+The exceptions are the two installers, `scripts/install.sh` (POSIX `sh`) and `scripts/install.ps1`
+(PowerShell), because they run on a machine that has nothing installed yet, which is the whole point of
+them. They are a matched pair: same folder layout, same `KEY=VALUE` config file, same options, same
+messages. A change to one usually needs the same change to the other.
+
+Both are served straight from `raw.githubusercontent.com` on `master`, so **a change is live the moment
+it is pushed**, with no release needed and no way to stage it. Test against a scratch directory first:
 
 ```sh
 mkdir /tmp/oar-install-test && cd /tmp/oar-install-test
 sh ~/path/to/scripts/install.sh --no-start
 ```
 
-It resolves the latest release from the redirect on `/releases/latest` rather than the API, which has an
-hourly rate limit that an installer would hit on a shared network.
+`install.ps1` can be exercised on macOS or Linux with PowerShell 7 by faking the architecture, which
+covers everything except actually launching the program:
+
+```sh
+PROCESSOR_ARCHITECTURE=AMD64 pwsh -NoProfile -File scripts/install.ps1 -Port 9000 -NoStart
+```
+
+Both resolve the latest release from the redirect on `/releases/latest` rather than the API, which has an
+hourly rate limit that an installer would hit on a shared network. Two things that bit during the port and
+are easy to reintroduce: `Invoke-WebRequest` hands back the checksum file as a byte array rather than
+text, so it is saved to disk and read back; and `$ProgressPreference` has to be silenced or a download
+spends most of its time drawing a progress bar.
 
 ## Continuous integration and releases
 

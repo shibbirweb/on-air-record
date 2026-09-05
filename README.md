@@ -43,7 +43,25 @@ to change the port. `--help` lists the rest.
 There is no prebuilt binary for ARM Linux, such as a Raspberry Pi. The installer says so and points at
 [building from source](#build-from-source).
 
-### By hand, and on Windows
+### The installer, on Windows
+
+Run this in PowerShell, from wherever you want it to live:
+
+```powershell
+irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1 | iex
+```
+
+Same idea and the same folder, with `start.cmd` beside the program so it can be started by double clicking
+it in Explorer. Windows asks whether to allow it through the firewall the first time; say yes for private
+networks, or no other machine can listen.
+
+`iex` cannot pass options, so use the script block form for those:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1))) -Port 9000
+```
+
+### By hand
 
 A release build carries the web UI inside the executable, so there is one file to copy and nothing to
 point it at. Download the archive for your platform from the
@@ -56,8 +74,9 @@ cd on-air-record-<version>-<target>
 ```
 
 On Windows, extract the `.zip` and run `on-air-record.exe`. macOS will refuse an unsigned download on the
-first attempt; allow it under System Settings, Privacy and Security. The installer above avoids that
-prompt, because a file fetched with `curl` is not quarantined the way a browser download is.
+first attempt; allow it under System Settings, Privacy and Security. The installers above avoid both that
+prompt and SmartScreen, because a file fetched with `curl` or `irm` is not quarantined the way a browser
+download is.
 
 Then open `http://localhost:8080` on the host, or `http://<host-lan-ip>:8080` from any other machine on
 the same network. Recordings and the database are written to `./data` next to wherever you ran it, which
