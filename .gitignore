@@ -4,8 +4,6 @@
 
 # Node
 node_modules/
-# The frontend build output is ignored by frontend/.gitignore, which also keeps dist/.gitkeep so the
-# directory exists at compile time for the embedded UI.
 /frontend/.vite/
 npm-debug.log*
 yarn-error.log*

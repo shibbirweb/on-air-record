@@ -8,11 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-# Ignore the build output but keep the directory: it must exist at compile time for the backend to embed
-# the UI. Ignoring the directory itself would make the negation useless, since git does not look inside
-# an ignored directory.
-dist/*
-!dist/.gitkeep
+dist
 dist-ssr
 *.local
 
