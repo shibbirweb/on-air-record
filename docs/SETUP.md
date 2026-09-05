@@ -569,7 +569,7 @@ from `/api/health`, what `--version` prints, and what the footer shows, so the r
 with it. The same number is recorded in four files, so move it with the script rather than by hand:
 
 ```sh
-node scripts/version.mjs bump
+make release          # or: node scripts/version.mjs bump
 ```
 
 That lists everything that has landed since the last release, suggests whether it is a patch, a minor or
@@ -582,7 +582,7 @@ git push origin master
 ```
 
 You never have to work out whether a release is due: every CI run says so in its summary, and
-`node scripts/version.mjs pending` answers the same question locally.
+`make pending` answers the same question locally.
 
 To release the version the manifest already carries, there is nothing to do here.
 

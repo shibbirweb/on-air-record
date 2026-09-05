@@ -88,6 +88,13 @@ You need Rust and Node, and the UI must be built first, because a release build 
 `frontend/dist` at compile time:
 
 ```bash
+make build      # the UI, then the binary, in the order that matters
+make run
+```
+
+Or without `make`:
+
+```bash
 # 1. build the web UI
 cd frontend
 npm install

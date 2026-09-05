@@ -27,6 +27,10 @@ error. If a build dies there, the wrong Node is active.
 
 ## Commands
 
+A `Makefile` at the root wraps the common ones: `make check` runs everything CI does, `make build` builds
+the UI then the binary in the order that matters, `make release` bumps the version. `make` lists the rest.
+The underlying commands:
+
 ```sh
 # Backend, from backend/
 cargo run                                    # API on :8080, reads ../frontend/dist

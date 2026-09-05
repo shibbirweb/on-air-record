@@ -97,6 +97,34 @@ UI never means recompiling the backend. Only a release build carries the assets.
 
 ## Useful commands
 
+There is a `Makefile` at the root wrapping the everyday ones, so nothing has to be remembered about which
+of cargo, npm or node owns a given job. `make` on its own lists them.
+
+| Command | What it does |
+| --- | --- |
+| `make check` | Everything CI checks, in the same order. Run this before pushing |
+| `make build` | The UI and then the release binary, in that order |
+| `make test` | Both test suites |
+| `make lint` | Clippy with warnings denied, and oxlint |
+| `make dev-backend` / `make dev-frontend` | The two development servers, one per terminal |
+| `make pending` | Whether a release is due |
+| `make release` | Choose the next version and move all four manifests |
+| `make wiki` | Build the wiki pages into `/tmp/wiki-preview` to see what would be published |
+| `make install-preview` | Run the installer into `/tmp`, to try what a user gets |
+| `make tools` | Check cargo and node are present and usable |
+
+Two things it does that the bare commands do not. `make build` depends on `make ui`, so the release binary
+can never be built against a stale `frontend/dist`. And every frontend target first checks the Node major
+version, because Node 16 is a common fallback and fails the Vite build with a `styleText` export error
+that explains nothing:
+
+```
+Node v16.20.2 is too old and the build will fail with a styleText error.
+Run: cd frontend && nvm use
+```
+
+The underlying commands, for when you want one directly:
+
 | Command | What it does |
 | --- | --- |
 | `cargo check` | Fast type check of the backend |
@@ -107,6 +135,9 @@ UI never means recompiling the backend. Only a release build carries the assets.
 | `npm test` | Vitest over the framework free frontend logic |
 | `npm run lint` | oxlint over the frontend |
 | `cargo build --release --target <triple>` | What the release workflow runs per platform |
+
+`make` is not available by default on Windows. Every target is a one line wrapper, so read the `Makefile`
+and run the command inside it.
 
 ## Versioning
 
@@ -124,8 +155,8 @@ Counting lockfiles, one number is recorded in four files, so do not move it by h
 node scripts/version.mjs show          # the authoritative version
 node scripts/version.mjs check         # verify all four agree, exit 1 if not
 node scripts/version.mjs set 0.2.0     # move all four to an exact version
-node scripts/version.mjs bump          # show what is unreleased and choose the next version
-node scripts/version.mjs pending       # report whether a release is due, never fails
+node scripts/version.mjs bump          # show what is unreleased and choose the next version, or make release
+node scripts/version.mjs pending       # report whether a release is due, or make pending
 ```
 
 ### Knowing a release is due
