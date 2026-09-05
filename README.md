@@ -28,6 +28,8 @@ through every part of the interface with screenshots.
 - [Testing](#testing)
 - [Documentation](#documentation)
 - [Troubleshooting](#troubleshooting)
+- [Reporting a problem](#reporting-a-problem)
+- [Author](#author)
 - [License](#license)
 
 ## Highlights
@@ -374,6 +376,24 @@ The two most common first run problems:
 
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the rest.
 
+## Reporting a problem
+
+Bugs, questions and suggestions all go to the issue tracker:
+
+**https://github.com/shibbirweb/on-air-record/issues**
+
+A useful report says what you did, what you expected, what happened instead, your operating system, and
+the version shown in the bottom right corner of the app. Run with `--log-level debug` and include the
+output if the problem is in the audio path.
+
+## Author
+
+**MD. Shibbir Ahmed**, Senior Full Stack and AI Engineer.
+
+- Portfolio: <https://shibbirweb.github.io>
+- GitHub: <https://github.com/shibbirweb>
+- Source: <https://github.com/shibbirweb/on-air-record>
+
 ## License
 
-MIT
+[MIT](LICENSE). Copyright (c) 2026 MD. Shibbir Ahmed.

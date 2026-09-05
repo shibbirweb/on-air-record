@@ -95,7 +95,7 @@ jobs:
           name="on-air-record-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp "backend/target/${{ matrix.target }}/release/on-air-record" "dist/$name/"
-          cp README.md "dist/$name/"
+          cp README.md LICENSE "dist/$name/"
           # The systemd unit is only useful on Linux, so it does not belong in the macOS archives.
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp packaging/on-air-record.service "dist/$name/"
@@ -115,6 +115,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
           Copy-Item "backend/target/${{ matrix.target }}/release/on-air-record.exe" "dist/$name/"
           Copy-Item "README.md" "dist/$name/"
+          Copy-Item "LICENSE" "dist/$name/"
           Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
           $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
           "$hash  $name.zip" | Out-File -Encoding ascii "dist/$name.zip.sha256"

@@ -6,6 +6,8 @@ rust-version = "1.82"
 description = "Cross platform audio broadcast and DVR service with a browser control room"
 authors = ["MD. Shibbir Ahmed <shibbirweb@gmail.com>"]
 license = "MIT"
+repository = "https://github.com/shibbirweb/on-air-record"
+homepage = "https://shibbirweb.github.io"
 
 [dependencies]
 axum = { version = "0.8.4", features = ["ws", "macros"] }

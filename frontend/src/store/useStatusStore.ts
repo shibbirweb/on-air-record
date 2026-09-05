@@ -13,16 +13,20 @@ import type { ServiceStatus } from '@/api/types';
 
 type StatusState = {
   status: ServiceStatus | null;
+  /** Build version, from the health endpoint. Fixed for the life of the process, so it is fetched once. */
+  version: string | null;
   reachable: boolean;
   error: string | null;
   busy: boolean;
   refresh: () => Promise<void>;
+  loadVersion: () => Promise<void>;
   startCapture: () => Promise<void>;
   stopCapture: () => Promise<void>;
 };
 
 export const useStatusStore = create<StatusState>((set) => ({
   status: null,
+  version: null,
   reachable: false,
   error: null,
   busy: false,
@@ -38,6 +42,16 @@ export const useStatusStore = create<StatusState>((set) => ({
         reachable: false,
         error: cause instanceof ApiError ? cause.message : 'the service is unreachable',
       });
+    }
+  },
+
+  loadVersion: async () => {
+    try {
+      const health = await api.health();
+      set({ version: health.version });
+    } catch {
+      // Not worth surfacing. The version is a convenience for bug reports, and the status poll already
+      // tells the user when the service is unreachable.
     }
   },
 

@@ -46,6 +46,8 @@ running it on macOS, Linux and Windows.
 - [On a phone or a tablet](#on-a-phone-or-a-tablet)
 - [Dark mode](#dark-mode)
 - [Questions and problems](#questions-and-problems)
+- [Reporting a problem](#reporting-a-problem)
+- [Credits](#credits)
 
 ## Opening it
 
@@ -93,6 +95,9 @@ The narrow right column is what you glance at occasionally:
 - **Recorder** shows whether it is still recording and how loud the microphone is.
 - **Source** is which microphone it is listening to.
 - **Storage** is how much disk has been used.
+
+Along the bottom of every page is a strip with the licence, a link to the source code, a link for
+reporting a problem, and the version number.
 
 ## The top bar
 
@@ -441,3 +446,26 @@ recording for everybody.
 **Can I listen from outside the building?**
 Not as it stands. The service is designed for a local network and has no authentication, so it should not
 be exposed to the internet directly. Ask whoever administers it about a VPN.
+
+## Reporting a problem
+
+There is a link at the bottom of every page:
+
+![The footer strip, with the copyright, the licence, a source code link, a report an issue link and the version number](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/footer.png)
+
+If something does not work, or the guide is wrong, open an issue:
+
+**https://github.com/shibbirweb/on-air-record/issues**
+
+Please include:
+
+- What you did, what you expected, and what happened instead.
+- Your operating system, and the version number from that same strip, `v0.1.0` above.
+- Anything the program printed in its window or log at the time.
+
+## Credits
+
+On Air Record is built and maintained by **MD. Shibbir Ahmed**
+([portfolio](https://shibbirweb.github.io), [GitHub](https://github.com/shibbirweb)).
+
+Released under the [MIT licence](https://github.com/shibbirweb/on-air-record/blob/master/LICENSE). Copyright (c) 2026 MD. Shibbir Ahmed.

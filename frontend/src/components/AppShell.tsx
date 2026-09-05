@@ -9,6 +9,7 @@
 import { Radio, Settings2, SlidersHorizontal, Wifi, WifiOff } from 'lucide-react';
 import { NavLink, Outlet, useOutletContext } from 'react-router';
 
+import { AppFooter } from '@/components/AppFooter';
 import { OnAirSign } from '@/components/OnAirSign';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -56,7 +57,7 @@ export function AppShell() {
   const onAir = capturing && playing && mode === 'live';
 
   return (
-    <div className="bg-background min-h-screen">
+    <div className="bg-background flex min-h-screen flex-col">
       <header className="bg-background/85 sticky top-0 z-20 border-b backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3 px-4 py-3">
           <div className="flex items-center gap-2.5">
@@ -112,7 +113,13 @@ export function AppShell() {
         </div>
       </header>
 
-      <Outlet context={{ engine, playheadMs } satisfies AppOutletContext} />
+      {/* The shell is a column and the page grows, so the footer sits at the bottom of a short page
+          rather than floating half way up it. */}
+      <div className="flex-1">
+        <Outlet context={{ engine, playheadMs } satisfies AppOutletContext} />
+      </div>
+
+      <AppFooter />
     </div>
   );
 }

@@ -1,6 +1,17 @@
 {
   "name": "frontend",
   "private": true,
+  "description": "Browser control room for the On Air Record audio broadcast and DVR service",
+  "author": "MD. Shibbir Ahmed <shibbirweb@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/shibbirweb/on-air-record",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shibbirweb/on-air-record.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shibbirweb/on-air-record/issues"
+  },
   "version": "0.0.0",
   "type": "module",
   "scripts": {

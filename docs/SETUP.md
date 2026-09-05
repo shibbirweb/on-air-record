@@ -30,6 +30,8 @@ Nothing has to be installed on the listening devices.
 - [Building from source](#building-from-source)
 - [Publishing a release](#publishing-a-release)
 - [Setup problems](#setup-problems)
+- [Reporting a problem](#reporting-a-problem)
+- [Credits](#credits)
 
 ## What you need
 
@@ -544,3 +546,22 @@ above.
 **Recordings older than a day or two keep vanishing.**
 That is the retention window doing its job, and it defaults to 24 hours. Raise it on the settings page,
 and look at the storage estimate there before you do.
+
+## Reporting a problem
+
+If something does not work, or the guide is wrong, open an issue:
+
+**https://github.com/shibbirweb/on-air-record/issues**
+
+Please include:
+
+- What you did, what you expected, and what happened instead.
+- Your operating system, and the version number shown in the bottom right corner of the app.
+- Anything the program printed in its window or log at the time.
+
+## Credits
+
+On Air Record is built and maintained by **MD. Shibbir Ahmed**
+([portfolio](https://shibbirweb.github.io), [GitHub](https://github.com/shibbirweb)).
+
+Released under the [MIT licence](https://github.com/shibbirweb/on-air-record/blob/master/LICENSE). Copyright (c) 2026 MD. Shibbir Ahmed.
