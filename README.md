@@ -11,6 +11,9 @@ Think of it as a small FM station plus a digital video recorder for sound:
 - The browser is the radio receiver (it plays the live signal).
 - The timeline is the tape (you can rewind, play back history, and jump back to live).
 
+If you just want to use it rather than build it, read the
+**[user guide](docs/USER_GUIDE.md)**, which walks through every part of the interface with screenshots.
+
 ## Table of contents
 
 - [Highlights](#highlights)
@@ -362,6 +365,8 @@ What the automated tests do not cover, and what to check by hand after a change 
 
 ## Documentation
 
+- [docs/USER_GUIDE.md](docs/USER_GUIDE.md): how to use the app, in plain language and with screenshots.
+  This is the one to hand to somebody who just wants to listen.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): layers, design patterns, and data flow.
 - [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md): capture, framing, storage format, and DVR timing.
 - [docs/API.md](docs/API.md): REST endpoints and the WebSocket protocol.
