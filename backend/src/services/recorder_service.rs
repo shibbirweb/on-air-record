@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 
-use crate::audio::{FrameEncoder, SegmentLocation, SegmentWriter};
+use crate::audio::{FrameEncoder, SegmentLayout, SegmentLocation, SegmentWriter};
 use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
 use crate::models::AudioFrame;
@@ -34,6 +34,9 @@ pub struct RecorderContext {
     pub hub: Arc<BroadcastHub>,
     pub encoder: Arc<dyn FrameEncoder>,
     pub session_id: i64,
+    /// Fixed for the whole session. Changing the directory mid session would scatter one recording
+    /// across two roots, so a new location takes effect on the next capture start.
+    pub layout: SegmentLayout,
 }
 
 /// Live handle on the recorder thread.
@@ -195,7 +198,7 @@ fn open_segment(
     first_frame: &AudioFrame,
 ) -> AppResult<SegmentWriter> {
     let location = SegmentLocation::for_segment(
-        &context.config.data_dir,
+        &context.layout,
         context.session_id,
         sequence,
         first_frame.timestamp_ms,
@@ -252,7 +255,8 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
 
         let first = frame_at(started_at_ms);
-        let location = SegmentLocation::for_segment(&dir, 1, 0, first.timestamp_ms);
+        let location =
+            SegmentLocation::for_segment(&SegmentLayout::at(dir.clone()), 1, 0, first.timestamp_ms);
         let mut writer = SegmentWriter::create(location, &first).expect("create");
 
         for index in 0..frames {

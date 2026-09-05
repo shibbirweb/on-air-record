@@ -13,10 +13,13 @@ pub const KEY_SEGMENT_SECONDS: &str = "segment_seconds";
 pub const KEY_RETENTION_HOURS: &str = "retention_hours";
 pub const KEY_AUTO_START: &str = "auto_start";
 pub const KEY_FRAME_MS: &str = "frame_ms";
+pub const KEY_RECORDINGS_DIR: &str = "recordings_dir";
 
 pub const GAIN_RANGE: (f32, f32) = (0.0, 4.0);
 pub const SEGMENT_SECONDS_RANGE: (u32, u32) = (5, 300);
-pub const RETENTION_HOURS_RANGE: (u32, u32) = (1, 8760);
+/// Ten years is the largest finite window. Anything longer is really "keep forever", which has its own
+/// representation rather than being encoded as an implausibly large number.
+pub const RETENTION_HOURS_RANGE: (u32, u32) = (1, 87_600);
 pub const FRAME_MS_RANGE: (u32, u32) = (20, 500);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,9 +28,16 @@ pub struct Settings {
     pub input_device_id: Option<String>,
     pub gain: f32,
     pub segment_seconds: u32,
-    pub retention_hours: u32,
+    /// How long recordings are kept. `None` means keep them forever, which disables pruning entirely and
+    /// makes the disk the only limit.
+    pub retention_hours: Option<u32>,
     pub auto_start: bool,
     pub frame_ms: u32,
+    /// Where segment files are written. `None` uses `<data dir>/recordings`.
+    ///
+    /// Always an absolute path when set, because the process working directory is not something the
+    /// operator controls once the service runs under a service manager.
+    pub recordings_dir: Option<String>,
 }
 
 impl Default for Settings {
@@ -36,9 +46,10 @@ impl Default for Settings {
             input_device_id: None,
             gain: 1.0,
             segment_seconds: 10,
-            retention_hours: 24,
+            retention_hours: Some(24),
             auto_start: true,
             frame_ms: 100,
+            recordings_dir: None,
         }
     }
 }
@@ -58,9 +69,16 @@ impl Settings {
             input_device_id,
             gain: parse_f32(pairs.get(KEY_GAIN), defaults.gain),
             segment_seconds: parse_u32(pairs.get(KEY_SEGMENT_SECONDS), defaults.segment_seconds),
-            retention_hours: parse_u32(pairs.get(KEY_RETENTION_HOURS), defaults.retention_hours),
+            retention_hours: parse_retention(
+                pairs.get(KEY_RETENTION_HOURS),
+                defaults.retention_hours,
+            ),
             auto_start: parse_bool(pairs.get(KEY_AUTO_START), defaults.auto_start),
             frame_ms: parse_u32(pairs.get(KEY_FRAME_MS), defaults.frame_ms),
+            recordings_dir: pairs
+                .get(KEY_RECORDINGS_DIR)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
         }
         .clamped()
     }
@@ -79,10 +97,18 @@ impl Settings {
             ),
             (
                 KEY_RETENTION_HOURS.to_string(),
-                self.retention_hours.to_string(),
+                // Forever is stored as an empty value rather than a sentinel number, so nobody has to
+                // remember that some particular hour count secretly means something else.
+                self.retention_hours
+                    .map(|hours| hours.to_string())
+                    .unwrap_or_default(),
             ),
             (KEY_AUTO_START.to_string(), self.auto_start.to_string()),
             (KEY_FRAME_MS.to_string(), self.frame_ms.to_string()),
+            (
+                KEY_RECORDINGS_DIR.to_string(),
+                self.recordings_dir.clone().unwrap_or_default(),
+            ),
         ]
     }
 
@@ -98,14 +124,19 @@ impl Settings {
             .clamp(SEGMENT_SECONDS_RANGE.0, SEGMENT_SECONDS_RANGE.1);
         self.retention_hours = self
             .retention_hours
-            .clamp(RETENTION_HOURS_RANGE.0, RETENTION_HOURS_RANGE.1);
+            .map(|hours| hours.clamp(RETENTION_HOURS_RANGE.0, RETENTION_HOURS_RANGE.1));
         self.frame_ms = self.frame_ms.clamp(FRAME_MS_RANGE.0, FRAME_MS_RANGE.1);
         self
     }
 
-    /// How long the retention janitor keeps material, in milliseconds.
-    pub fn retention_ms(&self) -> i64 {
-        self.retention_hours as i64 * 3_600_000
+    /// How long the janitor keeps material, in milliseconds, or `None` to keep it forever.
+    pub fn retention_ms(&self) -> Option<i64> {
+        self.retention_hours.map(|hours| hours as i64 * 3_600_000)
+    }
+
+    /// True when nothing is ever pruned.
+    pub fn keeps_forever(&self) -> bool {
+        self.retention_hours.is_none()
     }
 }
 
@@ -120,9 +151,12 @@ pub struct SettingsPatch {
     pub input_device_id: Option<Option<String>>,
     pub gain: Option<f32>,
     pub segment_seconds: Option<u32>,
-    pub retention_hours: Option<u32>,
+    /// `Some(None)` switches to keeping forever, `None` leaves the current window alone.
+    pub retention_hours: Option<Option<u32>>,
     pub auto_start: Option<bool>,
     pub frame_ms: Option<u32>,
+    /// `Some(None)` returns to the default location under the data directory.
+    pub recordings_dir: Option<Option<String>>,
 }
 
 impl SettingsPatch {
@@ -133,6 +167,7 @@ impl SettingsPatch {
             && self.retention_hours.is_none()
             && self.auto_start.is_none()
             && self.frame_ms.is_none()
+            && self.recordings_dir.is_none()
     }
 
     /// Apply the patch to `base` and return the clamped result.
@@ -160,6 +195,12 @@ impl SettingsPatch {
         if let Some(frame_ms) = self.frame_ms {
             updated.frame_ms = frame_ms;
         }
+        if let Some(recordings_dir) = &self.recordings_dir {
+            updated.recordings_dir = recordings_dir
+                .as_ref()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+        }
 
         updated.clamped()
     }
@@ -174,6 +215,18 @@ impl SettingsPatch {
 fn parse_f32(raw: Option<&String>, fallback: f32) -> f32 {
     raw.and_then(|value| value.trim().parse::<f32>().ok())
         .unwrap_or(fallback)
+}
+
+/// Parse the retention value, where a stored empty string means keep forever.
+///
+/// A key that is absent entirely is a different case from one stored empty: absent means the setting was
+/// never written and should fall back to the default, while empty is a deliberate choice of forever.
+fn parse_retention(raw: Option<&String>, fallback: Option<u32>) -> Option<u32> {
+    match raw {
+        None => fallback,
+        Some(value) if value.trim().is_empty() => None,
+        Some(value) => value.trim().parse::<u32>().ok().or(fallback),
+    }
 }
 
 fn parse_u32(raw: Option<&String>, fallback: u32) -> u32 {
@@ -199,9 +252,10 @@ mod tests {
             input_device_id: Some("Scarlett Solo USB".to_string()),
             gain: 1.5,
             segment_seconds: 20,
-            retention_hours: 48,
+            retention_hours: Some(48),
             auto_start: false,
             frame_ms: 40,
+            recordings_dir: Some("/mnt/audio".to_string()),
         };
         let pairs: HashMap<String, String> = settings.to_pairs().into_iter().collect();
         assert_eq!(Settings::from_pairs(&pairs), settings);
@@ -240,10 +294,18 @@ mod tests {
     #[test]
     fn retention_converts_to_milliseconds() {
         let settings = Settings {
-            retention_hours: 2,
+            retention_hours: Some(2),
             ..Settings::default()
         };
-        assert_eq!(settings.retention_ms(), 7_200_000);
+        assert_eq!(settings.retention_ms(), Some(7_200_000));
+        assert!(!settings.keeps_forever());
+
+        let forever = Settings {
+            retention_hours: None,
+            ..Settings::default()
+        };
+        assert_eq!(forever.retention_ms(), None);
+        assert!(forever.keeps_forever());
     }
     #[test]
     fn patch_only_touches_the_fields_it_sets() {

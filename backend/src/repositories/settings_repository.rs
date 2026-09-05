@@ -104,9 +104,10 @@ mod tests {
             input_device_id: Some("Built-in Microphone".to_string()),
             gain: 2.0,
             segment_seconds: 30,
-            retention_hours: 12,
+            retention_hours: Some(12),
             auto_start: false,
             frame_ms: 60,
+            recordings_dir: None,
         };
         repository.save(&settings).expect("save");
         assert_eq!(repository.load().expect("load"), settings);

@@ -53,8 +53,15 @@ impl RetentionService {
     }
 
     /// Run one pass against the current retention setting.
+    ///
+    /// Keeping forever is not "a very long window", it is no window at all: the janitor does nothing and
+    /// the disk becomes the only limit. Expressing that as an early return rather than an enormous cutoff
+    /// means there is no date far enough in the future to accidentally delete something.
     pub fn sweep(&self) -> AppResult<SweepReport> {
-        let retention_ms = self.settings.current().retention_ms();
+        let Some(retention_ms) = self.settings.current().retention_ms() else {
+            return Ok(SweepReport::default());
+        };
+
         self.sweep_before(now_ms() - retention_ms)
     }
 
@@ -64,7 +71,7 @@ impl RetentionService {
         let mut report = SweepReport::default();
 
         for segment in expired {
-            let path = self.config.resolve_data_path(&segment.path);
+            let path = self.config.resolve_segment_path(&segment.path);
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -174,6 +181,7 @@ mod tests {
 
     struct Fixture {
         service: RetentionService,
+        settings: Arc<SettingsService>,
         segments: Arc<SegmentRepository>,
         session_id: i64,
         config: Arc<AppConfig>,
@@ -199,8 +207,11 @@ mod tests {
 
         let database = Arc::new(Database::open_in_memory().expect("database"));
         let settings = Arc::new(
-            SettingsService::load(Arc::new(SettingsRepository::new(database.clone())))
-                .expect("settings"),
+            SettingsService::load(
+                Arc::new(SettingsRepository::new(database.clone())),
+                config.clone(),
+            )
+            .expect("settings"),
         );
         let segments = Arc::new(SegmentRepository::new(database.clone()));
         let sessions = Arc::new(SessionRepository::new(database));
@@ -217,7 +228,13 @@ mod tests {
         sessions.close(session.id, 1_000).expect("close");
 
         Fixture {
-            service: RetentionService::new(config.clone(), settings, segments.clone(), sessions),
+            service: RetentionService::new(
+                config.clone(),
+                settings.clone(),
+                segments.clone(),
+                sessions,
+            ),
+            settings,
             segments,
             session_id: session.id,
             config,
@@ -265,6 +282,54 @@ mod tests {
         assert!(!old.exists());
         assert!(recent.exists());
         assert_eq!(fixture.segments.stats().expect("stats").segment_count, 1);
+    }
+
+    #[test]
+    fn keeping_forever_prunes_nothing() {
+        let fixture = fixture("forever");
+        let file = insert_with_file(&fixture, 0, 0, 1_000);
+
+        fixture
+            .settings
+            .update(&crate::models::SettingsPatch {
+                retention_hours: Some(None),
+                ..crate::models::SettingsPatch::default()
+            })
+            .expect("keep forever");
+
+        // Even material from 1970 survives, because there is no cutoff at all.
+        assert_eq!(
+            fixture.service.sweep().expect("sweep"),
+            SweepReport::default()
+        );
+        assert!(file.exists());
+        assert_eq!(fixture.segments.stats().expect("stats").segment_count, 1);
+    }
+
+    #[test]
+    fn a_finite_window_still_prunes_after_switching_back() {
+        let fixture = fixture("switchback");
+        let file = insert_with_file(&fixture, 0, 0, 1_000);
+
+        fixture
+            .settings
+            .update(&crate::models::SettingsPatch {
+                retention_hours: Some(None),
+                ..crate::models::SettingsPatch::default()
+            })
+            .expect("keep forever");
+        assert_eq!(fixture.service.sweep().expect("sweep").segments_deleted, 0);
+
+        fixture
+            .settings
+            .update(&crate::models::SettingsPatch {
+                retention_hours: Some(Some(1)),
+                ..crate::models::SettingsPatch::default()
+            })
+            .expect("one hour");
+
+        assert_eq!(fixture.service.sweep().expect("sweep").segments_deleted, 1);
+        assert!(!file.exists());
     }
 
     #[test]

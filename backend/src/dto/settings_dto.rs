@@ -10,13 +10,25 @@ pub struct SettingsDto {
     pub input_device_id: Option<String>,
     pub gain: f32,
     pub segment_seconds: u32,
-    pub retention_hours: u32,
+    /// `null` means recordings are kept forever.
+    pub retention_hours: Option<u32>,
     pub auto_start: bool,
     pub frame_ms: u32,
+    /// `null` means the default location under the data directory.
+    pub recordings_dir: Option<String>,
+    /// Where segments are actually written right now, resolved from the setting. Always absolute, so the
+    /// UI can show the effective path rather than an empty box when the default is in force.
+    pub effective_recordings_dir: String,
 }
 
-impl From<Settings> for SettingsDto {
-    fn from(settings: Settings) -> Self {
+impl SettingsDto {
+    /// Project the settings onto the wire, resolving the effective recordings directory against `config`.
+    pub fn new(settings: Settings, config: &crate::config::AppConfig) -> Self {
+        let effective_recordings_dir = config
+            .effective_recordings_dir(settings.recordings_dir.as_deref())
+            .to_string_lossy()
+            .to_string();
+
         Self {
             input_device_id: settings.input_device_id,
             gain: settings.gain,
@@ -24,6 +36,8 @@ impl From<Settings> for SettingsDto {
             retention_hours: settings.retention_hours,
             auto_start: settings.auto_start,
             frame_ms: settings.frame_ms,
+            recordings_dir: settings.recordings_dir,
+            effective_recordings_dir,
         }
     }
 }
@@ -39,12 +53,16 @@ pub struct SettingsPatchRequest {
     pub gain: Option<f32>,
     #[serde(default)]
     pub segment_seconds: Option<u32>,
-    #[serde(default)]
-    pub retention_hours: Option<u32>,
+    /// Present and null switches to keeping forever; absent leaves the window alone.
+    #[serde(default, deserialize_with = "deserialize_nested_option_u32")]
+    pub retention_hours: Option<Option<u32>>,
     #[serde(default)]
     pub auto_start: Option<bool>,
     #[serde(default)]
     pub frame_ms: Option<u32>,
+    /// Present and null returns to the default location.
+    #[serde(default, deserialize_with = "deserialize_nested_option")]
+    pub recordings_dir: Option<Option<String>>,
 }
 
 impl From<SettingsPatchRequest> for SettingsPatch {
@@ -56,6 +74,7 @@ impl From<SettingsPatchRequest> for SettingsPatch {
             retention_hours: request.retention_hours,
             auto_start: request.auto_start,
             frame_ms: request.frame_ms,
+            recordings_dir: request.recordings_dir,
         }
     }
 }
@@ -67,6 +86,14 @@ where
     D: Deserializer<'de>,
 {
     Option::<String>::deserialize(deserializer).map(Some)
+}
+
+/// The same trick for the retention window, where a present null means keep forever.
+fn deserialize_nested_option_u32<'de, D>(deserializer: D) -> Result<Option<Option<u32>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<u32>::deserialize(deserializer).map(Some)
 }
 
 #[cfg(test)]
@@ -100,7 +127,11 @@ mod tests {
 
     #[test]
     fn settings_serialise_with_camel_case_keys() {
-        let json = serde_json::to_value(SettingsDto::from(Settings::default())).expect("serialise");
+        let json = serde_json::to_value(SettingsDto::new(
+            Settings::default(),
+            &crate::config::AppConfig::default(),
+        ))
+        .expect("serialise");
         assert_eq!(json["segmentSeconds"], 10);
         assert_eq!(json["autoStart"], true);
     }

@@ -156,7 +156,7 @@ impl PlaybackCursor {
         let wanted = samples_per_frame * open.segment.bytes_per_sample_frame();
         let read_len = wanted.min(available).max(0) as usize;
 
-        let path = self.config.resolve_data_path(&open.segment.path);
+        let path = self.config.resolve_segment_path(&open.segment.path);
         let bytes = match read_segment_bytes(&path, open.offset, read_len) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -252,8 +252,12 @@ mod tests {
         for (sequence, (start_ms, end_ms)) in ranges.iter().enumerate() {
             let sequence = sequence as i64;
             let first = AudioFrame::from_samples(*start_ms, 48_000, 1, vec![0; 4800], true);
-            let location =
-                SegmentLocation::for_segment(&config.data_dir, session.id, sequence, *start_ms);
+            let location = SegmentLocation::for_segment(
+                &crate::audio::SegmentLayout::under_data_dir(&config.data_dir),
+                session.id,
+                sequence,
+                *start_ms,
+            );
             let mut writer = SegmentWriter::create(location, &first).expect("writer");
 
             let frames = ((end_ms - start_ms) / 100) as usize;

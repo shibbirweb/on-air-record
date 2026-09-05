@@ -53,7 +53,7 @@ impl AppState {
             Err(error) => tracing::warn!(%error, "could not close dangling sessions"),
         }
 
-        let settings = Arc::new(SettingsService::load(settings_repository)?);
+        let settings = Arc::new(SettingsService::load(settings_repository, config.clone())?);
         let hub = Arc::new(BroadcastHub::new());
         let encoder = build_encoder(FrameFormat::PcmS16);
 

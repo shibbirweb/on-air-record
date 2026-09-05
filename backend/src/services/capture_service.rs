@@ -11,7 +11,7 @@ use std::sync::{Arc, RwLock};
 
 use crossbeam_channel::bounded;
 
-use crate::audio::{self, CaptureHandle, CaptureOptions, FrameEncoder};
+use crate::audio::{self, CaptureHandle, CaptureOptions, FrameEncoder, SegmentLayout};
 use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
 use crate::models::{CaptureSnapshot, CaptureState, SessionDraft};
@@ -142,6 +142,7 @@ impl CaptureService {
                 hub: self.hub.clone(),
                 encoder: self.encoder.clone(),
                 session_id: session.id,
+                layout: self.segment_layout(&settings),
             },
             receiver,
         ) {
@@ -233,6 +234,22 @@ impl CaptureService {
 
         self.hub.reset_levels();
         self.set_state(CaptureState::Idle, None);
+    }
+
+    /// Decide where this session's segments go.
+    ///
+    /// Resolved once per session from the settings in force at start, so a directory change never splits
+    /// one recording across two roots.
+    fn segment_layout(&self, settings: &crate::models::Settings) -> SegmentLayout {
+        let recordings_dir = self
+            .config
+            .effective_recordings_dir(settings.recordings_dir.as_deref());
+
+        if self.config.is_default_recordings_dir(&recordings_dir) {
+            SegmentLayout::under_data_dir(&self.config.data_dir)
+        } else {
+            SegmentLayout::at(recordings_dir)
+        }
     }
 
     fn set_state(&self, state: CaptureState, error: Option<String>) {

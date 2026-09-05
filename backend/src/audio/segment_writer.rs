@@ -13,6 +13,38 @@ use crate::error::{AppError, AppResult};
 use crate::models::{AudioFrame, SegmentDraft};
 use crate::util::day::local_day;
 
+/// Where segments are written, and how their paths are recorded.
+///
+/// Two roots rather than one, because the file location and the indexed path are different questions.
+/// Recordings in the default place are indexed relative to the data directory so the whole directory
+/// stays relocatable; recordings the operator has redirected elsewhere are indexed absolutely, because a
+/// relative path would have nothing meaningful to be relative to.
+#[derive(Debug, Clone)]
+pub struct SegmentLayout {
+    /// Absolute directory segments are written into.
+    pub recordings_dir: PathBuf,
+    /// Root the stored path is made relative to. `None` stores absolute paths.
+    pub relative_to: Option<PathBuf>,
+}
+
+impl SegmentLayout {
+    /// The default layout: `<data dir>/recordings`, indexed relative to the data directory.
+    pub fn under_data_dir(data_dir: &Path) -> Self {
+        Self {
+            recordings_dir: data_dir.join("recordings"),
+            relative_to: Some(data_dir.to_path_buf()),
+        }
+    }
+
+    /// A layout writing into `recordings_dir`, indexed absolutely.
+    pub fn at(recordings_dir: PathBuf) -> Self {
+        Self {
+            recordings_dir,
+            relative_to: None,
+        }
+    }
+}
+
 /// Where a segment lives, on disk and on the calendar.
 ///
 /// This is the one place the storage layout is decided. Deriving the day and the path together from the
@@ -36,14 +68,25 @@ impl SegmentLocation {
     /// when the recorder was stopped and started several times within it. That ordering is what makes
     /// the data directory browsable by hand and a day's material trivial to archive or delete.
     pub fn for_segment(
-        data_dir: &Path,
+        layout: &SegmentLayout,
         session_id: i64,
         sequence: i64,
         started_at_ms: i64,
     ) -> Self {
         let day = local_day(started_at_ms);
-        let relative_path = format!("recordings/{day}/{session_id}/{sequence:06}.pcm");
-        let absolute_path = data_dir.join(&relative_path);
+        let absolute_path = layout
+            .recordings_dir
+            .join(&day)
+            .join(session_id.to_string())
+            .join(format!("{sequence:06}.pcm"));
+
+        // Separators are normalised so an index written on Windows still reads on any other platform.
+        let relative_path = layout
+            .relative_to
+            .as_ref()
+            .and_then(|root| absolute_path.strip_prefix(root).ok())
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| absolute_path.to_string_lossy().to_string());
 
         Self {
             session_id,
@@ -220,7 +263,8 @@ mod tests {
     fn writes_frames_and_reports_the_range() {
         let dir = temp_dir("writer");
         let first = AudioFrame::from_samples(1_000, 48_000, 1, vec![0; 4800], true);
-        let location = SegmentLocation::for_segment(&dir, 1, 0, first.timestamp_ms);
+        let location =
+            SegmentLocation::for_segment(&SegmentLayout::at(dir.clone()), 1, 0, first.timestamp_ms);
 
         let mut writer = SegmentWriter::create(location, &first).expect("create");
         writer.append(&first, &PcmS16Encoder).expect("append");
@@ -244,7 +288,8 @@ mod tests {
     fn empty_segment_is_discarded() {
         let dir = temp_dir("empty");
         let frame = AudioFrame::from_samples(0, 48_000, 1, vec![0; 10], true);
-        let location = SegmentLocation::for_segment(&dir, 1, 1, frame.timestamp_ms);
+        let location =
+            SegmentLocation::for_segment(&SegmentLayout::at(dir.clone()), 1, 1, frame.timestamp_ms);
         let path = location.absolute_path.clone();
 
         let writer = SegmentWriter::create(location, &frame).expect("create");
@@ -258,7 +303,8 @@ mod tests {
     fn reads_back_the_bytes_that_were_written() {
         let dir = temp_dir("read");
         let frame = AudioFrame::from_samples(0, 48_000, 1, vec![1, 2, 3, 4], true);
-        let location = SegmentLocation::for_segment(&dir, 1, 2, frame.timestamp_ms);
+        let location =
+            SegmentLocation::for_segment(&SegmentLayout::at(dir.clone()), 1, 2, frame.timestamp_ms);
         let path = location.absolute_path.clone();
 
         let mut writer = SegmentWriter::create(location, &frame).expect("create");
@@ -279,7 +325,8 @@ mod tests {
     fn segments_are_laid_out_by_day_then_session() {
         let started_at_ms = 1_757_030_400_000;
         let day = crate::util::day::local_day(started_at_ms);
-        let location = SegmentLocation::for_segment(Path::new("/srv/oar"), 3, 12, started_at_ms);
+        let layout = SegmentLayout::under_data_dir(Path::new("/srv/oar"));
+        let location = SegmentLocation::for_segment(&layout, 3, 12, started_at_ms);
 
         assert_eq!(location.day, day);
         assert_eq!(
@@ -293,11 +340,30 @@ mod tests {
     }
 
     #[test]
+    fn a_redirected_directory_is_indexed_absolutely() {
+        let started_at_ms = 1_757_030_400_000;
+        let day = crate::util::day::local_day(started_at_ms);
+        let layout = SegmentLayout::at(PathBuf::from("/mnt/audio"));
+        let location = SegmentLocation::for_segment(&layout, 3, 12, started_at_ms);
+
+        // No `recordings` prefix: the chosen directory is itself the recordings root.
+        assert_eq!(
+            location.absolute_path,
+            PathBuf::from(format!("/mnt/audio/{day}/3/000012.pcm"))
+        );
+        // Absolute, because there is no root it could sensibly be relative to.
+        assert_eq!(
+            location.relative_path,
+            location.absolute_path.to_string_lossy()
+        );
+    }
+
+    #[test]
     fn two_sessions_on_one_day_share_the_day_directory() {
         let started_at_ms = 1_757_030_400_000;
-        let morning = SegmentLocation::for_segment(Path::new("/srv/oar"), 1, 0, started_at_ms);
-        let evening =
-            SegmentLocation::for_segment(Path::new("/srv/oar"), 2, 0, started_at_ms + 3_600_000);
+        let layout = SegmentLayout::under_data_dir(Path::new("/srv/oar"));
+        let morning = SegmentLocation::for_segment(&layout, 1, 0, started_at_ms);
+        let evening = SegmentLocation::for_segment(&layout, 2, 0, started_at_ms + 3_600_000);
 
         assert_eq!(morning.day, evening.day);
         assert_ne!(morning.relative_path, evening.relative_path);

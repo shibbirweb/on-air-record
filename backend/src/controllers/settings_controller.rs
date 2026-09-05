@@ -8,19 +8,22 @@ use axum::Json;
 use crate::app::AppState;
 use crate::dto::{SettingsDto, SettingsPatchRequest};
 use crate::error::AppResult;
-use crate::models::SettingsPatch;
+use crate::models::{Settings, SettingsPatch};
 
 /// `GET /api/settings`
 pub async fn show(State(state): State<Arc<AppState>>) -> AppResult<Json<SettingsDto>> {
-    Ok(Json(state.settings.current().into()))
+    Ok(Json(SettingsDto::new(
+        state.settings.current(),
+        &state.config,
+    )))
 }
 
 /// `GET /api/settings/defaults`
 ///
 /// The values a reset restores. Exposed so the UI can say precisely what a reset will change instead of
 /// hardcoding a second copy of the defaults that drifts the first time one of them is retuned.
-pub async fn defaults() -> AppResult<Json<SettingsDto>> {
-    Ok(Json(crate::models::Settings::default().into()))
+pub async fn defaults(State(state): State<Arc<AppState>>) -> AppResult<Json<SettingsDto>> {
+    Ok(Json(SettingsDto::new(Settings::default(), &state.config)))
 }
 
 /// `PATCH /api/settings`
@@ -42,7 +45,7 @@ pub async fn update(
         state.capture.restart().await?;
     }
 
-    Ok(Json(updated.into()))
+    Ok(Json(SettingsDto::new(updated, &state.config)))
 }
 
 /// `POST /api/settings/reset`
@@ -57,5 +60,5 @@ pub async fn reset(State(state): State<Arc<AppState>>) -> AppResult<Json<Setting
         state.capture.restart().await?;
     }
 
-    Ok(Json(updated.into()))
+    Ok(Json(SettingsDto::new(updated, &state.config)))
 }

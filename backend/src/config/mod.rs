@@ -97,6 +97,50 @@ impl AppConfig {
         self.data_dir.join(relative)
     }
 
+    /// Resolve a stored segment path to a file on disk.
+    ///
+    /// Two forms are accepted, and which one a segment uses is decided once when it is written:
+    ///
+    /// - **Relative**, resolved against the data directory. Used whenever recordings live in the default
+    ///   location, so the whole data directory stays relocatable.
+    /// - **Absolute**, used as is. Written only when the operator has pointed recordings at a directory
+    ///   of their own, at which point relocatability was already theirs to manage.
+    ///
+    /// Rows written by older versions are all relative, so this is backward compatible without a
+    /// migration.
+    pub fn resolve_segment_path(&self, stored: &str) -> PathBuf {
+        let path = Path::new(stored);
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.data_dir.join(path)
+        }
+    }
+
+    /// Where segments are written, given the configured override.
+    ///
+    /// A relative override is resolved against the data directory rather than the process working
+    /// directory, which is not something an operator controls under a service manager.
+    pub fn effective_recordings_dir(&self, configured: Option<&str>) -> PathBuf {
+        match configured.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(value) => {
+                let path = PathBuf::from(value);
+                if path.is_absolute() {
+                    path
+                } else {
+                    self.data_dir.join(path)
+                }
+            }
+            None => self.recordings_dir(),
+        }
+    }
+
+    /// True when `dir` is the default recordings location, which is what decides whether new segments
+    /// are indexed with a relative or an absolute path.
+    pub fn is_default_recordings_dir(&self, dir: &Path) -> bool {
+        dir == self.recordings_dir()
+    }
+
     /// Turn an absolute segment path back into the relative form stored in the database, so the data
     /// directory can be moved without invalidating the index.
     pub fn relativise_data_path(&self, absolute: &Path) -> String {
@@ -231,6 +275,63 @@ mod tests {
         assert_eq!(
             config.relativise_data_path(&absolute),
             "recordings/3/000012.pcm"
+        );
+    }
+
+    #[test]
+    fn segment_paths_resolve_relative_against_the_data_dir() {
+        let config = AppConfig {
+            data_dir: PathBuf::from("/srv/oar"),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            config.resolve_segment_path("recordings/2026-09-05/1/000000.pcm"),
+            PathBuf::from("/srv/oar/recordings/2026-09-05/1/000000.pcm")
+        );
+    }
+
+    #[test]
+    fn absolute_segment_paths_are_used_untouched() {
+        let config = AppConfig {
+            data_dir: PathBuf::from("/srv/oar"),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            config.resolve_segment_path("/mnt/audio/2026-09-05/1/000000.pcm"),
+            PathBuf::from("/mnt/audio/2026-09-05/1/000000.pcm")
+        );
+    }
+
+    #[test]
+    fn the_recordings_directory_falls_back_to_the_data_dir() {
+        let config = AppConfig {
+            data_dir: PathBuf::from("/srv/oar"),
+            ..AppConfig::default()
+        };
+
+        let default = config.effective_recordings_dir(None);
+        assert_eq!(default, PathBuf::from("/srv/oar/recordings"));
+        assert!(config.is_default_recordings_dir(&default));
+
+        // An empty setting is the same as no setting, so a cleared text box behaves predictably.
+        assert_eq!(config.effective_recordings_dir(Some("   ")), default);
+    }
+
+    #[test]
+    fn a_configured_recordings_directory_wins() {
+        let config = AppConfig {
+            data_dir: PathBuf::from("/srv/oar"),
+            ..AppConfig::default()
+        };
+
+        let custom = config.effective_recordings_dir(Some("/mnt/audio"));
+        assert_eq!(custom, PathBuf::from("/mnt/audio"));
+        assert!(!config.is_default_recordings_dir(&custom));
+
+        // A relative override belongs to the data directory, not the process working directory.
+        assert_eq!(
+            config.effective_recordings_dir(Some("archive")),
+            PathBuf::from("/srv/oar/archive")
         );
     }
 

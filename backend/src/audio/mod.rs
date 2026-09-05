@@ -18,4 +18,4 @@ pub use device_registry::DeviceRegistry;
 pub use encoder::{build_encoder, FrameEncoder, FrameFormat, PcmS16Encoder};
 pub use frame_builder::FrameBuilder;
 pub use peaks::{PeakEnvelopeBuilder, PeakSource, PEAK_BUCKET_MS};
-pub use segment_writer::{SegmentLocation, SegmentWriter};
+pub use segment_writer::{SegmentLayout, SegmentLocation, SegmentWriter};
