@@ -105,3 +105,166 @@ jobs:
       # Also type checks, because the build script runs tsc first.
       - name: Build
         run: npm run build
+
+  # The installers are the only code most people will ever run, and they cannot be tested by compiling
+  # them. This installs from the latest published release on all three platforms, exactly as a user would,
+  # and then checks the service it produced actually answers.
+  #
+  # The scripts come from the checkout, not from raw.githubusercontent, so a pull request tests its own
+  # version rather than the one already on master.
+  installers:
+    name: installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The released Linux binary loads ALSA at run time. A runner image may not carry it.
+      - name: Install the ALSA runtime
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2
+
+      - name: install.sh
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -eu
+          work="$RUNNER_TEMP/installer-test"
+          mkdir -p "$work"
+          cd "$work"
+
+          echo "::group::install"
+          sh "$GITHUB_WORKSPACE/scripts/install.sh" --port 8099 --no-start
+          echo "::endgroup::"
+
+          for file in on-air-record/on-air-record on-air-record/start.sh on-air-record/config; do
+            test -f "$file" || { echo "missing $file"; exit 1; }
+          done
+          test -d on-air-record/data || { echo "missing the data folder"; exit 1; }
+          grep -q '^OAR_PORT=8099$' on-air-record/config || { echo "port was not saved"; exit 1; }
+          echo "layout and config OK"
+
+          # A downloaded binary that will not execute is the failure this job exists to catch, and on macOS
+          # it is also proof that curl left no quarantine flag behind.
+          version="$(./on-air-record/on-air-record --version)"
+          echo "installed: $version"
+          case "$version" in
+            "on-air-record "[0-9]*) ;;
+            *) echo "unexpected --version output"; exit 1 ;;
+          esac
+
+          echo "::group::start via the launcher"
+          ./on-air-record/start.sh > service.log 2>&1 &
+          answered=0
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8099/api/health -o health.json 2>/dev/null; then answered=1; break; fi
+            sleep 1
+          done
+          pkill -f 'on-air-record/on-air-record' 2>/dev/null || true
+          echo "::endgroup::"
+
+          if [ "$answered" -ne 1 ]; then
+            echo "the service never answered on the configured port"
+            cat service.log || true
+            exit 1
+          fi
+          cat health.json; echo
+          grep -q '"status":"ok"' health.json || { echo "health did not report ok"; exit 1; }
+          test -f on-air-record/data/on-air-record.sqlite || { echo "the database was not created in the folder"; exit 1; }
+          echo "the launcher started it on the configured port, with its data inside the folder"
+
+          echo "::group::second run"
+          second="$(sh "$GITHUB_WORKSPACE/scripts/install.sh" --no-start)"
+          echo "$second"
+          echo "::endgroup::"
+          echo "$second" | grep -q "Already installed here" || { echo "it downloaded again instead of reusing the install"; exit 1; }
+          echo "$second" | grep -q "Using the settings already saved" || { echo "it did not reuse the saved config"; exit 1; }
+
+          # No port given and no terminal to ask at: the default has to stand rather than hanging.
+          mkdir -p "$work/fresh" && cd "$work/fresh"
+          sh "$GITHUB_WORKSPACE/scripts/install.sh" --no-start < /dev/null > /dev/null
+          grep -q '^OAR_PORT=8080$' on-air-record/config || { echo "the non interactive default was not used"; exit 1; }
+          echo "non interactive run fell back to the default port"
+
+      # Windows PowerShell 5.1 on purpose: it is what a Windows machine has out of the box, it negotiates
+      # TLS 1.0 by default, and it is where the checksum file arrives as a byte array.
+      - name: install.ps1 on Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'installer-test'
+          New-Item -ItemType Directory -Path $work -Force | Out-Null
+          Set-Location $work
+
+          Write-Host '::group::install'
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\install.ps1" -Port 8099 -NoStart
+          if ($LASTEXITCODE -ne 0) { throw "the installer exited with $LASTEXITCODE" }
+          Write-Host '::endgroup::'
+
+          foreach ($file in @('on-air-record\on-air-record.exe', 'on-air-record\start.cmd', 'on-air-record\start.ps1', 'on-air-record\config')) {
+            if (-not (Test-Path $file)) { throw "missing $file" }
+          }
+          if (-not (Test-Path 'on-air-record\data')) { throw 'missing the data folder' }
+          if (-not (Select-String -Path 'on-air-record\config' -Pattern '^OAR_PORT=8099$' -Quiet)) { throw 'port was not saved' }
+          Write-Host 'layout and config OK'
+
+          $version = & '.\on-air-record\on-air-record.exe' --version
+          Write-Host "installed: $version"
+          if ($version -notmatch '^on-air-record \d') { throw "unexpected --version output: $version" }
+
+          Write-Host '::group::start via start.cmd'
+          $service = Start-Process -FilePath '.\on-air-record\start.cmd' -PassThru -NoNewWindow `
+            -RedirectStandardOutput service.log -RedirectStandardError service.err
+          $health = $null
+          foreach ($attempt in 1..60) {
+            try {
+              $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8099/api/health' -TimeoutSec 2
+              break
+            } catch { Start-Sleep -Seconds 1 }
+          }
+          # start.cmd spawns powershell which spawns the program, so stopping the launcher is not enough.
+          Stop-Process -Id $service.Id -Force -ErrorAction SilentlyContinue
+          Get-Process -Name 'on-air-record' -ErrorAction SilentlyContinue | Stop-Process -Force
+          Write-Host '::endgroup::'
+
+          if (-not $health) {
+            Get-Content service.log, service.err -ErrorAction SilentlyContinue | Write-Host
+            throw 'the service never answered on the configured port'
+          }
+          Write-Host ($health | ConvertTo-Json -Compress)
+          if ($health.status -ne 'ok') { throw "health did not report ok: $($health.status)" }
+          if (-not (Test-Path 'on-air-record\data\on-air-record.sqlite')) { throw 'the database was not created in the folder' }
+          Write-Host 'start.cmd started it on the configured port, with its data inside the folder'
+
+          Write-Host '::group::second run'
+          $second = & powershell -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\install.ps1" -NoStart | Out-String
+          Write-Host $second
+          Write-Host '::endgroup::'
+          if ($second -notmatch 'Already installed here') { throw 'it downloaded again instead of reusing the install' }
+          if ($second -notmatch 'Using the settings already saved') { throw 'it did not reuse the saved config' }
+
+      # PowerShell 7 is a different engine, and anybody who has installed it will use it by reflex.
+      - name: install.ps1 on PowerShell 7
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'installer-test-pwsh'
+          New-Item -ItemType Directory -Path $work -Force | Out-Null
+          Set-Location $work
+
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE\scripts\install.ps1" -Port 8098 -NoStart
+          if ($LASTEXITCODE -ne 0) { throw "the installer exited with $LASTEXITCODE" }
+
+          if (-not (Test-Path 'on-air-record\on-air-record.exe')) { throw 'the program was not installed' }
+          if (-not (Select-String -Path 'on-air-record\config' -Pattern '^OAR_PORT=8098$' -Quiet)) { throw 'port was not saved' }
+          Write-Host "installed: $(& '.\on-air-record\on-air-record.exe' --version)"

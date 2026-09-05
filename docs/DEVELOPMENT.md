@@ -168,13 +168,31 @@ spends most of its time drawing a progress bar.
 
 ## Continuous integration and releases
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request: the
-backend matrix does `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` on
-Ubuntu, macOS and Windows, a separate job lints, tests and builds the frontend, and a third checks that
-the recorded versions agree. Ubuntu installs `libasound2-dev` because `cpal` links against ALSA there.
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request:
 
-The Windows leg is the point of the matrix. It cannot be reproduced locally on macOS, so a change that
-compiles here can still fail there and CI is the only warning you will get.
+- **backend**, a matrix over Ubuntu, macOS and Windows doing `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings` and `cargo test`. Ubuntu installs `libasound2-dev`, because
+  `cpal` links against ALSA there.
+- **frontend**, which lints, tests and builds.
+- **versions**, which checks the four recorded version numbers still agree.
+- **installers**, a matrix over the same three platforms that runs the installer from the checkout exactly
+  as a user would, then starts the service it produced and checks `/api/health` answers.
+
+The Windows legs are the point of both matrices. They cannot be reproduced on macOS, so a change that
+works here can still fail there and CI is the only warning you will get.
+
+The installer job is worth understanding, because the installers are the only code most people will ever
+run and nothing about them is caught by compiling. It uses the scripts from the checkout rather than from
+`raw.githubusercontent.com`, so a pull request tests its own version rather than the one already on
+`master`. It asserts the folder layout, that the port reached the config file, that the downloaded binary
+actually executes, that the launcher starts it on the configured port with its database inside the folder,
+that a second run reuses the install instead of downloading again, and that a run with no terminal falls
+back to the default port rather than hanging. Windows is exercised under both Windows PowerShell 5.1,
+which is what a machine has out of the box, and PowerShell 7.
+
+It downloads from the **latest published release**, so it is testing the current scripts against the last
+release, not against the working tree. A script change that depends on something only in an unreleased
+binary will pass here and fail for users.
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs when a release is **published
 from the GitHub web interface**, and attaches one archive per target with a `sha256` alongside. The web UI

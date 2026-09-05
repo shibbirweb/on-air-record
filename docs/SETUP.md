@@ -624,10 +624,11 @@ as downloadable artifacts without touching Releases. They are named for the mani
 commit, such as `on-air-record-v0.1.0-dev-4f5389a-x86_64-unknown-linux-gnu.tar.gz`, so a rehearsal can
 never be mistaken for a real release.
 
-Separately, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push: formatting,
-linting and the full test suite on macOS, Linux and Windows, the frontend checks, and a check that the
-four recorded versions still agree. That Windows job is the only thing standing behind the Windows build,
-since it cannot be produced or tested from a Mac.
+Separately, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request:
+formatting, linting and the full test suite on macOS, Linux and Windows, the frontend checks, a check that
+the four recorded versions still agree, and a run of the installers on all three platforms that starts the
+service they produce and confirms it answers. Those Windows jobs are the only thing standing behind the
+Windows build, since it cannot be produced or tested from a Mac.
 
 ## Setup problems
 
