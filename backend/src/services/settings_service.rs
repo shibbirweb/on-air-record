@@ -204,6 +204,7 @@ mod tests {
                 retention_hours: Some(168),
                 auto_start: false,
                 frame_ms: 40,
+                recording_sample_rate: None,
                 recordings_dir: None,
             })
             .expect("configure");

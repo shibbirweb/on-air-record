@@ -20,6 +20,7 @@ use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig};
 use crossbeam_channel::{Sender, TrySendError};
 
 use crate::audio::frame_builder::FrameBuilder;
+use crate::audio::resampler::Resampler;
 use crate::audio::DeviceRegistry;
 use crate::error::{AppError, AppResult};
 use crate::models::AudioFrame;
@@ -65,6 +66,8 @@ impl Default for GainControl {
 pub struct CaptureOptions {
     /// `None` follows the system default input.
     pub device_id: Option<String>,
+    /// Rate to record at. `None`, or anything at or above the device rate, records at the device rate.
+    pub target_sample_rate: Option<u32>,
     pub frame_ms: u32,
     pub gain: GainControl,
     /// Counter the callback bumps when the consumer cannot keep up. Owned by the caller so the count
@@ -77,8 +80,11 @@ pub struct CaptureOptions {
 pub struct CaptureRuntime {
     pub device_id: String,
     pub device_name: String,
-    /// Sample rate of the captured stream. The device decides, we do not resample.
+    /// Rate of the frames leaving the engine, which is what lands in segments and on the wire. Equal to
+    /// `source_sample_rate` unless the recording rate setting asked for less.
     pub sample_rate: u32,
+    /// Rate the device itself is running at, kept for diagnostics.
+    pub source_sample_rate: u32,
     /// Channels after the downmix, always 1 today.
     pub channels: u16,
     /// Channels the device delivered before the downmix, kept for diagnostics.
@@ -232,8 +238,15 @@ fn build_stream(
 
     let sample_format = supported.sample_format();
     let config: StreamConfig = supported.config();
-    let sample_rate = config.sample_rate.0;
+    let source_sample_rate = config.sample_rate.0;
     let source_channels = config.channels.max(1);
+
+    // Resampling happens before framing, so the frame builder, the segment index, the wire protocol and
+    // the browser all see one rate: the one actually being recorded.
+    let sample_rate = options
+        .target_sample_rate
+        .map(|target| target.min(source_sample_rate))
+        .unwrap_or(source_sample_rate);
 
     let builder = Arc::new(Mutex::new(FrameBuilder::new(
         sample_rate,
@@ -242,36 +255,97 @@ fn build_stream(
     )));
 
     let stream = match sample_format {
-        SampleFormat::I8 => open::<i8>(&device, &config, options, &builder, &sink, &dropped_frames),
-        SampleFormat::I16 => {
-            open::<i16>(&device, &config, options, &builder, &sink, &dropped_frames)
-        }
-        SampleFormat::I32 => {
-            open::<i32>(&device, &config, options, &builder, &sink, &dropped_frames)
-        }
-        SampleFormat::U8 => open::<u8>(&device, &config, options, &builder, &sink, &dropped_frames),
-        SampleFormat::U16 => {
-            open::<u16>(&device, &config, options, &builder, &sink, &dropped_frames)
-        }
-        SampleFormat::U32 => {
-            open::<u32>(&device, &config, options, &builder, &sink, &dropped_frames)
-        }
-        SampleFormat::F32 => {
-            open::<f32>(&device, &config, options, &builder, &sink, &dropped_frames)
-        }
-        SampleFormat::F64 => {
-            open::<f64>(&device, &config, options, &builder, &sink, &dropped_frames)
-        }
+        SampleFormat::I8 => open::<i8>(
+            &device,
+            &config,
+            options,
+            sample_rate,
+            &builder,
+            &sink,
+            &dropped_frames,
+        ),
+        SampleFormat::I16 => open::<i16>(
+            &device,
+            &config,
+            options,
+            sample_rate,
+            &builder,
+            &sink,
+            &dropped_frames,
+        ),
+        SampleFormat::I32 => open::<i32>(
+            &device,
+            &config,
+            options,
+            sample_rate,
+            &builder,
+            &sink,
+            &dropped_frames,
+        ),
+        SampleFormat::U8 => open::<u8>(
+            &device,
+            &config,
+            options,
+            sample_rate,
+            &builder,
+            &sink,
+            &dropped_frames,
+        ),
+        SampleFormat::U16 => open::<u16>(
+            &device,
+            &config,
+            options,
+            sample_rate,
+            &builder,
+            &sink,
+            &dropped_frames,
+        ),
+        SampleFormat::U32 => open::<u32>(
+            &device,
+            &config,
+            options,
+            sample_rate,
+            &builder,
+            &sink,
+            &dropped_frames,
+        ),
+        SampleFormat::F32 => open::<f32>(
+            &device,
+            &config,
+            options,
+            sample_rate,
+            &builder,
+            &sink,
+            &dropped_frames,
+        ),
+        SampleFormat::F64 => open::<f64>(
+            &device,
+            &config,
+            options,
+            sample_rate,
+            &builder,
+            &sink,
+            &dropped_frames,
+        ),
         other => Err(AppError::audio(format!(
             "device '{}' uses the unsupported sample format {other:?}",
             descriptor.name
         ))),
     }?;
 
+    if sample_rate != source_sample_rate {
+        tracing::info!(
+            source_sample_rate,
+            sample_rate,
+            "downsampling to the configured recording rate"
+        );
+    }
+
     let runtime = CaptureRuntime {
         device_id: descriptor.id,
         device_name: descriptor.name,
         sample_rate,
+        source_sample_rate,
         channels: 1,
         source_channels,
         frame_ms: options.frame_ms,
@@ -280,10 +354,12 @@ fn build_stream(
     Ok((stream, runtime, builder))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn open<T>(
     device: &cpal::Device,
     config: &StreamConfig,
     options: &CaptureOptions,
+    target_sample_rate: u32,
     builder: &Arc<Mutex<FrameBuilder>>,
     sink: &Sender<AudioFrame>,
     dropped_frames: &Arc<AtomicU64>,
@@ -298,8 +374,14 @@ where
     let sink = sink.clone();
     let dropped_frames = dropped_frames.clone();
 
-    // Reused across callbacks so the hot path never grows a buffer.
-    let mut mono = Vec::<i16>::with_capacity(4096);
+    // `None` when the device already runs at the target rate, in which case the audio passes through
+    // untouched and the filter is not paid for.
+    let mut resampler = Resampler::new(config.sample_rate.0, target_sample_rate);
+
+    // All reused across callbacks so the hot path never grows a buffer.
+    let mut mono = Vec::<f32>::with_capacity(4096);
+    let mut resampled = Vec::<f32>::with_capacity(4096);
+    let mut encoded = Vec::<i16>::with_capacity(4096);
 
     let data_callback = move |input: &[T], _info: &cpal::InputCallbackInfo| {
         let gain_value = gain.get();
@@ -311,19 +393,33 @@ where
             for sample in chunk {
                 sum += f32::from_sample(*sample);
             }
-            let averaged = (sum / chunk.len() as f32) * gain_value;
-            mono.push(to_i16(averaged));
+            mono.push((sum / chunk.len() as f32) * gain_value);
         }
+
+        let downsampled = match resampler.as_mut() {
+            Some(resampler) => {
+                resampled.clear();
+                resampler.process(&mono, &mut resampled);
+                true
+            }
+            None => false,
+        };
+
+        let samples = if downsampled { &resampled } else { &mono };
+        encoded.clear();
+        encoded.extend(samples.iter().map(|value| to_i16(*value)));
 
         let captured_at_ms = now_ms();
         if let Ok(mut builder) = builder.lock() {
-            builder.push(&mono, captured_at_ms, |frame| match sink.try_send(frame) {
-                Ok(()) => {}
-                Err(TrySendError::Full(_)) => {
-                    dropped_frames.fetch_add(1, Ordering::Relaxed);
-                }
-                Err(TrySendError::Disconnected(_)) => {
-                    dropped_frames.fetch_add(1, Ordering::Relaxed);
+            builder.push(&encoded, captured_at_ms, |frame| {
+                match sink.try_send(frame) {
+                    Ok(()) => {}
+                    Err(TrySendError::Full(_)) => {
+                        dropped_frames.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(TrySendError::Disconnected(_)) => {
+                        dropped_frames.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             });
         }

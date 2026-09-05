@@ -101,6 +101,7 @@ impl CaptureService {
         let (sender, receiver) = bounded(FRAME_CHANNEL_CAPACITY);
         let options = CaptureOptions {
             device_id: settings.input_device_id.clone(),
+            target_sample_rate: settings.recording_sample_rate,
             frame_ms: settings.frame_ms,
             gain: self.settings.gain_control(),
             dropped_frames: self.dropped_frames.clone(),

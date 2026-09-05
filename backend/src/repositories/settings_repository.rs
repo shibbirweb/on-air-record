@@ -107,6 +107,7 @@ mod tests {
             retention_hours: Some(12),
             auto_start: false,
             frame_ms: 60,
+            recording_sample_rate: None,
             recordings_dir: None,
         };
         repository.save(&settings).expect("save");

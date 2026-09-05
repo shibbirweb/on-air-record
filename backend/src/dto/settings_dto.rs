@@ -14,6 +14,8 @@ pub struct SettingsDto {
     pub retention_hours: Option<u32>,
     pub auto_start: bool,
     pub frame_ms: u32,
+    /// `null` follows the capture device's own rate.
+    pub recording_sample_rate: Option<u32>,
     /// `null` means the default location under the data directory.
     pub recordings_dir: Option<String>,
     /// Where segments are actually written right now, resolved from the setting. Always absolute, so the
@@ -36,6 +38,7 @@ impl SettingsDto {
             retention_hours: settings.retention_hours,
             auto_start: settings.auto_start,
             frame_ms: settings.frame_ms,
+            recording_sample_rate: settings.recording_sample_rate,
             recordings_dir: settings.recordings_dir,
             effective_recordings_dir,
         }
@@ -60,6 +63,9 @@ pub struct SettingsPatchRequest {
     pub auto_start: Option<bool>,
     #[serde(default)]
     pub frame_ms: Option<u32>,
+    /// Present and null follows the device's own rate.
+    #[serde(default, deserialize_with = "deserialize_nested_option_u32")]
+    pub recording_sample_rate: Option<Option<u32>>,
     /// Present and null returns to the default location.
     #[serde(default, deserialize_with = "deserialize_nested_option")]
     pub recordings_dir: Option<Option<String>>,
@@ -74,6 +80,7 @@ impl From<SettingsPatchRequest> for SettingsPatch {
             retention_hours: request.retention_hours,
             auto_start: request.auto_start,
             frame_ms: request.frame_ms,
+            recording_sample_rate: request.recording_sample_rate,
             recordings_dir: request.recordings_dir,
         }
     }

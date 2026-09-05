@@ -14,6 +14,19 @@ pub const KEY_RETENTION_HOURS: &str = "retention_hours";
 pub const KEY_AUTO_START: &str = "auto_start";
 pub const KEY_FRAME_MS: &str = "frame_ms";
 pub const KEY_RECORDINGS_DIR: &str = "recordings_dir";
+pub const KEY_RECORDING_SAMPLE_RATE: &str = "recording_sample_rate";
+
+/// Sample rates the recorder will downmix to, highest first.
+///
+/// Uncompressed PCM means the rate *is* the bit rate: at 16 bit mono, 48 kHz is 768 kbit/s and 8 kHz is
+/// 128 kbit/s, so this list is also the storage ladder. Anything above the device's own rate is not
+/// offered, because upsampling would cost disk without adding information.
+pub const SUPPORTED_SAMPLE_RATES: [u32; 5] = [48_000, 32_000, 24_000, 16_000, 8_000];
+
+/// Bits per second a mono 16 bit stream occupies at `sample_rate`.
+pub fn bit_rate_for(sample_rate: u32) -> u32 {
+    sample_rate * 16
+}
 
 pub const GAIN_RANGE: (f32, f32) = (0.0, 4.0);
 pub const SEGMENT_SECONDS_RANGE: (u32, u32) = (5, 300);
@@ -33,6 +46,9 @@ pub struct Settings {
     pub retention_hours: Option<u32>,
     pub auto_start: bool,
     pub frame_ms: u32,
+    /// Rate the recorder downsamples to. `None` keeps the device's own rate, which is the best quality
+    /// the hardware offers and the largest files.
+    pub recording_sample_rate: Option<u32>,
     /// Where segment files are written. `None` uses `<data dir>/recordings`.
     ///
     /// Always an absolute path when set, because the process working directory is not something the
@@ -49,6 +65,7 @@ impl Default for Settings {
             retention_hours: Some(24),
             auto_start: true,
             frame_ms: 100,
+            recording_sample_rate: None,
             recordings_dir: None,
         }
     }
@@ -75,6 +92,10 @@ impl Settings {
             ),
             auto_start: parse_bool(pairs.get(KEY_AUTO_START), defaults.auto_start),
             frame_ms: parse_u32(pairs.get(KEY_FRAME_MS), defaults.frame_ms),
+            recording_sample_rate: pairs
+                .get(KEY_RECORDING_SAMPLE_RATE)
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .map(nearest_supported_rate),
             recordings_dir: pairs
                 .get(KEY_RECORDINGS_DIR)
                 .map(|value| value.trim().to_string())
@@ -106,6 +127,12 @@ impl Settings {
             (KEY_AUTO_START.to_string(), self.auto_start.to_string()),
             (KEY_FRAME_MS.to_string(), self.frame_ms.to_string()),
             (
+                KEY_RECORDING_SAMPLE_RATE.to_string(),
+                self.recording_sample_rate
+                    .map(|rate| rate.to_string())
+                    .unwrap_or_default(),
+            ),
+            (
                 KEY_RECORDINGS_DIR.to_string(),
                 self.recordings_dir.clone().unwrap_or_default(),
             ),
@@ -126,7 +153,20 @@ impl Settings {
             .retention_hours
             .map(|hours| hours.clamp(RETENTION_HOURS_RANGE.0, RETENTION_HOURS_RANGE.1));
         self.frame_ms = self.frame_ms.clamp(FRAME_MS_RANGE.0, FRAME_MS_RANGE.1);
+        self.recording_sample_rate = self.recording_sample_rate.map(nearest_supported_rate);
         self
+    }
+
+    /// The rate the recorder should produce, given what the device offers.
+    ///
+    /// Never above the device rate: asking for 48 kHz from a 16 kHz interface would invent detail that
+    /// was never captured while doubling the disk it takes to store it.
+    pub fn effective_sample_rate(&self, device_rate: u32) -> u32 {
+        match self.recording_sample_rate {
+            Some(target) if device_rate > 0 => target.min(device_rate),
+            Some(target) => target,
+            None => device_rate,
+        }
     }
 
     /// How long the janitor keeps material, in milliseconds, or `None` to keep it forever.
@@ -155,6 +195,8 @@ pub struct SettingsPatch {
     pub retention_hours: Option<Option<u32>>,
     pub auto_start: Option<bool>,
     pub frame_ms: Option<u32>,
+    /// `Some(None)` returns to the device's own rate.
+    pub recording_sample_rate: Option<Option<u32>>,
     /// `Some(None)` returns to the default location under the data directory.
     pub recordings_dir: Option<Option<String>>,
 }
@@ -167,6 +209,7 @@ impl SettingsPatch {
             && self.retention_hours.is_none()
             && self.auto_start.is_none()
             && self.frame_ms.is_none()
+            && self.recording_sample_rate.is_none()
             && self.recordings_dir.is_none()
     }
 
@@ -195,6 +238,9 @@ impl SettingsPatch {
         if let Some(frame_ms) = self.frame_ms {
             updated.frame_ms = frame_ms;
         }
+        if let Some(recording_sample_rate) = self.recording_sample_rate {
+            updated.recording_sample_rate = recording_sample_rate;
+        }
         if let Some(recordings_dir) = &self.recordings_dir {
             updated.recordings_dir = recordings_dir
                 .as_ref()
@@ -221,6 +267,15 @@ fn parse_f32(raw: Option<&String>, fallback: f32) -> f32 {
 ///
 /// A key that is absent entirely is a different case from one stored empty: absent means the setting was
 /// never written and should fall back to the default, while empty is a deliberate choice of forever.
+/// Snap an arbitrary rate onto the closest supported one, so a hand edited database or an old client
+/// cannot put the recorder on a rate the UI has no way to display or undo.
+fn nearest_supported_rate(rate: u32) -> u32 {
+    SUPPORTED_SAMPLE_RATES
+        .into_iter()
+        .min_by_key(|supported| supported.abs_diff(rate))
+        .unwrap_or(48_000)
+}
+
 fn parse_retention(raw: Option<&String>, fallback: Option<u32>) -> Option<u32> {
     match raw {
         None => fallback,
@@ -255,6 +310,7 @@ mod tests {
             retention_hours: Some(48),
             auto_start: false,
             frame_ms: 40,
+            recording_sample_rate: Some(16_000),
             recordings_dir: Some("/mnt/audio".to_string()),
         };
         let pairs: HashMap<String, String> = settings.to_pairs().into_iter().collect();
@@ -289,6 +345,54 @@ mod tests {
         let settings = Settings::from_pairs(&pairs);
         assert_eq!(settings.gain, Settings::default().gain);
         assert_eq!(settings.auto_start, Settings::default().auto_start);
+    }
+
+    #[test]
+    fn the_sample_rate_ladder_is_the_bit_rate_ladder() {
+        // Uncompressed 16 bit mono, so the two are the same number scaled by sixteen.
+        assert_eq!(bit_rate_for(48_000), 768_000);
+        assert_eq!(bit_rate_for(16_000), 256_000);
+        assert_eq!(bit_rate_for(8_000), 128_000);
+    }
+
+    #[test]
+    fn an_unsupported_rate_snaps_to_the_nearest_offered_one() {
+        let pairs = HashMap::from([(KEY_RECORDING_SAMPLE_RATE.to_string(), "44100".to_string())]);
+        assert_eq!(
+            Settings::from_pairs(&pairs).recording_sample_rate,
+            Some(48_000)
+        );
+
+        let low = HashMap::from([(KEY_RECORDING_SAMPLE_RATE.to_string(), "9000".to_string())]);
+        assert_eq!(
+            Settings::from_pairs(&low).recording_sample_rate,
+            Some(8_000)
+        );
+    }
+
+    #[test]
+    fn an_empty_rate_means_follow_the_device() {
+        let pairs = HashMap::from([(KEY_RECORDING_SAMPLE_RATE.to_string(), String::new())]);
+        assert_eq!(Settings::from_pairs(&pairs).recording_sample_rate, None);
+    }
+
+    #[test]
+    fn the_effective_rate_never_exceeds_the_device() {
+        let native = Settings::default();
+        assert_eq!(native.effective_sample_rate(44_100), 44_100);
+
+        let asked_for_more = Settings {
+            recording_sample_rate: Some(48_000),
+            ..Settings::default()
+        };
+        // Upsampling would invent detail and double the disk, so the device rate wins.
+        assert_eq!(asked_for_more.effective_sample_rate(16_000), 16_000);
+
+        let asked_for_less = Settings {
+            recording_sample_rate: Some(16_000),
+            ..Settings::default()
+        };
+        assert_eq!(asked_for_less.effective_sample_rate(48_000), 16_000);
     }
 
     #[test]
