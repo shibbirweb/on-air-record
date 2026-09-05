@@ -140,6 +140,19 @@ Everything in `scripts/` is plain Node with no dependencies, run as `node script
 already required to build the UI, so it is the one toolchain every workflow can assume is present, and
 nothing else has to be installed to check a version or preview the wiki.
 
+The exception is `scripts/install.sh`, which is POSIX `sh` because it runs on a machine that has nothing
+installed yet, which is the whole point of it. It is served straight from `raw.githubusercontent.com` on
+`master`, so **a change to it is live the moment it is pushed**, with no release needed and no way to
+stage it. Test it against a scratch directory before pushing:
+
+```sh
+mkdir /tmp/oar-install-test && cd /tmp/oar-install-test
+sh ~/path/to/scripts/install.sh --no-start
+```
+
+It resolves the latest release from the redirect on `/releases/latest` rather than the API, which has an
+hourly rate limit that an installer would hit on a shared network.
+
 ## Continuous integration and releases
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request: the

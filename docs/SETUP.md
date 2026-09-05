@@ -15,6 +15,7 @@ Nothing has to be installed on the listening devices.
 ## Contents
 
 - [What you need](#what-you-need)
+- [The quick way, on macOS and Linux](#the-quick-way-on-macos-and-linux)
 - [Step 1: download](#step-1-download)
 - [Step 2: run it](#step-2-run-it)
 - [Step 3: open it](#step-3-open-it)
@@ -43,6 +44,52 @@ Nothing has to be installed on the listening devices.
 - A network the listeners are also on.
 
 Nothing else. There is no database to install, no runtime, no web server. The whole thing is one file.
+
+## The quick way, on macOS and Linux
+
+One command does all three steps below. Run it from whatever folder you want the installation to live in:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh
+```
+
+It works out which build your machine needs, downloads the latest release, checks it against the published
+checksum, asks which port to use, and starts the service. Everything lands in one `on-air-record` folder
+created right there:
+
+```
+on-air-record/
+  on-air-record     the program
+  start.sh          starts it again with your settings
+  config            your settings
+  data/             recordings and the database
+```
+
+Nothing is written anywhere else on the machine. To start it again later:
+
+```sh
+./on-air-record/start.sh
+```
+
+That reads `config`, so the port is only chosen once. Useful options:
+
+| Option | What it does |
+| --- | --- |
+| `--port 9000` | Use this port without asking |
+| `--reconfigure` | Ask for the port again |
+| `--update` | Fetch a newer release over the top |
+| `--no-start` | Install and configure, but do not start |
+| `--dir <path>` | Install somewhere other than the current folder |
+
+Pass them after `--`, like `curl -fsSL ... | sh -s -- --port 9000`.
+
+On a Mac this also sidesteps the "unidentified developer" warning, because a file fetched with `curl` is
+not quarantined the way a browser download is.
+
+It will refuse to run on ARM Linux, such as a Raspberry Pi, because there is no prebuilt binary for it.
+That needs [building from source](#building-from-source).
+
+The rest of this section is the same thing done by hand, and is what to follow on Windows.
 
 ## Step 1: download
 
