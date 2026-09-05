@@ -1,7 +1,7 @@
 <!--
-  Images are linked by absolute raw.githubusercontent URL rather than by relative path, so this one file
-  renders correctly both here in the repository and when its contents are pasted into the GitHub wiki,
-  which is a separate repository and cannot see docs/images. The links resolve once master is pushed.
+  This file is published to the GitHub wiki by .github/workflows/wiki.yml on every push to master, which
+  rewrites the links between documents on the way. Images are linked by absolute raw.githubusercontent URL
+  rather than by relative path, because the wiki is a separate repository and cannot see docs/images.
 -->
 
 # User guide

@@ -1,0 +1,65 @@
+# Publishes docs/ to the GitHub wiki.
+#
+# A wiki is a separate git repository, <repo>.wiki.git, so nothing in docs/ reaches it by being merged to
+# the default branch. This is what carries it across, on every push that touches the guides.
+#
+# The wiki has to exist before this can push to it: open the Wiki tab once and save any page, which is
+# what creates the repository. After that the placeholder Home page is replaced by a generated one.
+name: Wiki
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'docs/**.md'
+      - 'scripts/build_wiki.py'
+      - '.github/workflows/wiki.yml'
+  # Lets the wiki be republished without touching the docs, which is how you seed it the first time.
+  workflow_dispatch:
+
+# Two runs pushing to the same wiki would race and one would be rejected.
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: publish to the wiki
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the pages
+        run: python3 scripts/build_wiki.py "$RUNNER_TEMP/wiki-pages"
+
+      - name: Clone the wiki
+        run: |
+          git clone \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" \
+            "$RUNNER_TEMP/wiki"
+
+      - name: Publish
+        working-directory: ${{ runner.temp }}/wiki
+        run: |
+          # Mirror rather than merge: a page deleted from docs/ should disappear from the wiki too.
+          # .git is the only thing worth keeping.
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp "$RUNNER_TEMP/wiki-pages"/*.md .
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "the wiki already matches docs/, nothing to publish"
+            exit 0
+          fi
+
+          git commit -m "docs: publish ${GITHUB_SHA:0:7} from docs/"
+          git push origin HEAD:master
+          echo "published to https://github.com/${{ github.repository }}/wiki"

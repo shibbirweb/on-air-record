@@ -355,6 +355,9 @@ What the automated tests do not cover, and what to check by hand after a change 
 
 ## Documentation
 
+Both guides below are published to the [wiki](https://github.com/shibbirweb/on-air-record/wiki)
+automatically on every push to `master`, so read them wherever suits you.
+
 - [docs/SETUP.md](docs/SETUP.md): installing and running it on macOS, Linux and Windows, choosing a port,
   and keeping it running as a service.
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md): how to use the app, in plain language and with screenshots.
