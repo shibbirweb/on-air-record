@@ -4,7 +4,7 @@
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| Rust | 1.75+ | Install with [rustup](https://rustup.rs) |
+| Rust | 1.82+ | Install with [rustup](https://rustup.rs) |
 | Node.js | 18+ | 20 or 22 recommended |
 | npm | 9+ | Ships with Node |
 
@@ -60,7 +60,8 @@ The backend serves `../frontend/dist` by default. Point `--static-dir` somewhere
 | `cargo fmt` | Format Rust code |
 | `cargo test` | Run backend unit tests |
 | `npm run build` | Type check with `tsc` and build the UI |
-| `npm run lint` | ESLint over the frontend |
+| `npm test` | Vitest over the framework free frontend logic |
+| `npm run lint` | oxlint over the frontend |
 
 ## Code conventions
 
@@ -91,6 +92,7 @@ TypeScript:
 feat:[OAR-12] add retention janitor
 fix:[OAR-19] correct segment offset rounding when seeking
 docs:[OAR-3] document the websocket protocol
+test:[OAR-21] cover the playback cursor across a recording gap
 ```
 
 The ticket goes in square brackets immediately after the colon with no space. One logical change per commit.
@@ -123,8 +125,10 @@ message from the host API is passed through in `capture.error` and in the server
 start. Click the play control. If it still silent, check that the level meter moves, which tells you whether
 the problem is capture side or playback side.
 
-**Playback stutters over Wi-Fi.** Raise the jitter buffer in the settings panel. 150 ms is the default and
-300 ms is comfortable on a congested network.
+**Playback stutters over Wi-Fi.** The browser holds a 150 ms jitter buffer, set by `DEFAULT_JITTER_SECONDS`
+in `frontend/src/lib/audio/audioEngine.ts`. Raising it to 300 ms is comfortable on a congested network at
+the cost of the same amount of extra latency. The engine also counts every resynchronisation, so a rising
+`resyncs` in `AudioEngine.stats()` is the signal that the buffer is too small for the link.
 
 **The timeline is empty although recording is running.** Only closed segments are indexed. Wait one segment
 length, 10 seconds by default, or stop capture to flush the open segment.

@@ -47,7 +47,7 @@ export function StoragePanel() {
               <li key={session.id} className="flex items-baseline justify-between gap-2 text-xs">
                 <span className="truncate">{session.deviceName}</span>
                 <span className="text-muted-foreground shrink-0 tabular">
-                  {formatDateTime(session.startedAtMs)} · {formatBytes(session.bytes)}
+                  {formatDateTime(session.startedAtMs)} &middot; {formatBytes(session.bytes)}
                 </span>
               </li>
             ))}

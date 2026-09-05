@@ -130,10 +130,22 @@ Rules:
 - Components never call `fetch` directly. They call a store action, which calls the API client.
 - The Web Audio graph is never rebuilt by React rendering. It lives in `lib/audio` and is owned by a hook
   that mounts it once, because tearing an `AudioContext` down on every render causes clicks and drift.
-- Zustand stores are sliced by concern (`connectionStore`, `transportStore`, `deviceStore`, `settingsStore`,
-  `timelineStore`) so that a waveform repaint does not re render the settings panel.
+- Zustand stores are sliced by concern so that a waveform repaint does not re render the settings panel:
+
+  | Store | Owns |
+  | --- | --- |
+  | `useStatusStore` | Polled service and capture status, plus the record and stop actions |
+  | `useConnectionStore` | WebSocket liveness, the negotiated stream format, the input meter |
+  | `useTransportStore` | Play state, mode, volume, and the transport actions |
+  | `useDeviceStore` | The host input list and the current selection |
+  | `useSettingsStore` | Runtime preferences, updated optimistically |
+  | `useTimelineStore` | The visible window, coverage bands and the fetched envelope |
+  | `useStorageStore` | Disk usage and recent sessions |
 - High frequency data (audio frames, level meters, playhead position at 60fps) bypasses React state and is
   pushed through refs and imperative canvas drawing. Only low frequency state changes go through Zustand.
+- The imperative half of the transport is registered into the store rather than imported by it.
+  `useStreamEngine` builds the socket and the audio graph, then calls `attachController`, so any component
+  can call `seek` without being handed a WebSocket and the store stays free of side effects.
 
 ## 6. Data flow for the three core scenarios
 
@@ -168,3 +180,15 @@ Rules:
 | Support a new codec | Implement `FrameEncoder`, register it in `audio::encoder::build_encoder` |
 | Add a live audio consumer | Subscribe to `BroadcastHub`, nothing else |
 | Change the storage backend | Reimplement the repository traits, leave the services alone |
+
+## 8. Testing
+
+The backend carries unit tests next to the code they cover, run with `cargo test` from `backend/`. They
+concentrate on the parts where a mistake is silent rather than loud: timestamp arithmetic in the frame
+builder, byte offset maths in `Segment`, the segment index queries, envelope rendering, and the playback
+cursor stepping across a real data directory of real PCM files.
+
+The frontend tests the framework free half with `npm test` (Vitest) from `frontend/`: the binary frame
+decoder, the timeline geometry, and the formatters. Components are not unit tested, because what would
+break in them is canvas drawing and Web Audio scheduling, and neither is meaningfully exercised in jsdom.
+Those are verified by running the service and listening.

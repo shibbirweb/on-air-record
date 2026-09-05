@@ -20,7 +20,9 @@ Think of it as a small FM station plus a digital video recorder for sound:
 - [Configuration](#configuration)
 - [Project layout](#project-layout)
 - [Feature status](#feature-status)
+- [Testing](#testing)
 - [Documentation](#documentation)
+- [Troubleshooting](#troubleshooting)
 - [License](#license)
 
 ## Highlights
@@ -68,7 +70,7 @@ Think of it as a small FM station plus a digital video recorder for sound:
 
 ## Requirements
 
-- Rust 1.75 or newer (stable toolchain).
+- Rust 1.82 or newer (stable toolchain).
 - Node.js 18 or newer and npm, only needed to build the web UI.
 - Linux additionally needs ALSA development headers: `sudo apt install libasound2-dev pkg-config`.
 - macOS and Windows need no extra audio packages (CoreAudio and WASAPI are used through `cpal`).
@@ -200,12 +202,43 @@ Legend: `[x]` done, `[~]` in progress, `[ ]` planned.
 - [ ] Release workflow producing macOS, Linux, and Windows artifacts
 - [ ] Optional systemd unit and Windows service wrapper
 
+## Testing
+
+```bash
+cd backend  && cargo test                              # 110 unit tests
+cd backend  && cargo clippy --all-targets -- -D warnings
+cd frontend && npm test                                # Vitest, framework free logic
+cd frontend && npm run lint
+```
+
+Backend tests concentrate on the arithmetic that fails quietly rather than loudly: frame timestamping and
+drift correction, byte offsets inside a segment, the segment index queries, envelope rendering, and the
+playback cursor walking a real directory of real PCM files across a recording gap. Frontend tests cover the
+binary frame decoder, the timeline geometry, and the formatters.
+
+What the automated tests do not cover, and what to check by hand after a change to the audio path:
+
+- Press play and confirm sound comes out, since browsers only start audio from a user gesture.
+- Click somewhere in a shaded band on the timeline and confirm playback jumps there.
+- Let it play forward to the live edge and confirm the badge flips back to `on air` on its own.
+
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): layers, design patterns, and data flow.
 - [docs/AUDIO_PIPELINE.md](docs/AUDIO_PIPELINE.md): capture, framing, storage format, and DVR timing.
 - [docs/API.md](docs/API.md): REST endpoints and the WebSocket protocol.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): local setup, conventions, and troubleshooting.
+
+## Troubleshooting
+
+The two most common first run problems:
+
+- **The page says the web UI has not been built.** The backend is running but `frontend/dist` is missing.
+  Run `npm install && npm run build` in `frontend/`.
+- **No devices are listed on macOS.** The first run triggers a microphone permission prompt. If it was
+  denied, enable it under System Settings, Privacy and Security, Microphone, then restart the service.
+
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the rest.
 
 ## License
 

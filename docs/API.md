@@ -40,10 +40,12 @@ The one call the UI polls for the state of the world.
 {
   "capture": {
     "state": "recording",
+    "sessionId": 4,
     "deviceId": "MacBook Pro Microphone",
     "deviceName": "MacBook Pro Microphone",
     "sampleRate": 48000,
     "channels": 1,
+    "frameMs": 100,
     "startedAtMs": 1757030400000,
     "droppedFrames": 0,
     "error": null
@@ -127,7 +129,7 @@ Accepts any subset of the settings object and returns the full updated object.
 | `inputDeviceId` | string or null | any device id | On next capture start |
 | `gain` | number | 0.0 to 4.0 | Immediately |
 | `segmentSeconds` | integer | 5 to 300 | On next segment rollover |
-| `retentionHours` | integer | 1 to 8760 | On next janitor pass |
+| `retentionHours` | integer | 1 to 8760 | On next janitor pass, which runs every minute |
 | `autoStart` | boolean | | On next service start |
 | `frameMs` | integer | 20 to 500 | On next capture start |
 
@@ -142,6 +144,7 @@ The extent of the recorded material and where the gaps are.
   "earliestMs": 1757030400000,
   "latestMs": 1757034000000,
   "liveEdgeMs": 1757034000000,
+  "serverTimeMs": 1757034000120,
   "coverage": [
     { "startMs": 1757030400000, "endMs": 1757031900000 },
     { "startMs": 1757032200000, "endMs": 1757034000000 }
@@ -216,7 +219,7 @@ described in [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md). Text messages are JSON cont
 
 | `type` | Payload | Meaning |
 | --- | --- | --- |
-| `stream-info` | `sampleRate`, `channels`, `frameMs`, `mode`, `serverTimeMs`, `liveEdgeMs` | Sent on connect and after every mode change |
+| `stream-info` | `sampleRate`, `channels`, `frameMs`, `mode`, `serverTimeMs`, `liveEdgeMs`, `earliestMs`, `capturing` | Sent on connect, and again if capture stops while a listener is attached |
 | `mode` | `mode`, `positionMs` | The session changed between `live`, `playback`, and `paused` |
 | `switched-to-live` | `timestampMs` | Playback caught up with the live edge |
 | `gap` | `fromMs`, `toMs` | No recording exists in this range, playback skipped it |
@@ -238,7 +241,7 @@ described in [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md). Text messages are JSON cont
 
 ```
 C -> connect
-S -> {"type":"stream-info","sampleRate":48000,"channels":1,"frameMs":100,"mode":"live", ...}
+S -> {"type":"stream-info","sampleRate":48000,"channels":1,"frameMs":100,"mode":"live","capturing":true, ...}
 S -> <binary frame> <binary frame> ...
 C -> {"type":"seek","timestampMs":1757031000000}
 S -> {"type":"mode","mode":"playback","positionMs":1757031000000}
