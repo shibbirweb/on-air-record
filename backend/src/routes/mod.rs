@@ -15,6 +15,8 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
+mod embedded_ui;
+
 use crate::app::AppState;
 use crate::controllers::{
     bookmark_controller, capture_controller, device_controller, export_controller,
@@ -70,21 +72,29 @@ pub fn build(state: Arc<AppState>) -> Router {
 }
 
 /// Serve the compiled web UI, falling back to `index.html` so client side routes survive a page reload.
+///
+/// Disk wins over the copy embedded in the binary. That ordering is what lets `--static-dir` point at a
+/// fresh Vite build during development, or at a UI swapped in on a deployed machine, without rebuilding
+/// the backend. A downloaded release has no such directory and serves itself.
 fn static_files(static_dir: &Path) -> Router {
     let index = static_dir.join("index.html");
 
-    if !index.exists() {
-        tracing::warn!(
-            path = %static_dir.display(),
-            "the web ui was not found, serving build instructions instead"
-        );
-        return Router::new().fallback(missing_ui);
+    if index.exists() {
+        let service = ServeDir::new(static_dir).fallback(ServeFile::new(index));
+        return Router::new()
+            .fallback_service(service)
+            .layer(CompressionLayer::new());
     }
 
-    let service = ServeDir::new(static_dir).fallback(ServeFile::new(index));
-    Router::new()
-        .fallback_service(service)
-        .layer(CompressionLayer::new())
+    if let Some(embedded) = embedded_ui::router() {
+        return embedded;
+    }
+
+    tracing::warn!(
+        path = %static_dir.display(),
+        "no web ui on disk and none embedded in this binary, serving build instructions instead"
+    );
+    Router::new().fallback(missing_ui)
 }
 
 /// Explain how to build the UI rather than returning a bare 404, because a missing `dist` directory is by
