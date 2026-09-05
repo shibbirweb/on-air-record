@@ -13,16 +13,92 @@ Think of it as a small FM station plus a digital video recorder for sound:
 
 ![The control room: the live waveform and transport above the DVR timeline, with the recorder, microphone and storage panels in the right hand rail](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/control-room.png)
 
-If you just want to run it rather than work on it, the two guides to read are
-**[installation and setup](docs/SETUP.md)** and the **[user guide](docs/USER_GUIDE.md)**, which walks
+## Quick start
+
+### The installer, on macOS and Linux
+
+Run this from wherever you want it to live:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh
+```
+
+It works out which build the machine needs, downloads the latest release, checks it against the published
+checksum, asks once which port to use, and starts the service. Everything goes into an `on-air-record`
+folder created right there:
+
+```
+on-air-record/
+  on-air-record     the program
+  start.sh          starts it again with your settings
+  config            your settings
+  data/             recordings and the database
+```
+
+Nothing is written anywhere else, so moving the installation is moving that folder, and removing it is
+deleting it. Start it again any time with `./on-air-record/start.sh`, which reads the config, so the port
+only has to be chosen once. Re-run the installer with `--update` for a newer release, or `--reconfigure`
+to change the port. `--help` lists the rest.
+
+There is no prebuilt binary for ARM Linux, such as a Raspberry Pi. The installer says so and points at
+[building from source](#build-from-source).
+
+### By hand, and on Windows
+
+A release build carries the web UI inside the executable, so there is one file to copy and nothing to
+point it at. Download the archive for your platform from the
+[releases page](https://github.com/shibbirweb/on-air-record/releases), extract it, and run it:
+
+```bash
+tar -xzf on-air-record-<version>-<target>.tar.gz
+cd on-air-record-<version>-<target>
+./on-air-record
+```
+
+On Windows, extract the `.zip` and run `on-air-record.exe`. macOS will refuse an unsigned download on the
+first attempt; allow it under System Settings, Privacy and Security. The installer above avoids that
+prompt, because a file fetched with `curl` is not quarantined the way a browser download is.
+
+Then open `http://localhost:8080` on the host, or `http://<host-lan-ip>:8080` from any other machine on
+the same network. Recordings and the database are written to `./data` next to wherever you ran it, which
+`--data-dir` moves somewhere sensible.
+
+### Build from source
+
+You need Rust and Node, and the UI must be built first, because a release build embeds whatever is in
+`frontend/dist` at compile time:
+
+```bash
+# 1. build the web UI
+cd frontend
+npm install
+npm run build
+
+# 2. build and run the service
+cd ../backend
+cargo run --release
+```
+
+For development with hot reload, run the backend and the Vite dev server side by side:
+
+```bash
+cd backend && cargo run          # terminal 1, API on :8080
+cd frontend && npm run dev       # terminal 2, UI on :5173, proxied to :8080
+```
+
+A directory given with `--static-dir` always wins over the embedded copy, so a debug build serves whatever
+you last built into `frontend/dist` without a recompile.
+
+All of this is covered at more length in the **[installation guide](docs/SETUP.md)**, including running it
+as a service and reaching it from other machines. The **[user guide](docs/USER_GUIDE.md)** then walks
 through every part of the interface with screenshots.
 
 ## Table of contents
 
+- [Quick start](#quick-start)
 - [Highlights](#highlights)
 - [How it works](#how-it-works)
 - [Requirements](#requirements)
-- [Quick start](#quick-start)
 - [Running it as a service](#running-it-as-a-service)
 - [Configuration](#configuration)
 - [Project layout](#project-layout)
@@ -108,82 +184,6 @@ The Windows gap is deliberate rather than an oversight. Cross compiling from mac
 because the bundled SQLite needs a C toolchain for the target, so the [CI workflow](.github/workflows/ci.yml)
 runs the whole suite on a Windows runner instead. That covers the code but not the audio hardware, which
 is why the row above says what it says.
-
-## Quick start
-
-### The installer, on macOS and Linux
-
-Run this from wherever you want it to live:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh
-```
-
-It works out which build the machine needs, downloads the latest release, checks it against the published
-checksum, asks once which port to use, and starts the service. Everything goes into an `on-air-record`
-folder created right there:
-
-```
-on-air-record/
-  on-air-record     the program
-  start.sh          starts it again with your settings
-  config            your settings
-  data/             recordings and the database
-```
-
-Nothing is written anywhere else, so moving the installation is moving that folder, and removing it is
-deleting it. Start it again any time with `./on-air-record/start.sh`, which reads the config, so the port
-only has to be chosen once. Re-run the installer with `--update` for a newer release, or `--reconfigure`
-to change the port. `--help` lists the rest.
-
-There is no prebuilt binary for ARM Linux, such as a Raspberry Pi. The installer says so and points at
-[building from source](#build-from-source).
-
-### By hand, and on Windows
-
-A release build carries the web UI inside the executable, so there is one file to copy and nothing to
-point it at. Download the archive for your platform from the
-[releases page](https://github.com/shibbirweb/on-air-record/releases), extract it, and run it:
-
-```bash
-tar -xzf on-air-record-<version>-<target>.tar.gz
-cd on-air-record-<version>-<target>
-./on-air-record
-```
-
-On Windows, extract the `.zip` and run `on-air-record.exe`. macOS will refuse an unsigned download on the
-first attempt; allow it under System Settings, Privacy and Security. The installer above avoids that
-prompt, because a file fetched with `curl` is not quarantined the way a browser download is.
-
-Then open `http://localhost:8080` on the host, or `http://<host-lan-ip>:8080` from any other machine on
-the same network. Recordings and the database are written to `./data` next to wherever you ran it, which
-`--data-dir` moves somewhere sensible.
-
-### Build from source
-
-You need Rust and Node, and the UI must be built first, because a release build embeds whatever is in
-`frontend/dist` at compile time:
-
-```bash
-# 1. build the web UI
-cd frontend
-npm install
-npm run build
-
-# 2. build and run the service
-cd ../backend
-cargo run --release
-```
-
-For development with hot reload, run the backend and the Vite dev server side by side:
-
-```bash
-cd backend && cargo run          # terminal 1, API on :8080
-cd frontend && npm run dev       # terminal 2, UI on :5173, proxied to :8080
-```
-
-A directory given with `--static-dir` always wins over the embedded copy, so a debug build serves whatever
-you last built into `frontend/dist` without a recompile.
 
 ## Running it as a service
 
