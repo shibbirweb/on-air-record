@@ -143,9 +143,12 @@ export function TransportBar({ getPlayheadMs }: TransportBarProps) {
         disabled={!connected || mode === 'live'}
         onValueChange={(next) => requestSpeed(Number(next))}
       >
-        <SelectTrigger className="h-9 w-24" aria-label="Playback speed">
+        <SelectTrigger className="h-9 w-22" aria-label="Playback speed">
           <Gauge className="size-3.5 shrink-0 opacity-70" />
-          <SelectValue />
+          {/* Own children rather than the default, which would put the full item label, "1x (normal)",
+              into a trigger only wide enough for the number. The wording earns its place in the list
+              where the options are compared, not here where the value is already known. */}
+          <SelectValue>{speed}x</SelectValue>
         </SelectTrigger>
         <SelectContent>
           {SPEEDS.map((option) => (
