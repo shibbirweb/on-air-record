@@ -187,8 +187,8 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Segment index in SQLite with precise time ranges and an indexed calendar day
 - [x] A fresh segment on any timeline discontinuity, so stored byte offsets never lie
 - [x] Waveform peak envelope computed during recording, one byte per 100 ms bucket
-- [x] Retention janitor pruning expired segments, index rows, and emptied directories, or disabled
-      entirely when recordings are kept forever
+- [x] Retention janitor pruning expired segments, index rows, emptied directories and the bookmarks that
+      pointed at them, or disabled entirely when recordings are kept forever
 - [x] Recordings can live outside the data directory, with old segments still resolving
 - [x] Storage, session, and history depth reporting
 - [ ] Opus compression for segments, which would beat sample rate reduction for the same quality but
@@ -245,7 +245,8 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Saving asks first when it would shorten retention and delete audio
 - [x] Light and dark themes with a toggle, remembered per browser
 - [x] Responsive layout that reflows to a single column on narrow screens
-- [ ] Timeline bookmarks and named markers
+- [x] Timeline bookmarks: name a moment, see it flagged on the timeline and the day overview, jump back
+      to it from a list
 - [ ] Multi track view when several sessions overlap
 
 ### Milestone 6: packaging and operations

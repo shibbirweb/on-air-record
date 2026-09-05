@@ -7,6 +7,7 @@
  */
 
 import type {
+  Bookmark,
   DirectoryTest,
   Health,
   InputDevice,
@@ -125,6 +126,26 @@ export const api = {
   peaks: (fromMs: number, toMs: number, buckets: number) =>
     request<Peaks>(
       `/timeline/peaks?fromMs=${Math.round(fromMs)}&toMs=${Math.round(toMs)}&buckets=${buckets}`,
+    ),
+
+  bookmarks: () =>
+    request<{ bookmarks: Bookmark[] }>('/bookmarks').then((body) => body.bookmarks),
+
+  createBookmark: (timestampMs: number, label: string, note?: string | null) =>
+    request<Bookmark>('/bookmarks', {
+      method: 'POST',
+      body: JSON.stringify({ timestampMs: Math.round(timestampMs), label, note: note ?? null }),
+    }),
+
+  updateBookmark: (id: number, patch: { label?: string; note?: string | null }) =>
+    request<Bookmark>(`/bookmarks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  deleteBookmark: (id: number) =>
+    request<{ bookmarks: Bookmark[] }>(`/bookmarks/${id}`, { method: 'DELETE' }).then(
+      (body) => body.bookmarks,
     ),
 
   sessions: () =>

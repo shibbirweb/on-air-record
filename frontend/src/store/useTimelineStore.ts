@@ -81,6 +81,8 @@ type TimelineState = {
   zoomTo: (spanMs: number, anchorMs?: number | null) => void;
   /** Return to the standard span, framed on whatever is playing. */
   resetView: (anchorMs?: number | null) => void;
+  /** Frame one moment at the standard span. Used when jumping to a bookmark. */
+  focusOn: (timestampMs: number) => void;
   panBy: (deltaMs: number) => void;
   /** Move the window to start at `startMs`, kept inside the minimap's day. Used by the minimap drag. */
   scrollTo: (startMs: number) => void;
@@ -140,6 +142,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // back to the present under their hands.
       followingLive: false,
     })),
+
+  focusOn: (timestampMs) => {
+    // Always the standard span, never whatever zoom happened to be in force. Arriving at a marked moment
+    // while zoomed out to a day would put it a pixel wide, which is not "taking me there" in any useful
+    // sense, and arriving zoomed to a minute would hide its surroundings.
+    set({
+      spanMs: DEFAULT_SPAN_MS,
+      followingLive: false,
+      windowStartMs: timestampMs - DEFAULT_SPAN_MS / 2,
+    });
+  },
 
   resetView: (anchorMs) => {
     const state = get();

@@ -254,6 +254,52 @@ sessions recorded on one day are reported as one entry, however many times the r
 Each value is `0..255`. A zero means either silence or no recording, so the UI reads `coverage` from
 `/api/timeline/range` to tell the two apart.
 
+## Bookmarks
+
+Named moments on the timeline. A bookmark addresses a point in time rather than a segment, so a moment
+can be marked before the segment covering it has closed.
+
+### `GET /api/bookmarks`
+
+Every bookmark, oldest first, which is the order the timeline draws them in.
+
+```json
+{
+  "bookmarks": [
+    {
+      "id": 7,
+      "timestampMs": 1757030400000,
+      "label": "Doorbell rang",
+      "note": null,
+      "createdAtMs": 1757030412000
+    }
+  ]
+}
+```
+
+### `POST /api/bookmarks`
+
+```json
+{ "timestampMs": 1757030400000, "label": "Doorbell rang", "note": "someone at the front" }
+```
+
+`label` is required and is trimmed. An empty or whitespace only label is a `400`, as is a label over 120
+characters or a note over 2000, because silently discarding the end of what somebody typed is worse than
+saying it was too long. Returns the created bookmark.
+
+### `PATCH /api/bookmarks/{id}`
+
+Accepts any subset of `timestampMs`, `label` and `note`, and returns the updated bookmark. A present
+`note` of `null` clears it, an absent one leaves it alone. An empty patch is a `400` rather than a silent
+no-op.
+
+### `DELETE /api/bookmarks/{id}`
+
+Returns the remaining bookmarks, so one request both deletes and refreshes the timeline.
+
+Bookmarks are pruned by the retention janitor along with the audio they point at: once the timeline no
+longer reaches that far back, the bookmark is a link to nothing.
+
 ## Sessions and storage
 
 ### `GET /api/sessions`

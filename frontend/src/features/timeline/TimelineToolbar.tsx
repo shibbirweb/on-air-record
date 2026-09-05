@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { BookmarkControls } from '@/features/timeline/BookmarkControls';
 import { DayPicker } from '@/features/timeline/DayPicker';
 import { formatDateTime } from '@/lib/format';
 import { useTimelineStore, ZOOM_LEVELS } from '@/store/useTimelineStore';
@@ -49,6 +50,10 @@ export function TimelineToolbar({ getPlayheadMs }: TimelineToolbarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <DayPicker />
+
+      <Separator orientation="vertical" className="mx-1 h-6" />
+
+      <BookmarkControls getPlayheadMs={getPlayheadMs} />
 
       <Separator orientation="vertical" className="mx-1 h-6" />
 

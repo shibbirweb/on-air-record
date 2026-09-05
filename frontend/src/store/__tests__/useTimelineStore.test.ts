@@ -69,3 +69,35 @@ describe('resetView', () => {
     expect(useTimelineStore.getState().spanMs).toBe(DEFAULT_SPAN_MS);
   });
 });
+
+describe('focusOn', () => {
+  beforeEach(() => {
+    useTimelineStore.setState({
+      windowStartMs: LIVE_EDGE - 86_400_000,
+      spanMs: ZOOM_LEVELS[6],
+      followingLive: true,
+      range: rangeAt(LIVE_EDGE),
+    });
+  });
+
+  it('frames the moment at the standard span whatever the zoom was', () => {
+    const moment = LIVE_EDGE - 3_600_000;
+    useTimelineStore.getState().focusOn(moment);
+
+    const state = useTimelineStore.getState();
+    expect(state.spanMs).toBe(DEFAULT_SPAN_MS);
+    expect(state.windowStartMs + state.spanMs / 2).toBe(moment);
+  });
+
+  it('widens as well as narrows, so a minute long zoom still shows the surroundings', () => {
+    useTimelineStore.setState({ spanMs: ZOOM_LEVELS[0] });
+    useTimelineStore.getState().focusOn(LIVE_EDGE - 3_600_000);
+
+    expect(useTimelineStore.getState().spanMs).toBe(DEFAULT_SPAN_MS);
+  });
+
+  it('stops the window chasing the present', () => {
+    useTimelineStore.getState().focusOn(LIVE_EDGE - 3_600_000);
+    expect(useTimelineStore.getState().followingLive).toBe(false);
+  });
+});

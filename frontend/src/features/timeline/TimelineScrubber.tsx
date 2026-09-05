@@ -17,6 +17,7 @@ import { useAnimationFrame } from '@/hooks/useAnimationFrame';
 import { formatClock } from '@/lib/format';
 import { chooseTickStepMs, tickTimestamps, timeToX, xToTime } from '@/lib/timelineGeometry';
 import type { TimelineWindow } from '@/lib/timelineGeometry';
+import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useTimelineStore } from '@/store/useTimelineStore';
 import { useTransportStore } from '@/store/useTransportStore';
 
@@ -31,6 +32,46 @@ const DRAG_THRESHOLD_PX = 4;
 
 const HEIGHT = 132;
 const RULER_HEIGHT = 22;
+
+/** Clear space kept between a bookmark label and the next flag. */
+const LABEL_GAP_PX = 14;
+/** Distance from the flag pole to the start of its label. */
+const LABEL_INSET_PX = 12;
+/** Below this there is no room for anything readable, so the flag stands alone. */
+const MIN_LABEL_PX = 26;
+
+/**
+ * The longest prefix of `text` that fits in `available` pixels, or `null` when nothing readable does.
+ *
+ * Measured rather than estimated from a character count, because a label of capitals is far wider than
+ * the same number of lowercase letters and guessing produces either overlap or wasted space.
+ */
+function fitText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  available: number,
+): string | null {
+  if (available < MIN_LABEL_PX) {
+    return null;
+  }
+  if (context.measureText(text).width <= available) {
+    return text;
+  }
+
+  const ellipsis = '...';
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (context.measureText(text.slice(0, middle) + ellipsis).width <= available) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  return low > 0 ? text.slice(0, low) + ellipsis : null;
+}
 
 function readCssColor(element: HTMLElement, token: string, fallback: string): string {
   const value = getComputedStyle(element).getPropertyValue(token).trim();
@@ -56,6 +97,7 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
   // Where the listener asked to be. Set the moment the timeline is clicked, long before the audio graph
   // has anything to say about it.
   const requestedPositionMs = useTransportStore((state) => state.requestedPositionMs);
+  const bookmarks = useBookmarkStore((state) => state.bookmarks);
 
   // The draw loop runs outside React, so everything it reads is mirrored into refs and refreshed after
   // each render. Without this the loop would close over the values from the render that started it.
@@ -63,12 +105,14 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
   const dataRef = useRef({ peaks, range });
   const hoverRef = useRef<number | null>(null);
   const cueRef = useRef<number | null>(requestedPositionMs);
+  const bookmarksRef = useRef(bookmarks);
 
   useEffect(() => {
     viewRef.current = { windowStartMs, spanMs };
     dataRef.current = { peaks, range };
     hoverRef.current = hoverMs;
     cueRef.current = requestedPositionMs;
+    bookmarksRef.current = bookmarks;
   });
 
   const draw = useCallback(() => {
@@ -113,6 +157,7 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
       live: readCssColor(container, '--live', '#f33'),
       playhead: readCssColor(container, '--foreground', '#fff'),
       surface: readCssColor(container, '--card', '#111'),
+      bookmark: readCssColor(container, '--primary', '#e8a33d'),
     };
 
     const waveTop = RULER_HEIGHT;
@@ -185,6 +230,46 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
         context.moveTo(x, waveTop);
         context.lineTo(x, HEIGHT);
         context.stroke();
+      }
+    }
+
+    // Bookmarks sit under the moving parts so a marker never hides the playhead, but over the waveform
+    // so a quiet moment still shows its flag.
+    context.font = '10px ui-sans-serif, system-ui, sans-serif';
+    context.textBaseline = 'top';
+    for (const bookmark of bookmarksRef.current) {
+      const x = timeToX(bookmark.timestampMs, view);
+      if (x < -40 || x > width + 40) {
+        continue;
+      }
+
+      context.strokeStyle = colours.bookmark;
+      context.lineWidth = 1.5;
+      context.globalAlpha = 0.85;
+      context.beginPath();
+      context.moveTo(x, waveTop);
+      context.lineTo(x, HEIGHT);
+      context.stroke();
+      context.globalAlpha = 1;
+
+      // A pennant rather than a full height band: it reads as an annotation instead of competing with
+      // the playhead for attention.
+      context.fillStyle = colours.bookmark;
+      context.beginPath();
+      context.moveTo(x, waveTop);
+      context.lineTo(x + 9, waveTop + 4);
+      context.lineTo(x, waveTop + 8);
+      context.closePath();
+      context.fill();
+
+      // Labels are measured against the gap to the next flag rather than guessed at, so a cluster of
+      // bookmarks degrades to bare flags instead of a smear of overlapping text.
+      const next = bookmarksRef.current.find((item) => item.timestampMs > bookmark.timestampMs);
+      const room = (next === undefined ? width : timeToX(next.timestampMs, view)) - x - LABEL_GAP_PX;
+      const label = fitText(context, bookmark.label, room);
+      if (label !== null) {
+        context.fillStyle = colours.text;
+        context.fillText(label, x + LABEL_INSET_PX, waveTop + 1);
       }
     }
 

@@ -20,6 +20,7 @@ import { TimelineScrubber } from '@/features/timeline/TimelineScrubber';
 import { TimelineToolbar } from '@/features/timeline/TimelineToolbar';
 import { usePolling } from '@/hooks/usePolling';
 import { useStorageStore } from '@/store/useStorageStore';
+import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useTimelineStore } from '@/store/useTimelineStore';
 import { useTransportStore } from '@/store/useTransportStore';
 
@@ -29,6 +30,7 @@ const STORAGE_POLL_MS = 10_000;
 const DAYS_POLL_MS = 30_000;
 /** The minimap covers a whole day, so it only needs to notice the live edge creeping along. */
 const MINIMAP_POLL_MS = 10_000;
+const BOOKMARK_POLL_MS = 20_000;
 
 /** Wait for the window to settle before refetching the envelope, so a drag makes one request, not fifty. */
 const PEAKS_DEBOUNCE_MS = 180;
@@ -41,6 +43,7 @@ export function ControlRoom() {
   const refreshDays = useTimelineStore((state) => state.refreshDays);
   const refreshDayPeaks = useTimelineStore((state) => state.refreshDayPeaks);
   const refreshStorage = useStorageStore((state) => state.refresh);
+  const refreshBookmarks = useBookmarkStore((state) => state.refresh);
 
   const windowStartMs = useTimelineStore((state) => state.windowStartMs);
   const spanMs = useTimelineStore((state) => state.spanMs);
@@ -52,6 +55,8 @@ export function ControlRoom() {
   usePolling(refreshStorage, STORAGE_POLL_MS);
   usePolling(refreshDays, DAYS_POLL_MS);
   usePolling(refreshDayPeaks, MINIMAP_POLL_MS);
+  // Bookmarks only change when somebody makes one, or when the janitor prunes with the audio.
+  usePolling(refreshBookmarks, BOOKMARK_POLL_MS);
 
   const minimapStartMs = useTimelineStore((state) => state.minimapWindow().startMs);
   useEffect(() => {
@@ -101,7 +106,8 @@ export function ControlRoom() {
               <CardDescription>
                 Click anywhere to play from that moment, drag to pan, scroll to zoom. Shaded bands are the
                 stretches that were recorded. The bar underneath is the whole day, with the visible window
-                marked on it, and dragging that window moves the timeline.
+                marked on it, and dragging that window moves the timeline. Bookmarks appear as flags on
+                both.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">

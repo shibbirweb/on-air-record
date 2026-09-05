@@ -179,6 +179,15 @@ export type AudioFrame = {
   samples: Float32Array;
 };
 
+/** A named moment on the timeline. */
+export type Bookmark = {
+  id: number;
+  timestampMs: number;
+  label: string;
+  note: string | null;
+  createdAtMs: number;
+};
+
 /** The outcome of trying a recordings directory without saving it. */
 export type DirectoryTest = {
   ok: boolean;

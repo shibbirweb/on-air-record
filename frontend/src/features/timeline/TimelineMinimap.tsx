@@ -16,6 +16,7 @@ import { dayLabel, localDayId } from '@/lib/day';
 import { formatClock } from '@/lib/format';
 import { timeToX, xToTime } from '@/lib/timelineGeometry';
 import type { TimelineWindow } from '@/lib/timelineGeometry';
+import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useTimelineStore } from '@/store/useTimelineStore';
 import { useTransportStore } from '@/store/useTransportStore';
 
@@ -51,6 +52,7 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
   const minimapStartMs = useTimelineStore((state) => state.minimapWindow().startMs);
   const minimapEndMs = useTimelineStore((state) => state.minimapWindow().endMs);
   const requestedPositionMs = useTransportStore((state) => state.requestedPositionMs);
+  const bookmarks = useBookmarkStore((state) => state.bookmarks);
 
   // Everything the draw loop reads, refreshed after each render. The loop runs outside React.
   const stateRef = useRef({
@@ -61,6 +63,7 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
     dayPeaks,
     range,
     requestedPositionMs,
+    bookmarks,
   });
 
   useEffect(() => {
@@ -72,6 +75,7 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
       dayPeaks,
       range,
       requestedPositionMs,
+      bookmarks,
     };
   });
 
@@ -117,6 +121,7 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
       wave: readCssColor(container, '--wave', '#f0a'),
       live: readCssColor(container, '--live', '#f33'),
       marker: readCssColor(container, '--foreground', '#fff'),
+      bookmark: readCssColor(container, '--primary', '#e8a33d'),
     };
 
     const barTop = LABEL_HEIGHT;
@@ -177,6 +182,17 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
         const half = Math.max((amplitude * barHeight * 0.8) / 2, 0.5);
         context.fillRect(x, centreY - half, 1, half * 2);
       }
+    }
+
+    // Tick marks only at this size. The label would not fit, and the point here is to show where in the
+    // day the marked moments fall so they can be scrolled to.
+    context.fillStyle = colours.bookmark;
+    for (const bookmark of current.bookmarks) {
+      const x = timeToX(bookmark.timestampMs, view);
+      if (x < 0 || x > width) {
+        continue;
+      }
+      context.fillRect(x - 1, barTop, 2, 5);
     }
 
     const liveEdgeMs = current.range?.liveEdgeMs ?? null;
