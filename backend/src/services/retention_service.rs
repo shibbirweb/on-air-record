@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::config::AppConfig;
 use crate::error::AppResult;
-use crate::repositories::{SegmentRepository, SessionRepository};
+use crate::repositories::{BookmarkRepository, SegmentRepository, SessionRepository};
 use crate::services::SettingsService;
 use crate::util::time::now_ms;
 
@@ -28,6 +28,7 @@ pub struct SweepReport {
     pub segments_deleted: usize,
     pub bytes_reclaimed: i64,
     pub sessions_deleted: usize,
+    pub bookmarks_deleted: usize,
 }
 
 pub struct RetentionService {
@@ -35,6 +36,7 @@ pub struct RetentionService {
     settings: Arc<SettingsService>,
     segments: Arc<SegmentRepository>,
     sessions: Arc<SessionRepository>,
+    bookmarks: Arc<BookmarkRepository>,
 }
 
 impl RetentionService {
@@ -43,12 +45,14 @@ impl RetentionService {
         settings: Arc<SettingsService>,
         segments: Arc<SegmentRepository>,
         sessions: Arc<SessionRepository>,
+        bookmarks: Arc<BookmarkRepository>,
     ) -> Self {
         Self {
             config,
             settings,
             segments,
             sessions,
+            bookmarks,
         }
     }
 
@@ -93,6 +97,11 @@ impl RetentionService {
             self.remove_empty_directories();
         }
 
+        // Bookmarks go with the audio they point at. Pruned independently of whether any segment was
+        // deleted this pass, because a bookmark can be left behind by a window that shrank while the
+        // recorder was stopped and there was nothing on disk to delete.
+        report.bookmarks_deleted = self.bookmarks.delete_before(cutoff_ms)?;
+
         Ok(report)
     }
 
@@ -109,11 +118,14 @@ impl RetentionService {
                     let outcome = tokio::task::spawn_blocking(move || janitor.sweep()).await;
 
                     match outcome {
-                        Ok(Ok(report)) if report.segments_deleted > 0 => {
+                        Ok(Ok(report))
+                            if report.segments_deleted > 0 || report.bookmarks_deleted > 0 =>
+                        {
                             tracing::info!(
                                 segments = report.segments_deleted,
                                 bytes = report.bytes_reclaimed,
                                 sessions = report.sessions_deleted,
+                                bookmarks = report.bookmarks_deleted,
                                 "retention sweep reclaimed space"
                             );
                         }
@@ -181,6 +193,7 @@ mod tests {
 
     struct Fixture {
         service: RetentionService,
+        bookmarks: Arc<crate::repositories::BookmarkRepository>,
         settings: Arc<SettingsService>,
         segments: Arc<SegmentRepository>,
         session_id: i64,
@@ -214,7 +227,8 @@ mod tests {
             .expect("settings"),
         );
         let segments = Arc::new(SegmentRepository::new(database.clone()));
-        let sessions = Arc::new(SessionRepository::new(database));
+        let sessions = Arc::new(SessionRepository::new(database.clone()));
+        let bookmarks = Arc::new(crate::repositories::BookmarkRepository::new(database));
 
         let session = sessions
             .create(&SessionDraft {
@@ -233,7 +247,9 @@ mod tests {
                 settings.clone(),
                 segments.clone(),
                 sessions,
+                bookmarks.clone(),
             ),
+            bookmarks,
             settings,
             segments,
             session_id: session.id,
@@ -330,6 +346,32 @@ mod tests {
 
         assert_eq!(fixture.service.sweep().expect("sweep").segments_deleted, 1);
         assert!(!file.exists());
+    }
+
+    #[test]
+    fn bookmarks_go_with_the_audio_they_point_at() {
+        let fixture = fixture("bookmarks");
+        insert_with_file(&fixture, 0, 0, 1_000);
+
+        let stale = crate::models::BookmarkDraft {
+            timestamp_ms: 500,
+            label: "inside the pruned audio".to_string(),
+            note: None,
+        };
+        let kept = crate::models::BookmarkDraft {
+            timestamp_ms: 100_000,
+            label: "still within the window".to_string(),
+            note: None,
+        };
+        fixture.bookmarks.create(&stale).expect("create");
+        fixture.bookmarks.create(&kept).expect("create");
+
+        let report = fixture.service.sweep_before(50_000).expect("sweep");
+
+        assert_eq!(report.bookmarks_deleted, 1);
+        let remaining = fixture.bookmarks.list().expect("list");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].label, "still within the window");
     }
 
     #[test]

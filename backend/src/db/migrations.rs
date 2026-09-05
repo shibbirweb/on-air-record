@@ -70,6 +70,24 @@ const MIGRATIONS: &[Migration] = &[
         CREATE INDEX idx_segments_day ON segments (day, started_at_ms);
     "#,
     },
+    Migration {
+        version: 3,
+        name: "timeline bookmarks",
+        // Bookmarks point at a moment rather than at a segment. Deliberately no foreign key: a moment can
+        // be marked before the segment covering it has closed, and the timestamp stays meaningful even
+        // once the audio around it is gone.
+        sql: r#"
+        CREATE TABLE bookmarks (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_ms  INTEGER NOT NULL,
+            label         TEXT NOT NULL,
+            note          TEXT,
+            created_at_ms INTEGER NOT NULL
+        );
+
+        CREATE INDEX idx_bookmarks_timestamp ON bookmarks (timestamp_ms);
+    "#,
+    },
 ];
 
 /// Apply every migration newer than the database's recorded version.
@@ -146,6 +164,23 @@ mod tests {
         assert_eq!(day, crate::util::day::local_day(1_757_030_400_000));
         // The file itself was not moved, so the old path must survive the upgrade untouched.
         assert_eq!(path, "recordings/1/000000.pcm");
+    }
+
+    #[test]
+    fn bookmarks_survive_an_upgrade_from_the_previous_version() {
+        let connection = Connection::open_in_memory().expect("open");
+        connection.execute_batch(MIGRATIONS[0].sql).expect("v1");
+        connection.execute_batch(MIGRATIONS[1].sql).expect("v2");
+        connection
+            .pragma_update(None, "user_version", 2)
+            .expect("stamp version");
+
+        run(&connection).expect("upgrade");
+
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM bookmarks", [], |row| row.get(0))
+            .expect("bookmarks table exists");
+        assert_eq!(count, 0);
     }
 
     #[test]

@@ -10,10 +10,12 @@ use crate::audio::{build_encoder, FrameEncoder, FrameFormat};
 use crate::config::AppConfig;
 use crate::db::Database;
 use crate::error::AppResult;
-use crate::repositories::{SegmentRepository, SessionRepository, SettingsRepository};
+use crate::repositories::{
+    BookmarkRepository, SegmentRepository, SessionRepository, SettingsRepository,
+};
 use crate::services::{
-    BroadcastHub, CaptureService, DeviceService, PlaybackService, RetentionService,
-    SettingsService, TimelineService,
+    BookmarkService, BroadcastHub, CaptureService, DeviceService, PlaybackService,
+    RetentionService, SettingsService, TimelineService,
 };
 use crate::util::time::now_ms;
 
@@ -26,6 +28,7 @@ pub struct AppState {
     pub timeline: Arc<TimelineService>,
     pub retention: Arc<RetentionService>,
     pub hub: Arc<BroadcastHub>,
+    pub bookmarks: Arc<BookmarkService>,
     pub sessions: Arc<SessionRepository>,
     pub segments: Arc<SegmentRepository>,
     pub encoder: Arc<dyn FrameEncoder>,
@@ -43,7 +46,8 @@ impl AppState {
 
         let settings_repository = Arc::new(SettingsRepository::new(database.clone()));
         let sessions = Arc::new(SessionRepository::new(database.clone()));
-        let segments = Arc::new(SegmentRepository::new(database));
+        let segments = Arc::new(SegmentRepository::new(database.clone()));
+        let bookmark_repository = Arc::new(BookmarkRepository::new(database));
 
         // A hard kill leaves the last session marked as still recording. Closing it now keeps the
         // sessions list honest and stops the UI from showing two active sessions after a restart.
@@ -66,6 +70,7 @@ impl AppState {
             encoder.clone(),
         ));
 
+        let bookmarks = Arc::new(BookmarkService::new(bookmark_repository.clone()));
         let devices = Arc::new(DeviceService::new(settings.clone(), capture.clone()));
         let playback = Arc::new(PlaybackService::new(config.clone(), segments.clone()));
         let timeline = Arc::new(TimelineService::new(segments.clone(), hub.clone()));
@@ -74,6 +79,7 @@ impl AppState {
             settings.clone(),
             segments.clone(),
             sessions.clone(),
+            bookmark_repository.clone(),
         ));
 
         Ok(Arc::new(Self {
@@ -85,6 +91,7 @@ impl AppState {
             timeline,
             retention,
             hub,
+            bookmarks,
             sessions,
             segments,
             encoder,

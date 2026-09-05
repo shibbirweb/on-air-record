@@ -17,8 +17,8 @@ use tower_http::trace::TraceLayer;
 
 use crate::app::AppState;
 use crate::controllers::{
-    capture_controller, device_controller, session_controller, settings_controller,
-    status_controller, stream_controller, timeline_controller,
+    bookmark_controller, capture_controller, device_controller, session_controller,
+    settings_controller, status_controller, stream_controller, timeline_controller,
 };
 
 /// Build the complete application router.
@@ -43,6 +43,14 @@ pub fn build(state: Arc<AppState>) -> Router {
         .route("/timeline/range", get(timeline_controller::range))
         .route("/timeline/days", get(timeline_controller::days))
         .route("/timeline/peaks", get(timeline_controller::peaks))
+        .route(
+            "/bookmarks",
+            get(bookmark_controller::list).post(bookmark_controller::create),
+        )
+        .route(
+            "/bookmarks/{id}",
+            axum::routing::patch(bookmark_controller::update).delete(bookmark_controller::remove),
+        )
         .route("/sessions", get(session_controller::list))
         .route("/storage", get(session_controller::storage))
         .route("/ws/stream", get(stream_controller::stream))

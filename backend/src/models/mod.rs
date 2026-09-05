@@ -4,6 +4,7 @@
 //! host. Repositories map rows onto them and DTOs project them onto the wire.
 
 pub mod audio_frame;
+pub mod bookmark;
 pub mod capture_state;
 pub mod device;
 pub mod segment;
@@ -11,6 +12,7 @@ pub mod session;
 pub mod settings;
 
 pub use audio_frame::AudioFrame;
+pub use bookmark::{Bookmark, BookmarkDraft, BookmarkPatch};
 pub use capture_state::{CaptureSnapshot, CaptureState, LevelSnapshot};
 pub use device::InputDevice;
 pub use segment::{Segment, SegmentDraft, TimeRange};
