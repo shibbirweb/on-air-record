@@ -78,7 +78,9 @@ impl TimelineService {
         }
 
         let buckets = buckets.clamp(MIN_BUCKETS, MAX_BUCKETS);
-        let segments = self.segments.find_in_range(TimeRange::new(from_ms, to_ms))?;
+        let segments = self
+            .segments
+            .find_in_range(TimeRange::new(from_ms, to_ms))?;
 
         let sources: Vec<PeakSource<'_>> = segments
             .iter()
@@ -208,7 +210,12 @@ mod tests {
         insert(&fixture, 0, 0, 10_000, 100);
 
         assert_eq!(
-            fixture.service.peaks(0, 10_000, 1).expect("peaks").values.len(),
+            fixture
+                .service
+                .peaks(0, 10_000, 1)
+                .expect("peaks")
+                .values
+                .len(),
             MIN_BUCKETS
         );
         assert_eq!(

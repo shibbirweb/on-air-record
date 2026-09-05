@@ -100,9 +100,10 @@ impl SegmentRepository {
                  ORDER BY started_at_ms ASC"
             );
             let mut statement = conn.prepare(&sql)?;
-            let rows = statement.query_map(rusqlite::params![range.start_ms, range.end_ms], |row| {
-                map_segment(row)
-            })?;
+            let rows = statement
+                .query_map(rusqlite::params![range.start_ms, range.end_ms], |row| {
+                    map_segment(row)
+                })?;
 
             let mut segments = Vec::new();
             for row in rows {
@@ -121,9 +122,8 @@ impl SegmentRepository {
             let mut statement = conn.prepare(
                 "SELECT started_at_ms, ended_at_ms FROM segments ORDER BY started_at_ms ASC",
             )?;
-            let rows = statement.query_map([], |row| {
-                Ok(TimeRange::new(row.get(0)?, row.get(1)?))
-            })?;
+            let rows =
+                statement.query_map([], |row| Ok(TimeRange::new(row.get(0)?, row.get(1)?)))?;
 
             let mut ranges = Vec::new();
             for row in rows {
@@ -157,8 +157,10 @@ impl SegmentRepository {
     /// Newest indexed moment, which is the live edge while capture is stopped.
     pub fn latest_end_ms(&self) -> AppResult<Option<i64>> {
         self.database.with_connection(|conn| {
-            conn.query_row("SELECT MAX(ended_at_ms) FROM segments", [], |row| row.get(0))
-                .map_err(Into::into)
+            conn.query_row("SELECT MAX(ended_at_ms) FROM segments", [], |row| {
+                row.get(0)
+            })
+            .map_err(Into::into)
         })
     }
 
@@ -171,9 +173,7 @@ impl SegmentRepository {
                  ORDER BY ended_at_ms ASC LIMIT ?2"
             );
             let mut statement = conn.prepare(&sql)?;
-            let rows = statement.query_map(rusqlite::params![cutoff_ms, limit], |row| {
-                map_segment(row)
-            })?;
+            let rows = statement.query_map(rusqlite::params![cutoff_ms, limit], map_segment)?;
 
             let mut segments = Vec::new();
             for row in rows {
@@ -274,30 +274,63 @@ mod tests {
     #[test]
     fn find_covering_returns_the_owning_segment() {
         let fixture = fixture();
-        fixture.segments.insert(&draft(&fixture, 0, 0, 10_000)).expect("insert");
-        fixture.segments.insert(&draft(&fixture, 1, 10_000, 20_000)).expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 0, 0, 10_000))
+            .expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 1, 10_000, 20_000))
+            .expect("insert");
 
-        let found = fixture.segments.find_covering(15_000).expect("find").expect("present");
+        let found = fixture
+            .segments
+            .find_covering(15_000)
+            .expect("find")
+            .expect("present");
         assert_eq!(found.sequence, 1);
-        assert!(fixture.segments.find_covering(25_000).expect("find").is_none());
+        assert!(fixture
+            .segments
+            .find_covering(25_000)
+            .expect("find")
+            .is_none());
     }
 
     #[test]
     fn find_next_after_skips_a_gap() {
         let fixture = fixture();
-        fixture.segments.insert(&draft(&fixture, 0, 0, 10_000)).expect("insert");
-        fixture.segments.insert(&draft(&fixture, 1, 60_000, 70_000)).expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 0, 0, 10_000))
+            .expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 1, 60_000, 70_000))
+            .expect("insert");
 
-        let next = fixture.segments.find_next_after(20_000).expect("find").expect("present");
+        let next = fixture
+            .segments
+            .find_next_after(20_000)
+            .expect("find")
+            .expect("present");
         assert_eq!(next.started_at_ms, 60_000);
     }
 
     #[test]
     fn find_in_range_returns_only_overlapping_segments() {
         let fixture = fixture();
-        fixture.segments.insert(&draft(&fixture, 0, 0, 10_000)).expect("insert");
-        fixture.segments.insert(&draft(&fixture, 1, 10_000, 20_000)).expect("insert");
-        fixture.segments.insert(&draft(&fixture, 2, 20_000, 30_000)).expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 0, 0, 10_000))
+            .expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 1, 10_000, 20_000))
+            .expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 2, 20_000, 30_000))
+            .expect("insert");
 
         let found = fixture
             .segments
@@ -316,9 +349,18 @@ mod tests {
     #[test]
     fn coverage_merges_adjacent_segments_and_keeps_gaps() {
         let fixture = fixture();
-        fixture.segments.insert(&draft(&fixture, 0, 0, 10_000)).expect("insert");
-        fixture.segments.insert(&draft(&fixture, 1, 10_000, 20_000)).expect("insert");
-        fixture.segments.insert(&draft(&fixture, 2, 60_000, 70_000)).expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 0, 0, 10_000))
+            .expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 1, 10_000, 20_000))
+            .expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 2, 60_000, 70_000))
+            .expect("insert");
 
         let coverage = fixture.segments.coverage(200).expect("coverage");
         assert_eq!(coverage.len(), 2);
@@ -329,8 +371,14 @@ mod tests {
     #[test]
     fn expired_segments_are_selected_by_cutoff() {
         let fixture = fixture();
-        fixture.segments.insert(&draft(&fixture, 0, 0, 10_000)).expect("insert");
-        fixture.segments.insert(&draft(&fixture, 1, 10_000, 20_000)).expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 0, 0, 10_000))
+            .expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 1, 10_000, 20_000))
+            .expect("insert");
 
         let expired = fixture.segments.find_expired(15_000, 100).expect("expired");
         assert_eq!(expired.len(), 1);
@@ -343,8 +391,14 @@ mod tests {
     #[test]
     fn stats_aggregate_bytes_and_bounds() {
         let fixture = fixture();
-        fixture.segments.insert(&draft(&fixture, 0, 0, 10_000)).expect("insert");
-        fixture.segments.insert(&draft(&fixture, 1, 10_000, 20_000)).expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 0, 0, 10_000))
+            .expect("insert");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 1, 10_000, 20_000))
+            .expect("insert");
 
         let stats = fixture.segments.stats().expect("stats");
         assert_eq!(stats.segment_count, 2);
@@ -356,8 +410,15 @@ mod tests {
     #[test]
     fn peaks_survive_the_blob_round_trip() {
         let fixture = fixture();
-        fixture.segments.insert(&draft(&fixture, 0, 0, 1_000)).expect("insert");
-        let segment = fixture.segments.find_covering(500).expect("find").expect("present");
+        fixture
+            .segments
+            .insert(&draft(&fixture, 0, 0, 1_000))
+            .expect("insert");
+        let segment = fixture
+            .segments
+            .find_covering(500)
+            .expect("find")
+            .expect("present");
         assert_eq!(segment.peaks, vec![7; 10]);
     }
 }

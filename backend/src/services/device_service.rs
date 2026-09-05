@@ -23,11 +23,11 @@ impl DeviceService {
     pub async fn list(&self) -> AppResult<Vec<InputDevice>> {
         let selected = self.settings.current().input_device_id;
 
-        tokio::task::spawn_blocking(move || {
-            crate::audio::DeviceRegistry::list(selected.as_deref())
-        })
-        .await
-        .map_err(|error| AppError::internal(format!("device enumeration task failed: {error}")))?
+        tokio::task::spawn_blocking(move || crate::audio::DeviceRegistry::list(selected.as_deref()))
+            .await
+            .map_err(|error| {
+                AppError::internal(format!("device enumeration task failed: {error}"))
+            })?
     }
 
     /// Which device id is stored in settings, if any.

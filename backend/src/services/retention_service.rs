@@ -167,13 +167,15 @@ mod tests {
     }
 
     fn fixture(name: &str) -> Fixture {
-        let data_dir = std::env::temp_dir().join(format!("oar-retention-{name}-{}", std::process::id()));
+        let data_dir =
+            std::env::temp_dir().join(format!("oar-retention-{name}-{}", std::process::id()));
         std::fs::remove_dir_all(&data_dir).ok();
         std::fs::create_dir_all(&data_dir).expect("data dir");
 
-        let mut config = AppConfig::default();
-        config.data_dir = data_dir.clone();
-        let config = Arc::new(config);
+        let config = Arc::new(AppConfig {
+            data_dir: data_dir.clone(),
+            ..AppConfig::default()
+        });
 
         let database = Arc::new(Database::open_in_memory().expect("database"));
         let settings = Arc::new(

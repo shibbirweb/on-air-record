@@ -117,7 +117,9 @@ mod tests {
         let repository = Arc::new(SettingsRepository::new(database));
         let service = SettingsService::load(repository.clone()).expect("service");
 
-        service.set_input_device(Some("Scarlett Solo USB".to_string())).expect("select");
+        service
+            .set_input_device(Some("Scarlett Solo USB".to_string()))
+            .expect("select");
 
         let reloaded = SettingsService::load(repository).expect("reload");
         assert_eq!(
@@ -129,7 +131,9 @@ mod tests {
     #[test]
     fn selecting_no_device_returns_to_the_system_default() {
         let service = service();
-        service.set_input_device(Some("mic".to_string())).expect("select");
+        service
+            .set_input_device(Some("mic".to_string()))
+            .expect("select");
         service.set_input_device(None).expect("clear");
         assert_eq!(service.current().input_device_id, None);
     }

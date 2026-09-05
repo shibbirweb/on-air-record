@@ -93,7 +93,7 @@ impl PlaybackCursor {
     }
 
     /// Produce the next step of playback.
-    pub fn next(&mut self) -> AppResult<CursorOutput> {
+    pub fn advance(&mut self) -> AppResult<CursorOutput> {
         for _ in 0..MAX_SEGMENT_HOPS {
             if self.open.is_none() {
                 match self.locate()? {
@@ -135,10 +135,7 @@ impl PlaybackCursor {
         let from_ms = self.position_ms;
         let to_ms = segment.started_at_ms;
         self.position_ms = to_ms;
-        self.open = Some(OpenSegment {
-            segment,
-            offset: 0,
-        });
+        self.open = Some(OpenSegment { segment, offset: 0 });
 
         Ok(Located::Jumped { from_ms, to_ms })
     }
@@ -228,13 +225,15 @@ mod tests {
     /// Build a real data directory plus index: these tests are about the interaction between the two, so
     /// stubbing either half would test nothing.
     fn fixture(name: &str, ranges: &[(i64, i64)]) -> Fixture {
-        let data_dir = std::env::temp_dir().join(format!("oar-playback-{name}-{}", std::process::id()));
+        let data_dir =
+            std::env::temp_dir().join(format!("oar-playback-{name}-{}", std::process::id()));
         std::fs::remove_dir_all(&data_dir).ok();
         std::fs::create_dir_all(&data_dir).expect("data dir");
 
-        let mut config = AppConfig::default();
-        config.data_dir = data_dir.clone();
-        let config = Arc::new(config);
+        let config = Arc::new(AppConfig {
+            data_dir: data_dir.clone(),
+            ..AppConfig::default()
+        });
 
         let database = Arc::new(Database::open_in_memory().expect("database"));
         let sessions = SessionRepository::new(database.clone());
@@ -287,7 +286,7 @@ mod tests {
         let fixture = fixture("ordered", &[(10_000, 20_000)]);
         let mut cursor = fixture.service.cursor_at(12_000, 100);
 
-        let first = match cursor.next().expect("next") {
+        let first = match cursor.advance().expect("next") {
             CursorOutput::Frame(frame) => frame,
             other => panic!("expected a frame, got {other:?}"),
         };
@@ -295,7 +294,7 @@ mod tests {
         assert!(!first.live);
         assert_eq!(first.sample_count(), 4800);
 
-        let second = match cursor.next().expect("next") {
+        let second = match cursor.advance().expect("next") {
             CursorOutput::Frame(frame) => frame,
             other => panic!("expected a frame, got {other:?}"),
         };
@@ -310,7 +309,7 @@ mod tests {
 
         let mut timestamps = Vec::new();
         for _ in 0..3 {
-            match cursor.next().expect("next") {
+            match cursor.advance().expect("next") {
                 CursorOutput::Frame(frame) => timestamps.push(frame.timestamp_ms),
                 other => panic!("expected a frame, got {other:?}"),
             }
@@ -325,13 +324,13 @@ mod tests {
         let mut cursor = fixture.service.cursor_at(500, 100);
 
         // Drain the first segment.
-        while let CursorOutput::Frame(_) = cursor.next().expect("next") {
+        while let CursorOutput::Frame(_) = cursor.advance().expect("next") {
             if cursor.position_ms() >= 1_000 {
                 break;
             }
         }
 
-        match cursor.next().expect("next") {
+        match cursor.advance().expect("next") {
             CursorOutput::Gap { from_ms, to_ms } => {
                 assert_eq!(from_ms, 1_000);
                 assert_eq!(to_ms, 60_000);
@@ -339,7 +338,7 @@ mod tests {
             other => panic!("expected a gap, got {other:?}"),
         }
 
-        match cursor.next().expect("next") {
+        match cursor.advance().expect("next") {
             CursorOutput::Frame(frame) => assert_eq!(frame.timestamp_ms, 60_000),
             other => panic!("expected a frame, got {other:?}"),
         }
@@ -352,12 +351,12 @@ mod tests {
 
         for _ in 0..5 {
             assert!(matches!(
-                cursor.next().expect("next"),
+                cursor.advance().expect("next"),
                 CursorOutput::Frame(_)
             ));
         }
 
-        match cursor.next().expect("next") {
+        match cursor.advance().expect("next") {
             CursorOutput::EndOfRecording { at_ms } => assert_eq!(at_ms, 500),
             other => panic!("expected the end of the recording, got {other:?}"),
         }
@@ -368,13 +367,13 @@ mod tests {
         let fixture = fixture("seek", &[(0, 2_000)]);
         let mut cursor = fixture.service.cursor_at(1_000, 100);
 
-        let first = match cursor.next().expect("next") {
+        let first = match cursor.advance().expect("next") {
             CursorOutput::Frame(frame) => frame,
             other => panic!("expected a frame, got {other:?}"),
         };
 
         cursor.seek(1_000);
-        let again = match cursor.next().expect("next") {
+        let again = match cursor.advance().expect("next") {
             CursorOutput::Frame(frame) => frame,
             other => panic!("expected a frame, got {other:?}"),
         };
@@ -388,7 +387,7 @@ mod tests {
         let fixture = fixture("early", &[(100_000, 101_000)]);
         let mut cursor = fixture.service.cursor_at(0, 100);
 
-        match cursor.next().expect("next") {
+        match cursor.advance().expect("next") {
             CursorOutput::Gap { from_ms, to_ms } => {
                 assert_eq!(from_ms, 0);
                 assert_eq!(to_ms, 100_000);
@@ -400,7 +399,10 @@ mod tests {
     #[test]
     fn service_reports_the_playable_bounds() {
         let fixture = fixture("bounds", &[(5_000, 6_000), (7_000, 8_000)]);
-        assert_eq!(fixture.service.earliest_ms().expect("earliest"), Some(5_000));
+        assert_eq!(
+            fixture.service.earliest_ms().expect("earliest"),
+            Some(5_000)
+        );
         assert_eq!(fixture.service.latest_ms().expect("latest"), Some(8_000));
     }
 }

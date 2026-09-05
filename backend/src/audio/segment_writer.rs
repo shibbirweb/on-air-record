@@ -137,7 +137,10 @@ pub fn read_segment_bytes(path: &Path, offset: i64, length: usize) -> AppResult<
     use std::io::{Read, Seek, SeekFrom};
 
     let mut file = File::open(path).map_err(|error| {
-        AppError::internal(format!("could not open segment {}: {error}", path.display()))
+        AppError::internal(format!(
+            "could not open segment {}: {error}",
+            path.display()
+        ))
     })?;
     file.seek(SeekFrom::Start(offset.max(0) as u64))?;
 
@@ -208,9 +211,14 @@ mod tests {
         let path = dir.join("000001.pcm");
         let frame = AudioFrame::from_samples(0, 48_000, 1, vec![0; 10], true);
 
-        let writer =
-            SegmentWriter::create(1, 1, path.clone(), "recordings/1/000001.pcm".to_string(), &frame)
-                .expect("create");
+        let writer = SegmentWriter::create(
+            1,
+            1,
+            path.clone(),
+            "recordings/1/000001.pcm".to_string(),
+            &frame,
+        )
+        .expect("create");
         assert!(writer.finish().expect("finish").is_none());
         assert!(!path.exists());
 
@@ -223,9 +231,14 @@ mod tests {
         let path = dir.join("000002.pcm");
         let frame = AudioFrame::from_samples(0, 48_000, 1, vec![1, 2, 3, 4], true);
 
-        let mut writer =
-            SegmentWriter::create(1, 2, path.clone(), "recordings/1/000002.pcm".to_string(), &frame)
-                .expect("create");
+        let mut writer = SegmentWriter::create(
+            1,
+            2,
+            path.clone(),
+            "recordings/1/000002.pcm".to_string(),
+            &frame,
+        )
+        .expect("create");
         writer.append(&frame, &PcmS16Encoder).expect("append");
         writer.finish().expect("finish");
 

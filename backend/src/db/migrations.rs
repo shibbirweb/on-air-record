@@ -73,7 +73,11 @@ pub fn run(connection: &Connection) -> AppResult<()> {
 
 /// Highest migration version this build knows about.
 pub fn latest_version() -> i32 {
-    MIGRATIONS.iter().map(|item| item.version).max().unwrap_or(0)
+    MIGRATIONS
+        .iter()
+        .map(|item| item.version)
+        .max()
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

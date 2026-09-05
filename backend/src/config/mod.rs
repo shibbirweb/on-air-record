@@ -68,7 +68,10 @@ impl Default for AppConfig {
 impl AppConfig {
     /// Resolve the effective configuration from defaults, environment, and CLI flags.
     pub fn resolve(args: CliArgs) -> Self {
-        AppConfigBuilder::new().with_environment().with_cli(args).build()
+        AppConfigBuilder::new()
+            .with_environment()
+            .with_cli(args)
+            .build()
     }
 
     pub fn socket_addr(&self) -> SocketAddr {
@@ -208,8 +211,10 @@ mod tests {
 
     #[test]
     fn database_path_sits_inside_data_dir() {
-        let mut config = AppConfig::default();
-        config.data_dir = PathBuf::from("/srv/oar");
+        let config = AppConfig {
+            data_dir: PathBuf::from("/srv/oar"),
+            ..AppConfig::default()
+        };
         assert_eq!(
             config.database_path(),
             PathBuf::from("/srv/oar/on-air-record.sqlite")
@@ -218,8 +223,10 @@ mod tests {
 
     #[test]
     fn segment_paths_round_trip() {
-        let mut config = AppConfig::default();
-        config.data_dir = PathBuf::from("/srv/oar");
+        let config = AppConfig {
+            data_dir: PathBuf::from("/srv/oar"),
+            ..AppConfig::default()
+        };
         let absolute = config.resolve_data_path("recordings/3/000012.pcm");
         assert_eq!(
             config.relativise_data_path(&absolute),
@@ -229,8 +236,10 @@ mod tests {
 
     #[test]
     fn invalid_host_falls_back_to_all_interfaces() {
-        let mut config = AppConfig::default();
-        config.host = "not-an-ip".to_string();
+        let config = AppConfig {
+            host: "not-an-ip".to_string(),
+            ..AppConfig::default()
+        };
         assert_eq!(config.socket_addr().ip(), IpAddr::from([0, 0, 0, 0]));
     }
 }

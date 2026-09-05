@@ -189,8 +189,12 @@ mod tests {
     fn close_sets_the_end_timestamp_once() {
         let repository = repository();
         let session = repository.create(&draft()).expect("create");
-        repository.close(session.id, 1_700_000_060_000).expect("close");
-        repository.close(session.id, 1_700_000_090_000).expect("close again");
+        repository
+            .close(session.id, 1_700_000_060_000)
+            .expect("close");
+        repository
+            .close(session.id, 1_700_000_090_000)
+            .expect("close again");
 
         let stored = repository.find(session.id).expect("find").expect("present");
         assert_eq!(stored.ended_at_ms, Some(1_700_000_060_000));

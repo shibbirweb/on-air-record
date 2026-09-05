@@ -22,9 +22,9 @@ impl DeviceRegistry {
             .default_input_device()
             .and_then(|device| device.name().ok());
 
-        let devices = host
-            .input_devices()
-            .map_err(|error| AppError::audio(format!("could not enumerate input devices: {error}")))?;
+        let devices = host.input_devices().map_err(|error| {
+            AppError::audio(format!("could not enumerate input devices: {error}"))
+        })?;
 
         let mut listed = Vec::new();
         for device in devices {
@@ -39,7 +39,10 @@ impl DeviceRegistry {
                 is_default: default_name.as_deref() == Some(name.as_str()),
                 available: true,
                 channels: config.as_ref().map(|item| item.channels()).unwrap_or(0),
-                sample_rate: config.as_ref().map(|item| item.sample_rate().0).unwrap_or(0),
+                sample_rate: config
+                    .as_ref()
+                    .map(|item| item.sample_rate().0)
+                    .unwrap_or(0),
                 id: name.clone(),
                 name,
             });
@@ -66,12 +69,17 @@ impl DeviceRegistry {
     /// A configured device that has gone missing falls back to the system default rather than failing,
     /// because an unplugged interface should not stop the service from recording anything at all. The
     /// caller learns which device was actually opened from the returned descriptor.
-    pub fn resolve(preferred_id: Option<&str>) -> AppResult<(Device, SupportedStreamConfig, InputDevice)> {
+    pub fn resolve(
+        preferred_id: Option<&str>,
+    ) -> AppResult<(Device, SupportedStreamConfig, InputDevice)> {
         let host = cpal::default_host();
 
         let device = match preferred_id {
             Some(wanted) => find_by_name(&host, wanted).or_else(|| {
-                tracing::warn!(device_id = wanted, "configured input device is not available, falling back to the default");
+                tracing::warn!(
+                    device_id = wanted,
+                    "configured input device is not available, falling back to the default"
+                );
                 host.default_input_device()
             }),
             None => host.default_input_device(),
@@ -86,7 +94,9 @@ impl DeviceRegistry {
             .unwrap_or_else(|_| "unknown input device".to_string());
 
         let config = device.default_input_config().map_err(|error| {
-            AppError::audio(format!("device '{name}' has no usable input config: {error}"))
+            AppError::audio(format!(
+                "device '{name}' has no usable input config: {error}"
+            ))
         })?;
 
         let descriptor = InputDevice {
@@ -103,10 +113,7 @@ impl DeviceRegistry {
 }
 
 fn find_by_name(host: &cpal::Host, wanted: &str) -> Option<Device> {
-    host.input_devices().ok()?.find(|device| {
-        device
-            .name()
-            .map(|name| name == wanted)
-            .unwrap_or(false)
-    })
+    host.input_devices()
+        .ok()?
+        .find(|device| device.name().map(|name| name == wanted).unwrap_or(false))
 }

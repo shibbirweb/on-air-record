@@ -47,7 +47,11 @@ impl GainControl {
     }
 
     pub fn set(&self, gain: f32) {
-        let sanitised = if gain.is_finite() { gain.clamp(0.0, 4.0) } else { 1.0 };
+        let sanitised = if gain.is_finite() {
+            gain.clamp(0.0, 4.0)
+        } else {
+            1.0
+        };
         self.bits.store(sanitised.to_bits(), Ordering::Relaxed);
     }
 }
@@ -183,7 +187,9 @@ fn run_capture_thread(
     };
 
     if let Err(error) = stream.play() {
-        let _ = ready.send(Err(AppError::audio(format!("could not start the input stream: {error}"))));
+        let _ = ready.send(Err(AppError::audio(format!(
+            "could not start the input stream: {error}"
+        ))));
         return;
     }
 
@@ -229,17 +235,33 @@ fn build_stream(
     let sample_rate = config.sample_rate.0;
     let source_channels = config.channels.max(1);
 
-    let builder = Arc::new(Mutex::new(FrameBuilder::new(sample_rate, 1, options.frame_ms)));
+    let builder = Arc::new(Mutex::new(FrameBuilder::new(
+        sample_rate,
+        1,
+        options.frame_ms,
+    )));
 
     let stream = match sample_format {
         SampleFormat::I8 => open::<i8>(&device, &config, options, &builder, &sink, &dropped_frames),
-        SampleFormat::I16 => open::<i16>(&device, &config, options, &builder, &sink, &dropped_frames),
-        SampleFormat::I32 => open::<i32>(&device, &config, options, &builder, &sink, &dropped_frames),
+        SampleFormat::I16 => {
+            open::<i16>(&device, &config, options, &builder, &sink, &dropped_frames)
+        }
+        SampleFormat::I32 => {
+            open::<i32>(&device, &config, options, &builder, &sink, &dropped_frames)
+        }
         SampleFormat::U8 => open::<u8>(&device, &config, options, &builder, &sink, &dropped_frames),
-        SampleFormat::U16 => open::<u16>(&device, &config, options, &builder, &sink, &dropped_frames),
-        SampleFormat::U32 => open::<u32>(&device, &config, options, &builder, &sink, &dropped_frames),
-        SampleFormat::F32 => open::<f32>(&device, &config, options, &builder, &sink, &dropped_frames),
-        SampleFormat::F64 => open::<f64>(&device, &config, options, &builder, &sink, &dropped_frames),
+        SampleFormat::U16 => {
+            open::<u16>(&device, &config, options, &builder, &sink, &dropped_frames)
+        }
+        SampleFormat::U32 => {
+            open::<u32>(&device, &config, options, &builder, &sink, &dropped_frames)
+        }
+        SampleFormat::F32 => {
+            open::<f32>(&device, &config, options, &builder, &sink, &dropped_frames)
+        }
+        SampleFormat::F64 => {
+            open::<f64>(&device, &config, options, &builder, &sink, &dropped_frames)
+        }
         other => Err(AppError::audio(format!(
             "device '{}' uses the unsupported sample format {other:?}",
             descriptor.name
@@ -295,15 +317,13 @@ where
 
         let captured_at_ms = now_ms();
         if let Ok(mut builder) = builder.lock() {
-            builder.push(&mono, captured_at_ms, |frame| {
-                match sink.try_send(frame) {
-                    Ok(()) => {}
-                    Err(TrySendError::Full(_)) => {
-                        dropped_frames.fetch_add(1, Ordering::Relaxed);
-                    }
-                    Err(TrySendError::Disconnected(_)) => {
-                        dropped_frames.fetch_add(1, Ordering::Relaxed);
-                    }
+            builder.push(&mono, captured_at_ms, |frame| match sink.try_send(frame) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {
+                    dropped_frames.fetch_add(1, Ordering::Relaxed);
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    dropped_frames.fetch_add(1, Ordering::Relaxed);
                 }
             });
         }

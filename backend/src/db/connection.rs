@@ -29,7 +29,7 @@ impl Database {
         let database = Self {
             connection: Mutex::new(connection),
         };
-        database.with_connection(|conn| super::migrations::run(conn))?;
+        database.with_connection(super::migrations::run)?;
         Ok(database)
     }
 
@@ -40,7 +40,7 @@ impl Database {
         let database = Self {
             connection: Mutex::new(connection),
         };
-        database.with_connection(|conn| super::migrations::run(conn))?;
+        database.with_connection(super::migrations::run)?;
         Ok(database)
     }
 

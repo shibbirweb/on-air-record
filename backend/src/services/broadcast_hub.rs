@@ -49,7 +49,8 @@ impl BroadcastHub {
         self.live_edge_ms
             .store(frame.end_timestamp_ms(), Ordering::Relaxed);
         self.rms_bits.store(frame.rms.to_bits(), Ordering::Relaxed);
-        self.peak_bits.store(frame.peak.to_bits(), Ordering::Relaxed);
+        self.peak_bits
+            .store(frame.peak.to_bits(), Ordering::Relaxed);
         self.frames_published.fetch_add(1, Ordering::Relaxed);
         let _ = self.sender.send(frame);
     }
