@@ -75,6 +75,13 @@ Think of it as a small FM station plus a digital video recorder for sound:
 - Linux additionally needs ALSA development headers: `sudo apt install libasound2-dev pkg-config`.
 - macOS and Windows need no extra audio packages (CoreAudio and WASAPI are used through `cpal`).
 
+Portability comes from the dependencies rather than from conditional code: `cpal` covers CoreAudio, ALSA
+and WASAPI behind one API, `rusqlite` bundles SQLite, and there is no platform specific code beyond the
+SIGTERM handler. The service has so far been built and run end to end on macOS. Linux and Windows builds
+are expected to work but have not been exercised yet, which is what the release workflow in milestone 6 is
+for. Cross compiling from macOS is not a substitute, because the bundled SQLite needs a C toolchain for
+the target.
+
 ## Quick start
 
 ```bash
