@@ -36,6 +36,10 @@ pub fn build(state: Arc<AppState>) -> Router {
         )
         .route("/settings/defaults", get(settings_controller::defaults))
         .route("/settings/reset", post(settings_controller::reset))
+        .route(
+            "/settings/test-recordings-dir",
+            post(settings_controller::test_recordings_dir),
+        )
         .route("/timeline/range", get(timeline_controller::range))
         .route("/timeline/days", get(timeline_controller::days))
         .route("/timeline/peaks", get(timeline_controller::peaks))

@@ -151,6 +151,34 @@ restarts if `frameMs` actually changed.
 Resetting `retentionHours` downwards makes the janitor delete everything outside the smaller window within
 a minute, and that audio is not recoverable, so a client should confirm before calling this.
 
+### `POST /api/settings/test-recordings-dir`
+
+Try a recordings directory without saving it, so an unusable path is caught while it can still be
+corrected. Changes nothing on disk, including for a path that does not exist yet.
+
+```json
+{ "path": "/mnt/audio/on-air" }
+```
+
+`path` may be `null` or empty to test the default location.
+
+```json
+{
+  "ok": true,
+  "resolvedPath": "/mnt/audio/on-air",
+  "exists": false,
+  "willCreate": true,
+  "readable": true,
+  "writable": true,
+  "message": "Does not exist yet. It will be created inside '/mnt/audio' when you save."
+}
+```
+
+A path that will not work is a normal answer, not an API error: the response is still `200` with `ok`
+set to false and `message` explaining why, so a client never has to parse an error envelope to find out
+what is wrong. Writability is judged by writing a probe file and deleting it again, because a directory
+can exist and be readable while still refusing writes.
+
 ## Timeline
 
 ### `GET /api/timeline/range`

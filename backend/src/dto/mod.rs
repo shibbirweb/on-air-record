@@ -12,7 +12,9 @@ pub mod timeline_dto;
 
 pub use device_dto::{DeviceDto, DeviceListResponse, SelectDeviceRequest};
 pub use session_dto::{SessionDto, SessionListResponse, StorageResponse};
-pub use settings_dto::{SettingsDto, SettingsPatchRequest};
+pub use settings_dto::{
+    SettingsDto, SettingsPatchRequest, TestDirectoryRequest, TestDirectoryResponse,
+};
 pub use status_dto::{CaptureDto, HealthResponse, LevelsDto, StatusResponse};
 pub use timeline_dto::{
     CoverageDto, PeaksQuery, PeaksResponse, RecordingDayDto, RecordingDaysResponse,

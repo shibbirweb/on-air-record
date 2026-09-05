@@ -6,7 +6,7 @@ use axum::extract::State;
 use axum::Json;
 
 use crate::app::AppState;
-use crate::dto::{SettingsDto, SettingsPatchRequest};
+use crate::dto::{SettingsDto, SettingsPatchRequest, TestDirectoryRequest, TestDirectoryResponse};
 use crate::error::AppResult;
 use crate::models::{Settings, SettingsPatch};
 
@@ -61,4 +61,17 @@ pub async fn reset(State(state): State<Arc<AppState>>) -> AppResult<Json<Setting
     }
 
     Ok(Json(SettingsDto::new(updated, &state.config)))
+}
+
+/// `POST /api/settings/test-recordings-dir`
+///
+/// Try a directory without saving it, so an unusable path is caught while it can still be corrected
+/// rather than at the moment of saving. Changes nothing on disk, including for a path that does not
+/// exist yet.
+pub async fn test_recordings_dir(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<TestDirectoryRequest>,
+) -> AppResult<Json<TestDirectoryResponse>> {
+    let probe = state.settings.probe_recordings_dir(request.path.as_deref());
+    Ok(Json(probe.into()))
 }

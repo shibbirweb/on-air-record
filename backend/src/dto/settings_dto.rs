@@ -143,3 +143,42 @@ mod tests {
         assert_eq!(json["autoStart"], true);
     }
 }
+
+/// Request to try a recordings directory without saving it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestDirectoryRequest {
+    /// `null` or empty tests the default location.
+    pub path: Option<String>,
+}
+
+/// The outcome of trying a directory.
+///
+/// A failed test is a normal answer rather than an API error, so this comes back with a 200 and `ok`
+/// set to false. The client always gets the same shape and never has to parse an error envelope to find
+/// out why a path will not work.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestDirectoryResponse {
+    pub ok: bool,
+    pub resolved_path: String,
+    pub exists: bool,
+    pub will_create: bool,
+    pub readable: bool,
+    pub writable: bool,
+    pub message: String,
+}
+
+impl From<crate::services::settings_service::DirectoryProbe> for TestDirectoryResponse {
+    fn from(probe: crate::services::settings_service::DirectoryProbe) -> Self {
+        Self {
+            ok: probe.ok,
+            resolved_path: probe.resolved_path,
+            exists: probe.exists,
+            will_create: probe.will_create,
+            readable: probe.readable,
+            writable: probe.writable,
+            message: probe.message,
+        }
+    }
+}

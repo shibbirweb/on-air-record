@@ -35,6 +35,95 @@ impl SettingsService {
         })
     }
 
+    /// Report what would happen if recordings were pointed at `configured`, without changing anything.
+    ///
+    /// Deliberately non mutating, unlike the check on save. A test that created the directory would
+    /// litter the disk with empty folders every time somebody tried a path and thought better of it, so a
+    /// missing directory is judged by whether its nearest existing ancestor would accept one.
+    pub fn probe_recordings_dir(&self, configured: Option<&str>) -> DirectoryProbe {
+        let resolved = self.config.effective_recordings_dir(configured);
+
+        if resolved.exists() {
+            if !resolved.is_dir() {
+                return DirectoryProbe::failed(
+                    &resolved,
+                    true,
+                    "That path is a file, not a directory.".to_string(),
+                );
+            }
+
+            let readable = std::fs::read_dir(&resolved).is_ok();
+            if let Err(error) = write_probe(&resolved) {
+                return DirectoryProbe {
+                    readable,
+                    ..DirectoryProbe::failed(
+                        &resolved,
+                        true,
+                        format!("The directory exists but cannot be written to: {error}"),
+                    )
+                };
+            }
+
+            return DirectoryProbe {
+                ok: readable,
+                resolved_path: resolved.to_string_lossy().to_string(),
+                exists: true,
+                will_create: false,
+                readable,
+                writable: true,
+                message: if readable {
+                    "Ready to use. The directory exists and is readable and writable.".to_string()
+                } else {
+                    "Writable, but its contents cannot be listed, so playback of existing recordings may fail."
+                        .to_string()
+                },
+            };
+        }
+
+        // Nothing at the path yet. Whether it could be created is a question about its parent.
+        let Some(ancestor) = resolved.ancestors().skip(1).find(|path| path.exists()) else {
+            return DirectoryProbe::failed(
+                &resolved,
+                false,
+                "No part of that path exists, so it cannot be created.".to_string(),
+            );
+        };
+
+        if !ancestor.is_dir() {
+            return DirectoryProbe::failed(
+                &resolved,
+                false,
+                format!(
+                    "'{}' is a file, so nothing can be created inside it.",
+                    ancestor.display()
+                ),
+            );
+        }
+
+        match write_probe(ancestor) {
+            Ok(()) => DirectoryProbe {
+                ok: true,
+                resolved_path: resolved.to_string_lossy().to_string(),
+                exists: false,
+                will_create: true,
+                readable: true,
+                writable: true,
+                message: format!(
+                    "Does not exist yet. It will be created inside '{}' when you save.",
+                    ancestor.display()
+                ),
+            },
+            Err(error) => DirectoryProbe::failed(
+                &resolved,
+                false,
+                format!(
+                    "It cannot be created: '{}' is not writable: {error}",
+                    ancestor.display()
+                ),
+            ),
+        }
+    }
+
     /// Where segments are written under the current settings.
     pub fn effective_recordings_dir(&self) -> PathBuf {
         self.config
@@ -111,6 +200,35 @@ impl SettingsService {
     }
 }
 
+/// What a directory would do if recordings were pointed at it.
+#[derive(Debug, Clone)]
+pub struct DirectoryProbe {
+    pub ok: bool,
+    /// The absolute path the setting resolves to, which is what the operator should be shown.
+    pub resolved_path: String,
+    pub exists: bool,
+    /// True when the directory is missing but its parent would allow it to be created on save.
+    pub will_create: bool,
+    pub readable: bool,
+    pub writable: bool,
+    /// A sentence fit to put in front of a person.
+    pub message: String,
+}
+
+impl DirectoryProbe {
+    fn failed(resolved: &Path, exists: bool, message: String) -> Self {
+        Self {
+            ok: false,
+            resolved_path: resolved.to_string_lossy().to_string(),
+            exists,
+            will_create: false,
+            readable: false,
+            writable: false,
+            message,
+        }
+    }
+}
+
 /// Confirm a directory exists, or can be made, and that we can actually write into it.
 ///
 /// Creating a probe file is the only honest test. A directory can exist and be readable while still
@@ -124,12 +242,20 @@ fn check_writable(dir: &Path) -> AppResult<()> {
         ))
     })?;
 
-    let probe = dir.join(".oar-write-test");
-    std::fs::write(&probe, b"on-air-record").map_err(|error| {
+    write_probe(dir).map_err(|error| {
         AppError::bad_request(format!("'{}' is not writable: {error}", dir.display()))
-    })?;
-    let _ = std::fs::remove_file(&probe);
+    })
+}
 
+/// Write a small file into `dir` and remove it again.
+///
+/// The only honest test of writability. A directory can exist and be readable while still refusing
+/// writes because of permissions, a read only mount, or a full disk, and every one of those would
+/// otherwise surface as a stream of failed segments rather than a message on the settings page.
+fn write_probe(dir: &Path) -> Result<(), std::io::Error> {
+    let probe = dir.join(".oar-write-test");
+    std::fs::write(&probe, b"on-air-record")?;
+    let _ = std::fs::remove_file(&probe);
     Ok(())
 }
 
@@ -240,6 +366,67 @@ mod tests {
         assert_eq!(gain.get(), Settings::default().gain);
         let reloaded = SettingsService::load(repository, config()).expect("reload");
         assert_eq!(reloaded.current(), Settings::default());
+    }
+
+    #[test]
+    fn probing_an_existing_writable_directory_reports_ready() {
+        let service = service();
+        let target = std::env::temp_dir().join(format!("oar-probe-ok-{}", std::process::id()));
+        std::fs::create_dir_all(&target).expect("target");
+
+        let probe = service.probe_recordings_dir(Some(&target.to_string_lossy()));
+
+        assert!(probe.ok);
+        assert!(probe.exists);
+        assert!(!probe.will_create);
+        assert!(probe.readable && probe.writable);
+        assert_eq!(probe.resolved_path, target.to_string_lossy());
+
+        std::fs::remove_dir_all(&target).ok();
+    }
+
+    #[test]
+    fn probing_a_missing_directory_reports_that_it_would_be_created() {
+        let service = service();
+        let target = std::env::temp_dir()
+            .join(format!("oar-probe-new-{}", std::process::id()))
+            .join("nested");
+        std::fs::remove_dir_all(target.parent().expect("parent")).ok();
+
+        let probe = service.probe_recordings_dir(Some(&target.to_string_lossy()));
+
+        assert!(probe.ok);
+        assert!(!probe.exists);
+        assert!(probe.will_create);
+        // Testing must not leave empty directories behind for every path somebody tried.
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn probing_a_file_reports_the_reason_rather_than_a_bare_failure() {
+        let service = service();
+        let blocker = std::env::temp_dir().join(format!("oar-probe-file-{}", std::process::id()));
+        std::fs::write(&blocker, b"not a directory").expect("blocker");
+
+        let probe = service.probe_recordings_dir(Some(&blocker.to_string_lossy()));
+        assert!(!probe.ok);
+        assert!(probe.message.contains("file"));
+
+        let nested = service.probe_recordings_dir(Some(&blocker.join("inside").to_string_lossy()));
+        assert!(!nested.ok);
+        assert!(nested.message.contains("file"));
+
+        std::fs::remove_file(&blocker).ok();
+    }
+
+    #[test]
+    fn probing_nothing_reports_the_default_location() {
+        let service = service();
+        let probe = service.probe_recordings_dir(None);
+
+        assert!(probe.resolved_path.ends_with("recordings"));
+        // The default lives under the data directory, which the service already owns.
+        assert!(probe.ok);
     }
 
     #[test]

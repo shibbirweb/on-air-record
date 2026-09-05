@@ -176,3 +176,16 @@ export type AudioFrame = {
   live: boolean;
   samples: Float32Array;
 };
+
+/** The outcome of trying a recordings directory without saving it. */
+export type DirectoryTest = {
+  ok: boolean;
+  /** The absolute path the setting resolves to. */
+  resolvedPath: string;
+  exists: boolean;
+  /** True when it is missing but would be created on save. */
+  willCreate: boolean;
+  readable: boolean;
+  writable: boolean;
+  message: string;
+};

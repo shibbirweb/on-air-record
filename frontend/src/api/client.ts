@@ -7,6 +7,7 @@
  */
 
 import type {
+  DirectoryTest,
   Health,
   InputDevice,
   Peaks,
@@ -107,6 +108,12 @@ export const api = {
     }),
 
   settingsDefaults: () => request<Settings>('/settings/defaults'),
+
+  testRecordingsDir: (path: string | null) =>
+    request<DirectoryTest>('/settings/test-recordings-dir', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
 
   resetSettings: () => request<Settings>('/settings/reset', { method: 'POST' }),
 

@@ -236,7 +236,9 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
       never interrupts playback
 - [x] Retention expressed in hours or days, with presets, or kept forever
 - [x] Projected disk needed for the chosen window, following the bit rate being chosen as you choose it
-- [x] Configurable recording directory, validated for writability before it is accepted
+- [x] Configurable recording directory, with worked path examples in the server's own convention
+- [x] Test button reporting readability, writability and whether the directory would be created, without
+      touching the disk
 - [x] Settings panel for gain, segment length, and automatic start
 - [x] Explicit save: edits are staged, counted, and committed in one request, with Discard to abandon them
 - [x] Restore defaults stages the defaults for review rather than applying them straight away
