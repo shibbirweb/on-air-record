@@ -11,6 +11,8 @@ Think of it as a small FM station plus a digital video recorder for sound:
 - The browser is the radio receiver (it plays the live signal).
 - The timeline is the tape (you can rewind, play back history, and jump back to live).
 
+![The control room: the live waveform and transport above the DVR timeline, with the recorder, microphone and storage panels in the right hand rail](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/control-room.png)
+
 If you just want to run it rather than work on it, the two guides to read are
 **[installation and setup](docs/SETUP.md)** and the **[user guide](docs/USER_GUIDE.md)**, which walks
 through every part of the interface with screenshots.
