@@ -17,6 +17,7 @@ Think of it as a small FM station plus a digital video recorder for sound:
 - [How it works](#how-it-works)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Running it as a service](#running-it-as-a-service)
 - [Configuration](#configuration)
 - [Project layout](#project-layout)
 - [Feature status](#feature-status)
@@ -28,8 +29,9 @@ Think of it as a small FM station plus a digital video recorder for sound:
 ## Highlights
 
 - **Single binary service.** The Rust backend serves the REST API, the WebSocket audio stream, and the
-  compiled web UI from one process. Built for macOS, Linux (desktop and headless server), and Windows, see
-  [Requirements](#requirements) for which of those have actually been exercised.
+  compiled web UI from one process, with the UI baked into the executable so a release is one file. Built
+  for macOS, Linux (desktop and headless server), and Windows, see [Requirements](#requirements) for which
+  of those have actually been exercised.
 - **Live broadcast.** Captured audio is fanned out to every connected browser through a WebSocket, so
   several listeners on the LAN hear the same signal at the same time.
 - **Always on recording.** Audio is written to disk in fixed length segments and indexed in SQLite, so the
@@ -75,19 +77,54 @@ Think of it as a small FM station plus a digital video recorder for sound:
 
 ## Requirements
 
+Only to build from source. A release archive needs none of this.
+
 - Rust 1.82 or newer (stable toolchain).
-- Node.js 18 or newer and npm, only needed to build the web UI.
+- Node.js 22 (see [frontend/.nvmrc](frontend/.nvmrc)) and npm, only needed to build the web UI.
 - Linux additionally needs ALSA development headers: `sudo apt install libasound2-dev pkg-config`.
 - macOS and Windows need no extra audio packages (CoreAudio and WASAPI are used through `cpal`).
 
 Portability comes from the dependencies rather than from conditional code: `cpal` covers CoreAudio, ALSA
 and WASAPI behind one API, `rusqlite` bundles SQLite, and there is no platform specific code beyond the
-SIGTERM handler. The service has so far been built and run end to end on macOS. Linux and Windows builds
-are expected to work but have not been exercised yet, which is what the release workflow in milestone 6 is
-for. Cross compiling from macOS is not a substitute, because the bundled SQLite needs a C toolchain for
-the target.
+SIGTERM handler.
+
+Where each platform stands:
+
+| Platform | State |
+| --- | --- |
+| macOS (Apple silicon and Intel) | Built and run end to end, including capture, DVR playback and WAV export |
+| Linux (x86_64) | Built and run end to end in a container: full test suite, and an exported WAV validated with `ffprobe` |
+| Windows (x86_64) | Built and tested by CI only. Nobody has yet run the service on a Windows desktop and listened to it |
+
+The Windows gap is deliberate rather than an oversight. Cross compiling from macOS is not a substitute,
+because the bundled SQLite needs a C toolchain for the target, so the [CI workflow](.github/workflows/ci.yml)
+runs the whole suite on a Windows runner instead. That covers the code but not the audio hardware, which
+is why the row above says what it says.
 
 ## Quick start
+
+### Run a release build
+
+A release build carries the web UI inside the executable, so there is one file to copy and nothing to
+point it at. Download the archive for your platform from the releases page, extract it, and run it:
+
+```bash
+tar -xzf on-air-record-<version>-<target>.tar.gz
+cd on-air-record-<version>-<target>
+./on-air-record
+```
+
+On Windows, extract the `.zip` and run `on-air-record.exe`. macOS will refuse an unsigned download on the
+first attempt; allow it under System Settings, Privacy and Security.
+
+Then open `http://localhost:8080` on the host, or `http://<host-lan-ip>:8080` from any other machine on
+the same network. Recordings and the database are written to `./data` next to wherever you ran it, which
+`--data-dir` moves somewhere sensible.
+
+### Build from source
+
+You need Rust and Node, and the UI must be built first, because a release build embeds whatever is in
+`frontend/dist` at compile time:
 
 ```bash
 # 1. build the web UI
@@ -95,13 +132,10 @@ cd frontend
 npm install
 npm run build
 
-# 2. run the service
+# 2. build and run the service
 cd ../backend
 cargo run --release
 ```
-
-Then open `http://localhost:8080` on the host, or `http://<host-lan-ip>:8080` from any other machine on the
-same network.
 
 For development with hot reload, run the backend and the Vite dev server side by side:
 
@@ -109,6 +143,52 @@ For development with hot reload, run the backend and the Vite dev server side by
 cd backend && cargo run          # terminal 1, API on :8080
 cd frontend && npm run dev       # terminal 2, UI on :5173, proxied to :8080
 ```
+
+A directory given with `--static-dir` always wins over the embedded copy, so a debug build serves whatever
+you last built into `frontend/dist` without a recompile.
+
+## Running it as a service
+
+### Linux, with systemd
+
+[packaging/on-air-record.service](packaging/on-air-record.service) is a unit template, and its header
+comment carries the install commands. The one step that is easy to miss:
+
+```bash
+sudo usermod -aG audio on-air-record
+```
+
+Without membership of the `audio` group the service starts, serves the UI, and lists no input devices at
+all, which looks like a hardware fault rather than a permissions one.
+
+### Windows
+
+There is no service wrapper in the binary, because a code path nobody here can test is worse than a
+documented command. Use the built in service manager:
+
+```powershell
+sc.exe create OnAirRecord binPath= "C:\on-air-record\on-air-record.exe --data-dir C:\on-air-record\data" start= auto
+sc.exe start OnAirRecord
+```
+
+Note the space after each `=`, which `sc.exe` requires. `sc.exe` expects a service aware executable and
+will report a timeout on start even though the process is running, so for anything long lived prefer
+[NSSM](https://nssm.cc/), which supervises an ordinary console program properly and captures its output:
+
+```powershell
+nssm install OnAirRecord C:\on-air-record\on-air-record.exe
+nssm set OnAirRecord AppEnvironmentExtra OAR_DATA_DIR=C:\on-air-record\data
+nssm start OnAirRecord
+```
+
+The Windows audio session belongs to the logged in user, so a service running as `LocalSystem` may see no
+capture devices. Set the service to run as the account whose microphone you want to record.
+
+### macOS
+
+`launchd` will start the binary, but microphone access is granted per application and a background agent
+gets no permission prompt. Recording only works once the binary has been approved under System Settings,
+Privacy and Security, Microphone, which in practice means running it once in a terminal first.
 
 ## Configuration
 
@@ -249,21 +329,20 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Responsive layout that reflows to a single column on narrow screens
 - [x] Timeline bookmarks: name a moment, see it flagged on the timeline and the day overview, jump back
       to it from a list
-- [ ] Multi track view when several sessions overlap
 
 ### Milestone 6: packaging and operations
 
 - [x] Compiled UI served with gzip and a single page app fallback
 - [x] Build instructions page when the UI has not been compiled yet
-- [ ] Embed the compiled UI into the binary for a single file distribution
-- [ ] Verified Linux and Windows builds
-- [ ] Release workflow producing macOS, Linux, and Windows artifacts
-- [ ] Optional systemd unit and Windows service wrapper
+- [x] Embed the compiled UI into the binary for a single file distribution
+- [x] Continuous integration building and testing on macOS, Linux, and Windows
+- [x] Release workflow producing macOS, Linux, and Windows artifacts
+- [x] systemd unit template, with the Windows service wrapper documented
 
 ## Testing
 
 ```bash
-cd backend  && cargo test                              # 110 unit tests
+cd backend  && cargo test                              # 204 unit tests
 cd backend  && cargo clippy --all-targets -- -D warnings
 cd frontend && npm test                                # Vitest, framework free logic
 cd frontend && npm run lint
@@ -292,8 +371,9 @@ What the automated tests do not cover, and what to check by hand after a change 
 
 The two most common first run problems:
 
-- **The page says the web UI has not been built.** The backend is running but `frontend/dist` is missing.
-  Run `npm install && npm run build` in `frontend/`.
+- **The page says the web UI has not been built.** Only a source build can say this, and it means
+  `frontend/dist` is empty. Run `npm install && npm run build` in `frontend/`. A release binary carries
+  its own UI and cannot land here.
 - **No devices are listed on macOS.** The first run triggers a microphone permission prompt. If it was
   denied, enable it under System Settings, Privacy and Security, Microphone, then restart the service.
 

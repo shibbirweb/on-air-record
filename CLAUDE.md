@@ -30,7 +30,7 @@ error. If a build dies there, the wrong Node is active.
 ```sh
 # Backend, from backend/
 cargo run                                    # API on :8080, reads ../frontend/dist
-cargo test                                   # ~126 unit tests
+cargo test                                   # ~204 unit tests
 cargo test day_bounds                        # single test by name substring
 cargo test --lib services::playback_service  # one module
 cargo clippy --all-targets -- -D warnings    # must be clean
@@ -38,8 +38,8 @@ cargo fmt
 
 # Frontend, from frontend/
 npm run dev      # Vite on :5173, proxies /api and the WebSocket to :8080
-npm run build    # tsc -b then vite build, writes dist/ which the backend serves
-npm test         # Vitest, ~39 tests
+npm run build    # tsc -b then vite build, writes dist/, which a release backend embeds
+npm test         # Vitest, ~90 tests
 npm run lint     # oxlint
 ```
 
@@ -166,10 +166,24 @@ hours: insert PCM files and matching segment rows directly into SQLite for past 
 
 ## Platform
 
-Built and exercised on macOS only so far. Linux and Windows should work by construction (`cpal`,
-`rusqlite` bundled, no platform code beyond the SIGTERM handler) but are unverified. Cross compiling from
-macOS does not work, because bundled SQLite needs a C toolchain for the target. Linux additionally needs
-`libasound2-dev`.
+No platform specific code beyond the SIGTERM handler: `cpal` covers CoreAudio, ALSA and WASAPI, and
+`rusqlite` bundles SQLite. What has actually been exercised differs from what compiles:
+
+- **macOS**: built and run end to end, including capture, DVR playback and WAV export.
+- **Linux x86_64**: built and run end to end in a container, full test suite, WAV export validated with
+  `ffprobe`. Needs `libasound2-dev` and `pkg-config`.
+- **Windows x86_64**: built and tested by CI only. Nobody has run it on a Windows desktop. Do not claim
+  otherwise. Cross compiling from macOS cannot close this, because bundled SQLite needs a Windows C
+  toolchain, which is why `.github/workflows/ci.yml` runs the suite on a Windows runner.
+
+## Packaging
+
+A release build embeds `frontend/dist` into the executable, so `npm run build` must precede
+`cargo build --release` or the binary ships a stale UI. `backend/build.rs` creates the directory when it
+is missing and emits `cargo:rerun-if-changed` for it, because a proc macro cannot tell Cargo what it read.
+
+At runtime `routes::static_files` prefers a `--static-dir` containing `index.html`, then the embedded
+copy, then the build instructions page. Debug builds read from disk either way.
 
 ## Further reading
 

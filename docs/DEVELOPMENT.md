@@ -56,7 +56,29 @@ cd ../backend && cargo run --release
 # http://localhost:8080
 ```
 
-The backend serves `../frontend/dist` by default. Point `--static-dir` somewhere else if you relocate it.
+**Order matters.** A release build embeds `frontend/dist` into the executable at compile time, so the UI
+build has to happen first. Build the backend against a stale `dist` and the binary ships a stale UI.
+
+### How the UI is found at runtime
+
+`routes::static_files` tries three things in order:
+
+1. `--static-dir` pointing at a directory that contains `index.html`, served from disk. This is the
+   default in development, where `--static-dir` resolves to `../frontend/dist`, and it is also the escape
+   hatch for swapping the UI on a deployed machine without a recompile.
+2. The copy embedded in the binary, which is what a downloaded release serves.
+3. The build instructions page, when there is neither.
+
+Debug builds do not really embed anything: `rust-embed` reads the same directory from disk, so editing the
+UI never means recompiling the backend. Only a release build carries the assets.
+
+`backend/build.rs` exists for two reasons that are easy to trip over:
+
+- It creates `frontend/dist` if it is missing, because the embed macro will not compile against a folder
+  that does not exist and a fresh clone has no `dist`.
+- It emits `cargo:rerun-if-changed` for that directory. A proc macro cannot tell Cargo what it read, so
+  without this a `cargo build --release` after a UI only change would reuse the previous binary and its
+  previous UI, with nothing to indicate anything was wrong.
 
 ## Useful commands
 
@@ -69,6 +91,22 @@ The backend serves `../frontend/dist` by default. Point `--static-dir` somewhere
 | `npm run build` | Type check with `tsc` and build the UI |
 | `npm test` | Vitest over the framework free frontend logic |
 | `npm run lint` | oxlint over the frontend |
+| `cargo build --release --target <triple>` | What the release workflow runs per platform |
+
+## Continuous integration and releases
+
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request: the
+backend matrix does `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` on
+Ubuntu, macOS and Windows, and a separate job lints, tests and builds the frontend. Ubuntu installs
+`libasound2-dev` because `cpal` links against ALSA there.
+
+The Windows leg is the point of the matrix. It cannot be reproduced locally on macOS, so a change that
+compiles here can still fail there and CI is the only warning you will get.
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs on a `v*` tag and produces one
+archive per target with a `sha256` alongside. The web UI is built once in its own job and shared, so all
+four archives ship identical assets. Trigger it manually with `workflow_dispatch` to rehearse the build
+without publishing anything.
 
 ## Code conventions
 
