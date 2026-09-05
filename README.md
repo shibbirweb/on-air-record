@@ -219,7 +219,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Input level meter on a decibel scale, with a clipping warning
 - [x] Scrubbable CCTV style timeline with recorded coverage shading and a live edge marker
 - [x] Click to seek, drag to pan, scroll to zoom, with a hover time readout
-- [x] Zoom presets from one minute to a day, and a follow live toggle
+- [x] Zoom presets from one minute to a day, a follow live toggle, and a reset to the standard view
 - [x] Twenty four hour minimap under the timeline showing where the visible window sits in the day
 - [x] Drag the window on the minimap, or click it, to move the detailed view
 - [x] Zoom anchored on the marker, and on the pointer when scrolling

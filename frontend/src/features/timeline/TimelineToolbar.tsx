@@ -1,10 +1,11 @@
 /** Zoom levels and the follow live toggle that sit above the scrubber. */
 
-import { LocateFixed, ZoomIn, ZoomOut } from 'lucide-react';
+import { Frame, LocateFixed, ZoomIn, ZoomOut } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DayPicker } from '@/features/timeline/DayPicker';
 import { formatDateTime } from '@/lib/format';
 import { useTimelineStore, ZOOM_LEVELS } from '@/store/useTimelineStore';
@@ -30,6 +31,7 @@ export function TimelineToolbar({ getPlayheadMs }: TimelineToolbarProps) {
   const followingLive = useTimelineStore((state) => state.followingLive);
   const earliestMs = useTimelineStore((state) => state.range?.earliestMs ?? null);
   const zoomTo = useTimelineStore((state) => state.zoomTo);
+  const resetView = useTimelineStore((state) => state.resetView);
   const setFollowingLive = useTimelineStore((state) => state.setFollowingLive);
   const requestedPositionMs = useTransportStore((state) => state.requestedPositionMs);
 
@@ -49,6 +51,20 @@ export function TimelineToolbar({ getPlayheadMs }: TimelineToolbarProps) {
       <DayPicker />
 
       <Separator orientation="vertical" className="mx-1 h-6" />
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon-sm"
+            variant="outline"
+            onClick={() => resetView(getPlayheadMs() ?? requestedPositionMs)}
+            aria-label="Reset the view"
+          >
+            <Frame />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Reset to the standard view</TooltipContent>
+      </Tooltip>
 
       <Button
         size="icon-sm"

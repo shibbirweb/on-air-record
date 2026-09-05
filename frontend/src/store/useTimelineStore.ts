@@ -24,7 +24,16 @@ export const ZOOM_LEVELS = [
   24 * 60 * 60_000,
 ] as const;
 
+/** The span the timeline opens at, and the one the reset button returns to. */
 export const DEFAULT_SPAN_MS = ZOOM_LEVELS[2];
+
+/**
+ * How close to the live edge the playhead must be for a view reset to resume following it.
+ *
+ * Half a minute is comfortably more than the jitter buffer and the segment rollover, so anyone actually
+ * listening to the live feed counts as being at the live edge.
+ */
+const AT_LIVE_TOLERANCE_MS = 30_000;
 
 /** Zoom limits. Ten seconds shows individual words; a week is past the point of being readable. */
 const MIN_SPAN_MS = 10_000;
@@ -70,6 +79,8 @@ type TimelineState = {
 
   /** Rescale the window, holding `anchorMs` in place. Falls back to the centre when no anchor is given. */
   zoomTo: (spanMs: number, anchorMs?: number | null) => void;
+  /** Return to the standard span, framed on whatever is playing. */
+  resetView: (anchorMs?: number | null) => void;
   panBy: (deltaMs: number) => void;
   /** Move the window to start at `startMs`, kept inside the minimap's day. Used by the minimap drag. */
   scrollTo: (startMs: number) => void;
@@ -129,6 +140,31 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // back to the present under their hands.
       followingLive: false,
     })),
+
+  resetView: (anchorMs) => {
+    const state = get();
+    const liveEdgeMs = state.range?.liveEdgeMs ?? null;
+
+    // Standard means standard for what you are listening to. Someone at the live edge wants the live
+    // view back; someone playing yesterday afternoon wants yesterday afternoon at a sane zoom, not to be
+    // thrown forward to the present.
+    const atLive =
+      anchorMs === null ||
+      anchorMs === undefined ||
+      (liveEdgeMs !== null && liveEdgeMs - anchorMs <= AT_LIVE_TOLERANCE_MS);
+
+    if (atLive) {
+      set({ spanMs: DEFAULT_SPAN_MS });
+      get().setFollowingLive(true);
+      return;
+    }
+
+    set({
+      spanMs: DEFAULT_SPAN_MS,
+      followingLive: false,
+      windowStartMs: anchorMs - DEFAULT_SPAN_MS / 2,
+    });
+  },
 
   scrollTo: (startMs) => {
     const state = get();
