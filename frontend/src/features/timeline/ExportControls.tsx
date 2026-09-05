@@ -176,7 +176,10 @@ export function ExportControls() {
             ))}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          {/* Stacked rather than side by side: a 12 hour locale renders these as "05/09/2026, 07:11:08 pm",
+              which needs about 210px. Two of them across a 334px popover clipped the meridiem, so the
+              field read as the wrong half of the day while holding the right value. */}
+          <div className="grid gap-2">
             <div className="space-y-1">
               <Label htmlFor="export-from" className="text-xs">
                 From
