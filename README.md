@@ -28,7 +28,8 @@ Think of it as a small FM station plus a digital video recorder for sound:
 ## Highlights
 
 - **Single binary service.** The Rust backend serves the REST API, the WebSocket audio stream, and the
-  compiled web UI from one process on macOS, Linux (desktop and headless server), and Windows.
+  compiled web UI from one process. Built for macOS, Linux (desktop and headless server), and Windows, see
+  [Requirements](#requirements) for which of those have actually been exercised.
 - **Live broadcast.** Captured audio is fanned out to every connected browser through a WebSocket, so
   several listeners on the LAN hear the same signal at the same time.
 - **Always on recording.** Audio is written to disk in fixed length segments and indexed in SQLite, so the
@@ -41,6 +42,8 @@ Think of it as a small FM station plus a digital video recorder for sound:
   segment, so the UI can draw the waveform for both live audio and history.
 - **Device picker.** All host input devices are enumerated at runtime, and the selected device is persisted
   in SQLite so the service comes back on the same microphone after a restart.
+- **Bounded disk use.** A retention window is enforced by a janitor that prunes expired audio, its index
+  rows, and the directories they leave behind, so an always on recorder cannot quietly fill the disk.
 - **No authentication.** Designed for a trusted local network, so there is nothing to log into.
 
 ## How it works
@@ -151,67 +154,89 @@ on-air-record/
 
 ## Feature status
 
-Legend: `[x]` done, `[~]` in progress, `[ ]` planned.
+Legend: `[x]` done, `[~]` in progress, `[ ]` planned. Everything marked done has been exercised against a
+running service on macOS, see [Testing](#testing) for what that covers and what it does not.
 
 ### Milestone 1: foundations
 
-- [x] Repository scaffolding, README, and developer docs
-- [x] Configuration layer (CLI flags plus environment variables)
-- [x] SQLite connection handling and versioned schema migrations
+- [x] Single binary serving the REST API, the WebSocket, and the compiled web UI
+- [x] Configuration from CLI flags and `OAR_*` environment variables, flags winning
+- [x] SQLite storage in WAL mode with versioned, append only schema migrations
 - [x] Repository layer for settings, sessions, and segments
-- [x] Structured logging and graceful shutdown
+- [x] Structured logging, with a `RUST_LOG` override for targeted debugging
+- [x] Graceful shutdown on Ctrl+C and SIGTERM that flushes and indexes the open segment
+- [x] Startup repair of sessions left open by a previous crash
 
 ### Milestone 2: audio capture
 
-- [x] Cross platform input device enumeration
-- [x] Microphone capture through `cpal` with automatic format negotiation
-- [x] Downmix to mono and conversion to 16 bit PCM
-- [x] Software gain control
+- [x] Cross platform input device enumeration (CoreAudio, ALSA, WASAPI)
+- [x] Capture through `cpal` with automatic sample format and sample rate negotiation
+- [x] Downmix to mono and conversion to 16 bit PCM, clipping rather than wrapping on overload
+- [x] Software gain applied to the live signal without reopening the device
 - [x] Hot swap of the input device without restarting the service
+- [x] Fixed duration framing with sample derived timestamps and wall clock drift correction
 - [x] Capture level metering (RMS and peak)
+- [x] Dropped frame accounting when the recorder cannot keep up
+- [x] Optional automatic capture on service start
 
 ### Milestone 3: recording and storage
 
 - [x] Continuous segmented recorder writing raw PCM to disk
 - [x] Day based storage layout, `recordings/<YYYY-MM-DD>/<session>/`
-- [x] Segment index in SQLite with precise time ranges
-- [x] Waveform peak envelope computed while recording
-- [x] Retention janitor that prunes segments past the retention window
-- [x] Storage usage reporting
+- [x] Segment index in SQLite with precise time ranges and an indexed calendar day
+- [x] A fresh segment on any timeline discontinuity, so stored byte offsets never lie
+- [x] Waveform peak envelope computed during recording, one byte per 100 ms bucket
+- [x] Retention janitor pruning expired segments, index rows, and emptied directories
+- [x] Storage, session, and history depth reporting
 - [ ] Opus compression for segments instead of raw PCM
 - [ ] Export a time range as a downloadable WAV file
 
 ### Milestone 4: streaming
 
-- [x] Binary WebSocket framing protocol for PCM audio
-- [x] Live fan out to multiple simultaneous listeners
+- [x] Binary WebSocket framing protocol for PCM audio, format carried per frame
+- [x] Live fan out to any number of simultaneous listeners from one capture
+- [x] Slow listeners resynchronised rather than disconnected, never stalling the recorder
 - [x] DVR playback of stored segments paced at real time
 - [x] Seek to an arbitrary timestamp inside the retention window
-- [x] Automatic hand off from history back to the live edge
+- [x] Recording gaps reported to the client rather than silently skipped
+- [x] Automatic hand off from history back to the live edge on catching up
 - [x] Playback transport controls (pause, resume, jump to live)
+- [x] Keep alive ping and pong so idle connections survive proxies
 - [ ] Variable speed playback
 - [ ] Plain HTTP progressive stream for non JavaScript clients
 
 ### Milestone 5: web UI
 
-- [x] Vite, React, TypeScript, Tailwind, and shadcn/ui setup
-- [x] Zustand stores for connection, transport, devices, and settings
-- [x] Web Audio playback scheduler with jitter buffer
-- [x] Live waveform visualiser
-- [x] Scrubbable CCTV style timeline with recorded range shading
-- [x] Day picker that jumps the timeline to a chosen day and plays from its first moment
-- [x] Cue marker showing the selected moment before playback has started
+- [x] Vite, React 19, TypeScript, Tailwind v4, and shadcn/ui setup
+- [x] Zustand stores sliced by concern: status, connection, transport, devices, settings, timeline, storage
+- [x] Web Audio scheduler with a jitter buffer and gapless frame to frame scheduling
+- [x] Automatic reconnection with exponential backoff when the service restarts
+- [x] Live waveform visualiser driven by the audio actually being played
+- [x] Input level meter on a decibel scale, with a clipping warning
+- [x] Scrubbable CCTV style timeline with recorded coverage shading and a live edge marker
+- [x] Click to seek, drag to pan, scroll to zoom, with a hover time readout
+- [x] Zoom presets from one minute to a day, and a follow live toggle
 - [x] Zoom anchored on the marker, and on the pointer when scrolling
-- [x] Input device selector backed by the settings API
-- [x] Recorder and listener status panel
-- [x] Settings panel (gain, retention, segment length, auto start)
-- [x] Dark first responsive layout
+- [x] Cue marker showing the selected moment before playback has started
+- [x] Day picker that jumps the timeline to a chosen day and plays from its first moment
+- [x] Transport controls: play, pause, jump back thirty seconds, go live
+- [x] Volume slider and mute
+- [x] On air indicator and live listener count
+- [x] Input device selector marking the system default and any unplugged device
+- [x] Recorder panel: state, elapsed time, format, session, dropped frames, link health
+- [x] Storage panel with disk usage, history depth, retention, and recent sessions
+- [x] Settings panel for gain, retention, segment length, and automatic start
+- [x] Light and dark themes with a toggle, remembered per browser
+- [x] Responsive layout that reflows to a single column on narrow screens
 - [ ] Timeline bookmarks and named markers
 - [ ] Multi track view when several sessions overlap
 
-### Milestone 6: packaging
+### Milestone 6: packaging and operations
 
+- [x] Compiled UI served with gzip and a single page app fallback
+- [x] Build instructions page when the UI has not been compiled yet
 - [ ] Embed the compiled UI into the binary for a single file distribution
+- [ ] Verified Linux and Windows builds
 - [ ] Release workflow producing macOS, Linux, and Windows artifacts
 - [ ] Optional systemd unit and Windows service wrapper
 
