@@ -31,6 +31,7 @@ export function TransportBar({ getPlayheadMs }: TransportBarProps) {
   const volume = useTransportStore((state) => state.volume);
   const muted = useTransportStore((state) => state.muted);
   const endOfRecording = useTransportStore((state) => state.endOfRecording);
+  const requestedPositionMs = useTransportStore((state) => state.requestedPositionMs);
   const play = useTransportStore((state) => state.play);
   const pause = useTransportStore((state) => state.pause);
   const goLive = useTransportStore((state) => state.goLive);
@@ -48,7 +49,9 @@ export function TransportBar({ getPlayheadMs }: TransportBarProps) {
   const [behind, setBehind] = useState(false);
 
   useAnimationFrame(() => {
-    const playhead = getPlayheadMs();
+    // Same fallback as the timeline marker: show the moment that was asked for until the audio clock has
+    // something better, so the readout and the marker always agree.
+    const playhead = getPlayheadMs() ?? requestedPositionMs;
     const nextClock = formatClock(playhead);
     if (nextClock !== playheadLabel) {
       setPlayheadLabel(nextClock);
@@ -113,7 +116,7 @@ export function TransportBar({ getPlayheadMs }: TransportBarProps) {
       <div className="flex items-baseline gap-2">
         <span className="text-lg font-semibold tabular">{playheadLabel}</span>
         {!playing ? (
-          <Badge variant="outline">not playing</Badge>
+          <Badge variant="outline">{requestedPositionMs === null ? 'not playing' : 'cued'}</Badge>
         ) : behind || mode === 'playback' ? (
           <Badge variant="secondary">{offsetLabel}</Badge>
         ) : (

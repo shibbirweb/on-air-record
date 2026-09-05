@@ -53,17 +53,22 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
   const panBy = useTimelineStore((state) => state.panBy);
   const setSpan = useTimelineStore((state) => state.setSpan);
   const seek = useTransportStore((state) => state.seek);
+  // Where the listener asked to be. Set the moment the timeline is clicked, long before the audio graph
+  // has anything to say about it.
+  const requestedPositionMs = useTransportStore((state) => state.requestedPositionMs);
 
   // The draw loop runs outside React, so everything it reads is mirrored into refs and refreshed after
   // each render. Without this the loop would close over the values from the render that started it.
   const viewRef = useRef({ windowStartMs, spanMs });
   const dataRef = useRef({ peaks, range });
   const hoverRef = useRef<number | null>(null);
+  const cueRef = useRef<number | null>(requestedPositionMs);
 
   useEffect(() => {
     viewRef.current = { windowStartMs, spanMs };
     dataRef.current = { peaks, range };
     hoverRef.current = hoverMs;
+    cueRef.current = requestedPositionMs;
   });
 
   const draw = useCallback(() => {
@@ -107,6 +112,7 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
       wave: readCssColor(container, '--wave', '#f0a'),
       live: readCssColor(container, '--live', '#f33'),
       playhead: readCssColor(container, '--foreground', '#fff'),
+      surface: readCssColor(container, '--card', '#111'),
     };
 
     const waveTop = RULER_HEIGHT;
@@ -197,10 +203,19 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
       context.globalAlpha = 1;
     }
 
-    const playhead = getPlayheadMs();
-    if (playhead !== null) {
-      const x = timeToX(playhead, view);
+    // The audio clock is authoritative once it is running. Before that, and in the gap right after a seek
+    // while the jitter buffer refills, fall back to the position that was asked for. Without the fallback
+    // clicking the timeline while stopped moves the server but draws nothing, which reads as a dead click.
+    const audioPlayheadMs = getPlayheadMs();
+    const markerMs = audioPlayheadMs ?? cueRef.current;
+
+    if (markerMs !== null) {
+      const x = timeToX(markerMs, view);
       if (x >= -8 && x <= width + 8) {
+        // Filled head means audio is actually coming out here. Hollow means cued and waiting for play.
+        const playing = audioPlayheadMs !== null;
+
+        context.globalAlpha = playing ? 1 : 0.85;
         context.strokeStyle = colours.playhead;
         context.lineWidth = 2;
         context.beginPath();
@@ -208,13 +223,23 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
         context.lineTo(x, HEIGHT);
         context.stroke();
 
-        context.fillStyle = colours.playhead;
         context.beginPath();
         context.moveTo(x - 5, waveTop);
         context.lineTo(x + 5, waveTop);
-        context.lineTo(x, waveTop + 6);
+        context.lineTo(x, waveTop + 7);
         context.closePath();
-        context.fill();
+
+        if (playing) {
+          context.fillStyle = colours.playhead;
+          context.fill();
+        } else {
+          context.fillStyle = colours.surface;
+          context.fill();
+          context.lineWidth = 1.5;
+          context.stroke();
+        }
+
+        context.globalAlpha = 1;
       }
     }
   }, [getPlayheadMs]);
