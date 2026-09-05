@@ -19,7 +19,6 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { createInterface } from 'node:readline/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -339,6 +338,9 @@ async function commandBump(requested) {
       return 2;
     }
 
+    // Imported here rather than at the top: node:readline/promises needs Node 17, and only this one
+    // branch prompts. `show`, `check` and `pending` have to keep working on whatever node is lying around.
+    const { createInterface } = await import('node:readline/promises');
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const answer = (await rl.question(`\nWhich? [${levels.indexOf(suggested) + 1}] `)).trim();
     rl.close();

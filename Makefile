@@ -31,7 +31,7 @@ tools: ## Check the toolchains are present and report how to fix them
 	@echo "cargo $$(cargo --version | awk '{print $$2}'), node $$(node --version)"
 	@major=$$(node -p 'process.versions.node.split(".")[0]'); \
 	if [ "$$major" -lt 20 ]; then \
-		echo 'That node is too old for the frontend build. Run: cd frontend && nvm use'; \
+		echo 'That node is too old. Run: cd frontend && nvm use'; \
 	else \
 		echo 'Both are usable.'; \
 	fi
@@ -41,7 +41,8 @@ tools: ## Check the toolchains are present and report how to fix them
 node-version:
 	@major=$$(node -p 'process.versions.node.split(".")[0]'); \
 	if [ "$$major" -lt 20 ]; then \
-		echo "Node $$(node --version) is too old and the build will fail with a styleText error."; \
+		echo "Node $$(node --version) is too old: the frontend build fails with an unhelpful"; \
+		echo 'styleText error, and the scripts in scripts/ want Node 18 or newer.'; \
 		echo 'Run: cd frontend && nvm use'; \
 		exit 1; \
 	fi
@@ -88,16 +89,16 @@ check: node-version ## Everything CI checks, before you push
 	@echo ''
 	@echo 'All clear.'
 
-version: ## Print the version the service reports
+version: node-version ## Print the version the service reports
 	@node scripts/version.mjs show
 
-pending: ## Say whether a release is due, and what it would be numbered
+pending: node-version ## Say whether a release is due, and what it would be numbered
 	@node scripts/version.mjs pending
 
-release: ## Choose the next version and move all four manifests
+release: node-version ## Choose the next version and move all four manifests
 	@node scripts/version.mjs bump
 
-wiki: ## Build the wiki pages into /tmp/wiki-preview to see what would be published
+wiki: node-version ## Build the wiki pages into /tmp/wiki-preview to see what would be published
 	node scripts/build-wiki.mjs /tmp/wiki-preview
 
 install-preview: ## Run the installer into /tmp, to try what a user gets
