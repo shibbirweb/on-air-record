@@ -236,7 +236,9 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Projected disk needed for the chosen window, from the exact recording rate
 - [x] Configurable recording directory, validated for writability before it is accepted
 - [x] Settings panel for gain, segment length, and automatic start
-- [x] Reset to defaults, with a confirmation that warns when it would shorten retention and delete audio
+- [x] Explicit save: edits are staged, counted, and committed in one request, with Discard to abandon them
+- [x] Restore defaults stages the defaults for review rather than applying them straight away
+- [x] Saving asks first when it would shorten retention and delete audio
 - [x] Light and dark themes with a toggle, remembered per browser
 - [x] Responsive layout that reflows to a single column on narrow screens
 - [ ] Timeline bookmarks and named markers

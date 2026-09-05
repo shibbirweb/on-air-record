@@ -138,11 +138,16 @@ Rules:
   | `useConnectionStore` | WebSocket liveness, the negotiated stream format, the input meter |
   | `useTransportStore` | Play state, mode, volume, and the transport actions |
   | `useDeviceStore` | The host input list and the current selection |
-  | `useSettingsStore` | Runtime preferences, updated optimistically |
+  | `useSettingsStore` | Runtime preferences, plus the unsaved draft of the settings page |
   | `useTimelineStore` | The visible window, coverage bands, recorded days and the fetched envelope |
   | `useStorageStore` | Disk usage and recent sessions |
 - High frequency data (audio frames, level meters, playhead position at 60fps) bypasses React state and is
   pushed through refs and imperative canvas drawing. Only low frequency state changes go through Zustand.
+- The settings page is explicit save. Edits accumulate in `useSettingsStore.draft`, which holds only the
+  fields that differ from what is stored, so a value edited back to its original stops counting. One
+  request commits the lot, and the server applies it atomically: a rejected recording directory leaves
+  every other pending change unsaved rather than half applying them. The draft lives in the store, not the
+  page, so navigating away and back does not discard work in progress.
 - The imperative half of the transport is registered into the store rather than imported by it.
   `useStreamEngine` builds the socket and the audio graph, then calls `attachController`, so any component
   can call `seek` without being handed a WebSocket and the store stays free of side effects.

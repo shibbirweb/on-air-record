@@ -9,6 +9,7 @@ import { useEffect } from 'react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { RecordingLocation } from '@/features/settings/RecordingLocation';
+import { SettingsActionBar } from '@/features/settings/SettingsActionBar';
 import { RetentionSettings } from '@/features/settings/RetentionSettings';
 import { SettingsPanel } from '@/features/settings/SettingsPanel';
 import { usePolling } from '@/hooks/usePolling';
@@ -23,7 +24,11 @@ export function SettingsPage() {
   const refreshStorage = useStorageStore((state) => state.refresh);
 
   useEffect(() => {
-    void refreshSettings();
+    // Only pull from the server when there is nothing pending, or a refresh would overwrite edits that
+    // have not been saved yet.
+    if (Object.keys(useSettingsStore.getState().draft).length === 0) {
+      void refreshSettings();
+    }
   }, [refreshSettings]);
 
   usePolling(refreshStorage, STORAGE_POLL_MS);
@@ -33,7 +38,7 @@ export function SettingsPage() {
       <div className="space-y-1">
         <h2 className="text-xl font-semibold">Settings</h2>
         <p className="text-muted-foreground text-sm">
-          Changes are saved as you make them and persist across restarts.
+          Edits are held until you save them. Nothing reaches the recorder before that.
         </p>
       </div>
 
@@ -68,6 +73,8 @@ export function SettingsPage() {
           <SettingsPanel />
         </CardContent>
       </Card>
+
+      <SettingsActionBar />
     </main>
   );
 }

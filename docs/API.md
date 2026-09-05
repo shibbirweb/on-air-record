@@ -140,7 +140,9 @@ precisely what a reset will change rather than keeping a second copy of the defa
 
 ### `POST /api/settings/reset`
 
-Restores the defaults and returns the new settings. Takes no body.
+Restores the defaults and returns the new settings. Takes no body. Provided for scripting: the web UI
+stages the defaults into its draft and commits them through `PATCH` instead, so that a reset is reviewed
+and saved like any other change.
 
 The selected `inputDeviceId` is **preserved**, because the microphone is chosen elsewhere and silently
 moving the recorder onto another one is not what resetting the tuning asks for. As with `PATCH`, capture

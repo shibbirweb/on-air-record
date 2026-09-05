@@ -52,8 +52,8 @@ function toHours(amount: number, unit: Unit): number {
 
 export function RetentionSettings() {
   const settings = useSettingsStore((state) => state.settings);
-  const saving = useSettingsStore((state) => state.saving);
-  const update = useSettingsStore((state) => state.update);
+  const draft = useSettingsStore((state) => state.draft);
+  const edit = useSettingsStore((state) => state.edit);
   const storage = useStorageStore((state) => state.storage);
 
   /**
@@ -68,10 +68,13 @@ export function RetentionSettings() {
     return <p className="text-muted-foreground text-sm">Loading...</p>;
   }
 
-  const forever = settings.retentionHours === null;
+  // Merged in the component rather than in a selector: a selector returning a fresh object every call
+  // would make the store snapshot look like it changed on every render.
+  const pending = { ...settings, ...draft };
+  const forever = pending.retentionHours === null;
   const bytesPerHour = storage?.bytesPerHour ?? 0;
 
-  const storedHours = settings.retentionHours ?? 24;
+  const storedHours = pending.retentionHours ?? 24;
   const unit = unitChoice ?? splitWindow(storedHours).unit;
   const shownAmount =
     amountEdit ??
@@ -82,16 +85,16 @@ export function RetentionSettings() {
     Number.isFinite(parsedAmount) && parsedAmount > 0 ? toHours(parsedAmount, unit) : null;
 
   // Project the window being edited, not the one that is saved, so the number moves with the input.
-  const projectedHours = forever ? null : (draftHours ?? settings.retentionHours);
+  const projectedHours = forever ? null : (draftHours ?? pending.retentionHours);
   const projectedBytes = projectedHours === null ? null : projectedHours * bytesPerHour;
   const usedBytes = storage?.bytes ?? 0;
 
   const applyWindow = (hours: number | null) => {
-    void update({ retentionHours: hours });
+    edit({ retentionHours: hours });
   };
 
   const commitDraft = () => {
-    if (draftHours !== null && draftHours !== settings.retentionHours) {
+    if (draftHours !== null && draftHours !== pending.retentionHours) {
       applyWindow(draftHours);
     }
     setAmountEdit(null);
@@ -160,7 +163,7 @@ export function RetentionSettings() {
               <Button
                 key={preset.hours}
                 size="sm"
-                variant={settings.retentionHours === preset.hours ? 'secondary' : 'outline'}
+                variant={pending.retentionHours === preset.hours ? 'secondary' : 'outline'}
                 className="h-7"
                 onClick={() => {
                   setAmountEdit(null);
@@ -233,7 +236,6 @@ export function RetentionSettings() {
         )}
       </div>
 
-      {saving && <p className="text-muted-foreground text-xs">Saving...</p>}
     </div>
   );
 }
