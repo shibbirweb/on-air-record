@@ -13,6 +13,7 @@ pub mod frame_builder;
 pub mod peaks;
 pub mod resampler;
 pub mod segment_writer;
+pub mod wav;
 
 pub use capture::{CaptureHandle, CaptureOptions, CaptureRuntime, GainControl};
 pub use device_registry::DeviceRegistry;

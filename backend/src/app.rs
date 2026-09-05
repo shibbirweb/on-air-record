@@ -14,7 +14,7 @@ use crate::repositories::{
     BookmarkRepository, SegmentRepository, SessionRepository, SettingsRepository,
 };
 use crate::services::{
-    BookmarkService, BroadcastHub, CaptureService, DeviceService, PlaybackService,
+    BookmarkService, BroadcastHub, CaptureService, DeviceService, ExportService, PlaybackService,
     RetentionService, SettingsService, TimelineService,
 };
 use crate::util::time::now_ms;
@@ -29,6 +29,7 @@ pub struct AppState {
     pub retention: Arc<RetentionService>,
     pub hub: Arc<BroadcastHub>,
     pub bookmarks: Arc<BookmarkService>,
+    pub export: Arc<ExportService>,
     pub sessions: Arc<SessionRepository>,
     pub segments: Arc<SegmentRepository>,
     pub encoder: Arc<dyn FrameEncoder>,
@@ -74,6 +75,7 @@ impl AppState {
         let devices = Arc::new(DeviceService::new(settings.clone(), capture.clone()));
         let playback = Arc::new(PlaybackService::new(config.clone(), segments.clone()));
         let timeline = Arc::new(TimelineService::new(segments.clone(), hub.clone()));
+        let export = Arc::new(ExportService::new(segments.clone(), playback.clone()));
         let retention = Arc::new(RetentionService::new(
             config.clone(),
             settings.clone(),
@@ -92,6 +94,7 @@ impl AppState {
             retention,
             hub,
             bookmarks,
+            export,
             sessions,
             segments,
             encoder,

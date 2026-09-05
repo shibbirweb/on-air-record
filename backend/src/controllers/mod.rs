@@ -7,6 +7,7 @@
 pub mod bookmark_controller;
 pub mod capture_controller;
 pub mod device_controller;
+pub mod export_controller;
 pub mod session_controller;
 pub mod settings_controller;
 pub mod status_controller;

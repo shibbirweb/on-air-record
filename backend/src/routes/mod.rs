@@ -17,8 +17,9 @@ use tower_http::trace::TraceLayer;
 
 use crate::app::AppState;
 use crate::controllers::{
-    bookmark_controller, capture_controller, device_controller, session_controller,
-    settings_controller, status_controller, stream_controller, timeline_controller,
+    bookmark_controller, capture_controller, device_controller, export_controller,
+    session_controller, settings_controller, status_controller, stream_controller,
+    timeline_controller,
 };
 
 /// Build the complete application router.
@@ -53,6 +54,8 @@ pub fn build(state: Arc<AppState>) -> Router {
         )
         .route("/sessions", get(session_controller::list))
         .route("/storage", get(session_controller::storage))
+        .route("/export", get(export_controller::download))
+        .route("/export/plan", get(export_controller::plan))
         .route("/ws/stream", get(stream_controller::stream))
         .with_state(state.clone());
 

@@ -116,3 +116,39 @@ impl From<RecordingDay> for RecordingDayDto {
 pub struct RecordingDaysResponse {
     pub days: Vec<RecordingDayDto>,
 }
+
+/// Query string of both export endpoints.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportQuery {
+    pub from_ms: i64,
+    pub to_ms: i64,
+}
+
+/// What an export would produce, so the UI can show it before committing to a download.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPlanResponse {
+    pub from_ms: i64,
+    pub to_ms: i64,
+    pub duration_ms: i64,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub total_bytes: i64,
+    /// True when the range spans more than one recording rate and will be exported at the lowest.
+    pub mixed_rates: bool,
+}
+
+impl From<crate::services::ExportPlan> for ExportPlanResponse {
+    fn from(plan: crate::services::ExportPlan) -> Self {
+        Self {
+            from_ms: plan.range.start_ms,
+            to_ms: plan.range.end_ms,
+            duration_ms: plan.duration_ms(),
+            sample_rate: plan.sample_rate,
+            channels: plan.channels,
+            total_bytes: plan.total_bytes as i64,
+            mixed_rates: plan.mixed_rates,
+        }
+    }
+}
