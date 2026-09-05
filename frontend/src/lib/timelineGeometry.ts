@@ -30,7 +30,7 @@ export function xToTime(x: number, view: TimelineWindow): number {
 
 /** Nice tick intervals, from one second to one day. */
 const TICK_STEPS_MS = [
-  1_000, 5_000, 10_000, 30_000,
+  1_000, 5_000, 10_000, 15_000, 30_000,
   60_000, 5 * 60_000, 10 * 60_000, 15 * 60_000, 30 * 60_000,
   3_600_000, 3 * 3_600_000, 6 * 3_600_000, 12 * 3_600_000,
   24 * 3_600_000,
