@@ -10,6 +10,7 @@ import { create } from 'zustand';
 
 import { api, ApiError } from '@/api/client';
 import type { CoverageBand, Peaks, RecordingDay, TimelineRange } from '@/api/types';
+import { zoomWindow } from '@/lib/timelineGeometry';
 
 /** Selectable zoom levels, in milliseconds of visible span. */
 export const ZOOM_LEVELS = [
@@ -23,6 +24,10 @@ export const ZOOM_LEVELS = [
 ] as const;
 
 export const DEFAULT_SPAN_MS = ZOOM_LEVELS[2];
+
+/** Zoom limits. Ten seconds shows individual words; a week is past the point of being readable. */
+const MIN_SPAN_MS = 10_000;
+const MAX_SPAN_MS = 7 * 24 * 3_600_000;
 
 /** Columns requested per fetch. More than a wide screen has pixels is wasted bandwidth. */
 const PEAK_BUCKETS = 1200;
@@ -45,7 +50,8 @@ type TimelineState = {
   /** The day entry the visible window sits in, if any. */
   activeDay: () => RecordingDay | null;
 
-  setSpan: (spanMs: number) => void;
+  /** Rescale the window, holding `anchorMs` in place. Falls back to the centre when no anchor is given. */
+  zoomTo: (spanMs: number, anchorMs?: number | null) => void;
   panBy: (deltaMs: number) => void;
   centreOn: (timestampMs: number) => void;
   setFollowingLive: (following: boolean) => void;
@@ -76,13 +82,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     );
   },
 
-  setSpan: (spanMs) => {
+  zoomTo: (spanMs, anchorMs) => {
     const state = get();
-    // Zoom around the middle of what is on screen, which is what the eye expects, rather than around the
-    // left edge, which would slide the content sideways as well as scale it.
-    const centre = state.windowStartMs + state.spanMs / 2;
-    const clamped = Math.min(Math.max(spanMs, 10_000), 7 * 24 * 3_600_000);
-    set({ spanMs: clamped, windowStartMs: centre - clamped / 2 });
+    // The limits are policy and live here; holding the anchor is geometry and lives in lib.
+    const clamped = Math.min(Math.max(spanMs, MIN_SPAN_MS), MAX_SPAN_MS);
+    const zoomed = zoomWindow(
+      { startMs: state.windowStartMs, spanMs: state.spanMs },
+      clamped,
+      anchorMs,
+    );
+
+    set({ spanMs: zoomed.spanMs, windowStartMs: zoomed.startMs });
   },
 
   panBy: (deltaMs) =>
@@ -131,7 +141,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
     const dayLengthMs = entry.dayEndMs - entry.dayStartMs;
     const recordedSpanMs = Math.max(entry.endMs - entry.startMs, 0);
-    const spanMs = Math.min(Math.max(recordedSpanMs * 1.1, 5 * 60_000), dayLengthMs);
+    const spanMs = Math.min(
+      Math.max(recordedSpanMs * 1.1, 5 * 60_000, MIN_SPAN_MS),
+      dayLengthMs,
+      MAX_SPAN_MS,
+    );
     const centreMs = (entry.startMs + entry.endMs) / 2;
 
     set({

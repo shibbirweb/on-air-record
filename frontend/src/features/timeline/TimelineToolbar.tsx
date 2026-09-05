@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { DayPicker } from '@/features/timeline/DayPicker';
 import { formatDateTime } from '@/lib/format';
 import { useTimelineStore, ZOOM_LEVELS } from '@/store/useTimelineStore';
+import { useTransportStore } from '@/store/useTransportStore';
 
 const ZOOM_LABELS: Record<number, string> = {
   [ZOOM_LEVELS[0]]: '1m',
@@ -19,12 +20,29 @@ const ZOOM_LABELS: Record<number, string> = {
   [ZOOM_LEVELS[6]]: '24h',
 };
 
-export function TimelineToolbar() {
+type TimelineToolbarProps = {
+  /** Reads the live playhead off the audio clock, same source the marker is drawn from. */
+  getPlayheadMs: () => number | null;
+};
+
+export function TimelineToolbar({ getPlayheadMs }: TimelineToolbarProps) {
   const spanMs = useTimelineStore((state) => state.spanMs);
   const followingLive = useTimelineStore((state) => state.followingLive);
   const earliestMs = useTimelineStore((state) => state.range?.earliestMs ?? null);
-  const setSpan = useTimelineStore((state) => state.setSpan);
+  const zoomTo = useTimelineStore((state) => state.zoomTo);
   const setFollowingLive = useTimelineStore((state) => state.setFollowingLive);
+  const requestedPositionMs = useTransportStore((state) => state.requestedPositionMs);
+
+  /**
+   * Zoom about the marker rather than the middle of the view.
+   *
+   * Read in the handler rather than during render, because the audio clock is a moving external value.
+   * The fallback chain matches how the marker itself is drawn: the audio playhead if something is
+   * playing, otherwise the moment that was cued, otherwise nothing and the window centre is used.
+   */
+  const zoom = (spanMs: number) => {
+    zoomTo(spanMs, getPlayheadMs() ?? requestedPositionMs);
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -35,7 +53,7 @@ export function TimelineToolbar() {
       <Button
         size="icon-sm"
         variant="outline"
-        onClick={() => setSpan(spanMs * 0.5)}
+        onClick={() => zoom(spanMs * 0.5)}
         aria-label="Zoom in"
       >
         <ZoomIn />
@@ -43,7 +61,7 @@ export function TimelineToolbar() {
       <Button
         size="icon-sm"
         variant="outline"
-        onClick={() => setSpan(spanMs * 2)}
+        onClick={() => zoom(spanMs * 2)}
         aria-label="Zoom out"
       >
         <ZoomOut />
@@ -55,7 +73,7 @@ export function TimelineToolbar() {
             key={level}
             size="sm"
             variant={Math.abs(spanMs - level) < level * 0.05 ? 'secondary' : 'ghost'}
-            onClick={() => setSpan(level)}
+            onClick={() => zoom(level)}
           >
             {ZOOM_LABELS[level]}
           </Button>

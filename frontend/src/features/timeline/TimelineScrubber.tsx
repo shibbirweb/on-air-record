@@ -51,7 +51,7 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
   const peaks = useTimelineStore((state) => state.peaks);
   const range = useTimelineStore((state) => state.range);
   const panBy = useTimelineStore((state) => state.panBy);
-  const setSpan = useTimelineStore((state) => state.setSpan);
+  const zoomTo = useTimelineStore((state) => state.zoomTo);
   const seek = useTransportStore((state) => state.seek);
   // Where the listener asked to be. Set the moment the timeline is clicked, long before the audio graph
   // has anything to say about it.
@@ -254,7 +254,11 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
     return () => observer.disconnect();
   }, [draw]);
 
-  const pointerTime = (event: React.PointerEvent<HTMLCanvasElement>): number => {
+  /** The moment under the cursor. Takes any event carrying a horizontal position, pointer or wheel. */
+  const pointerTime = (event: {
+    clientX: number;
+    currentTarget: HTMLCanvasElement;
+  }): number => {
     const bounds = event.currentTarget.getBoundingClientRect();
     return xToTime(event.clientX - bounds.left, {
       startMs: viewRef.current.windowStartMs,
@@ -310,8 +314,10 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
     if (event.deltaY === 0) {
       return;
     }
+    // Anchored on the pointer, not the marker: scroll to zoom is a direct manipulation gesture, so the
+    // moment under the cursor is the one that should stay put.
     const factor = event.deltaY > 0 ? 1.25 : 0.8;
-    setSpan(viewRef.current.spanMs * factor);
+    zoomTo(viewRef.current.spanMs * factor, pointerTime(event));
   };
 
   return (

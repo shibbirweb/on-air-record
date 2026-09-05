@@ -28,6 +28,39 @@ export function xToTime(x: number, view: TimelineWindow): number {
   return view.startMs + (x / view.width) * view.spanMs;
 }
 
+/**
+ * Rescale the window while holding `anchorMs` at the same place on screen.
+ *
+ * This is what makes zooming feel like a magnifying glass rather than a jump cut: the moment you care
+ * about stays under the same pixel and the timeline grows or shrinks around it. Zooming about the centre
+ * instead slides whatever you were looking at towards an edge and eventually off it.
+ *
+ * An anchor outside the window is centred rather than held in place. Holding it would mean extrapolating
+ * the view far off to one side, which at high zoom lands the user somewhere they cannot see.
+ *
+ * `nextSpanMs` is expected to be clamped already: the limits are a policy of the store, not of geometry.
+ */
+export function zoomWindow(
+  current: { startMs: number; spanMs: number },
+  nextSpanMs: number,
+  anchorMs?: number | null,
+): { startMs: number; spanMs: number } {
+  if (nextSpanMs <= 0 || current.spanMs <= 0) {
+    return { startMs: current.startMs, spanMs: nextSpanMs };
+  }
+
+  const centreMs = current.startMs + current.spanMs / 2;
+  const anchor = anchorMs ?? centreMs;
+
+  const fraction = (anchor - current.startMs) / current.spanMs;
+  const held = fraction >= 0 && fraction <= 1 ? fraction : 0.5;
+
+  return {
+    startMs: anchor - nextSpanMs * held,
+    spanMs: nextSpanMs,
+  };
+}
+
 /** Nice tick intervals, from one second to one day. */
 const TICK_STEPS_MS = [
   1_000, 5_000, 10_000, 15_000, 30_000,

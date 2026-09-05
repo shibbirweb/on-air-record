@@ -146,7 +146,7 @@ export function ControlRoom() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <TimelineToolbar />
+              <TimelineToolbar getPlayheadMs={playheadMs} />
               <TimelineScrubber getPlayheadMs={playheadMs} />
             </CardContent>
           </Card>

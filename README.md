@@ -201,6 +201,7 @@ Legend: `[x]` done, `[~]` in progress, `[ ]` planned.
 - [x] Scrubbable CCTV style timeline with recorded range shading
 - [x] Day picker that jumps the timeline to a chosen day and plays from its first moment
 - [x] Cue marker showing the selected moment before playback has started
+- [x] Zoom anchored on the marker, and on the pointer when scrolling
 - [x] Input device selector backed by the settings API
 - [x] Recorder and listener status panel
 - [x] Settings panel (gain, retention, segment length, auto start)

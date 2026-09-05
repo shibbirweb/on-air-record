@@ -110,10 +110,15 @@ export function useStreamEngine(): StreamEngine {
       },
       seek: (timestampMs) => {
         engine.flush();
+        // Jumping to a moment means the timeline should stop chasing the present. Without this the next
+        // range poll drags the window back to the live edge a couple of seconds later, undoing both the
+        // scroll and any zoom the listener anchored on that moment.
+        useTimelineStore.getState().setFollowingLive(false);
         socket.send({ type: 'seek', timestampMs: Math.round(timestampMs) });
       },
       goLive: () => {
         engine.flush();
+        useTimelineStore.getState().setFollowingLive(true);
         socket.send({ type: 'live' });
       },
       setVolume: (volume) => engine.setVolume(volume),

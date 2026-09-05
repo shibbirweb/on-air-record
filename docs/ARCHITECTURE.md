@@ -171,6 +171,12 @@ Rules:
    the requested bucket count.
 3. The canvas draws the envelope, the recorded coverage bands, the playhead, and the live edge.
 
+The window is the only state the timeline really has, and every navigation is a transform of it: `panBy`
+slides it, `zoomTo` rescales it about an anchor, `showDay` fits it to a day. The anchor is what stops
+zooming from throwing away the moment the operator is looking at, so the toolbar passes the marker and the
+scroll wheel passes the pointer. Any navigation to a specific moment also clears `followingLive`, or the
+next range poll would drag the window back to the live edge and undo it.
+
 ## 7. Extension points
 
 | I want to | Touch this |
