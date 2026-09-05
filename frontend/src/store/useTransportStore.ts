@@ -21,6 +21,7 @@ export type TransportController = {
   goLive: () => void;
   setVolume: (volume: number) => void;
   setMuted: (muted: boolean) => void;
+  setSpeed: (speed: number) => void;
 };
 
 type TransportState = {
@@ -33,12 +34,16 @@ type TransportState = {
   requestedPositionMs: number | null;
   volume: number;
   muted: boolean;
+  /** Playback rate for history. The live feed is always real time, so this snaps back to 1 there. */
+  speed: number;
   /** Set when playback ran off the end of the recording. */
   endOfRecording: boolean;
   controller: TransportController | null;
 
   attachController: (controller: TransportController | null) => void;
   setPlaying: (playing: boolean) => void;
+  /** Record the speed the server actually applied, which may differ from what was asked for. */
+  setAppliedSpeed: (speed: number) => void;
   setMode: (mode: StreamMode) => void;
   setEndOfRecording: (reached: boolean) => void;
   markLive: () => void;
@@ -49,6 +54,7 @@ type TransportState = {
   goLive: () => void;
   setVolume: (volume: number) => void;
   toggleMuted: () => void;
+  requestSpeed: (speed: number) => void;
 };
 
 export const useTransportStore = create<TransportState>((set, get) => ({
@@ -58,11 +64,13 @@ export const useTransportStore = create<TransportState>((set, get) => ({
   requestedPositionMs: null,
   volume: 0.8,
   muted: false,
+  speed: 1,
   endOfRecording: false,
   controller: null,
 
   attachController: (controller) => set({ controller }),
   setPlaying: (playing) => set({ playing }),
+  setAppliedSpeed: (speed) => set({ speed }),
   setMode: (mode) => set({ mode }),
   setEndOfRecording: (endOfRecording) => set({ endOfRecording }),
 
@@ -72,6 +80,8 @@ export const useTransportStore = create<TransportState>((set, get) => ({
       followingLive: true,
       requestedPositionMs: null,
       endOfRecording: false,
+      // The present arrives in real time, so there is no faster to go.
+      speed: 1,
     }),
 
   play: async () => {
@@ -100,6 +110,7 @@ export const useTransportStore = create<TransportState>((set, get) => ({
       requestedPositionMs: null,
       mode: 'live',
       endOfRecording: false,
+      speed: 1,
     });
     get().controller?.goLive();
   },
@@ -114,5 +125,12 @@ export const useTransportStore = create<TransportState>((set, get) => ({
     const muted = !get().muted;
     set({ muted });
     get().controller?.setMuted(muted);
+  },
+
+  requestSpeed: (speed) => {
+    // Applied locally at once so the buttons respond, then confirmed by the server's echo in case it
+    // clamped the value to something it supports.
+    set({ speed });
+    get().controller?.setSpeed(speed);
   },
 }));

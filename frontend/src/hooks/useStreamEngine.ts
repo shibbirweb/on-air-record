@@ -54,6 +54,7 @@ export function useStreamEngine(): StreamEngine {
           // The server ran out of recorded material and rejoined the live feed. Flush first: what is
           // still scheduled is the tail of the old position.
           engine.flush();
+          engine.setSpeed(1);
           useTransportStore.getState().markLive();
           useTimelineStore.getState().setFollowingLive(true);
           break;
@@ -70,6 +71,13 @@ export function useStreamEngine(): StreamEngine {
 
         case 'level':
           useConnectionStore.getState().setLevels(message.rms, message.peak);
+          break;
+
+        case 'speed':
+          // The server's word is final: it may have clamped the request onto a speed it supports, and
+          // it resets to real time on its own whenever the session rejoins the live feed.
+          engine.setSpeed(message.value);
+          useTransportStore.getState().setAppliedSpeed(message.value);
           break;
 
         case 'error':
@@ -123,6 +131,12 @@ export function useStreamEngine(): StreamEngine {
       },
       setVolume: (volume) => engine.setVolume(volume),
       setMuted: (muted) => engine.setMuted(muted),
+      setSpeed: (speed) => {
+        // Both halves are needed: the server paces frames faster, and the engine plays each one faster.
+        // Either alone would just change how much audio is buffered rather than how fast it plays.
+        engine.setSpeed(speed);
+        socket.send({ type: 'speed', value: speed });
+      },
     });
 
     // Restore whatever the listener had set before this effect ran.

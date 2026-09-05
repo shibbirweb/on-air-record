@@ -171,7 +171,10 @@ byte_offset = ((timestamp_ms - segment.started_at_ms) * sample_rate / 1000) * 2 
 The offset is aligned down to a sample boundary. The cursor then reads frame sized chunks and yields them
 with reconstructed timestamps.
 
-Pacing is done by a tokio interval that ticks once per frame duration. This is deliberately simple: the
+Pacing is done by a tokio interval that ticks once per frame duration divided by the playback speed, so
+speed costs nothing but a different timer period. The client matches it by setting `playbackRate` on each
+buffer, which shifts pitch along with tempo the way tape does. Preserving pitch would need a phase vocoder,
+which is a great deal of machinery for a control whose job is scanning through recordings. This is deliberately simple: the
 client keeps its own jitter buffer, so the server does not need to be sample accurate, it only needs to
 deliver on average one frame of audio per frame of wall clock time.
 

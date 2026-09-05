@@ -46,6 +46,10 @@ pub enum ServerMessage {
     #[serde(rename_all = "camelCase")]
     Level { rms: f32, peak: f32 },
 
+    /// The applied playback speed, echoed after a request so the client learns what it was clamped to.
+    #[serde(rename_all = "camelCase")]
+    Speed { value: f32 },
+
     #[serde(rename_all = "camelCase")]
     Pong {
         client_time_ms: i64,
@@ -72,6 +76,12 @@ pub enum ClientMessage {
     Pause,
 
     Resume,
+
+    /// Play history faster or slower. Ignored while following the live feed, which is always real time.
+    #[serde(rename_all = "camelCase")]
+    Speed {
+        value: f32,
+    },
 
     #[serde(rename_all = "camelCase")]
     Ping {
@@ -133,6 +143,17 @@ mod tests {
         let ping: ClientMessage =
             serde_json::from_str(r#"{"type":"ping","clientTimeMs":5}"#).expect("parse");
         assert!(matches!(ping, ClientMessage::Ping { client_time_ms: 5 }));
+    }
+
+    #[test]
+    fn speed_round_trips_in_both_directions() {
+        let request: ClientMessage =
+            serde_json::from_str(r#"{"type":"speed","value":2.0}"#).expect("parse");
+        assert!(matches!(request, ClientMessage::Speed { value } if value == 2.0));
+
+        let applied =
+            serde_json::to_string(&ServerMessage::Speed { value: 1.5 }).expect("serialise");
+        assert_eq!(applied, r#"{"type":"speed","value":1.5}"#);
     }
 
     #[test]

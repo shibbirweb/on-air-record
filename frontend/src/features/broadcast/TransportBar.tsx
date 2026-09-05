@@ -5,12 +5,19 @@
  * distance from now, so it is expressed that way rather than as an absolute timestamp alone.
  */
 
-import { Pause, Play, Radio, RotateCcw, Volume2, VolumeX } from 'lucide-react';
+import { Gauge, Pause, Play, Radio, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 import { useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAnimationFrame } from '@/hooks/useAnimationFrame';
 import { formatClock, formatOffsetFromLive } from '@/lib/format';
@@ -25,6 +32,9 @@ type TransportBarProps = {
 /** How far behind the live edge before the UI stops calling it live. */
 const LIVE_TOLERANCE_MS = 2500;
 
+/** Must match `PLAYBACK_SPEEDS` in `backend/src/ws/session.rs`. */
+const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4] as const;
+
 export function TransportBar({ getPlayheadMs }: TransportBarProps) {
   const playing = useTransportStore((state) => state.playing);
   const mode = useTransportStore((state) => state.mode);
@@ -38,6 +48,8 @@ export function TransportBar({ getPlayheadMs }: TransportBarProps) {
   const seek = useTransportStore((state) => state.seek);
   const setVolume = useTransportStore((state) => state.setVolume);
   const toggleMuted = useTransportStore((state) => state.toggleMuted);
+  const speed = useTransportStore((state) => state.speed);
+  const requestSpeed = useTransportStore((state) => state.requestSpeed);
 
   const connected = useConnectionStore((state) => state.connected);
   const liveEdgeMs = useTimelineStore((state) => state.range?.liveEdgeMs ?? null);
@@ -124,6 +136,25 @@ export function TransportBar({ getPlayheadMs }: TransportBarProps) {
         )}
         {endOfRecording && <Badge variant="outline">end of recording</Badge>}
       </div>
+
+      {/* Only meaningful for history: the live feed arrives in real time, so the server forces 1x there. */}
+      <Select
+        value={String(speed)}
+        disabled={!connected || mode === 'live'}
+        onValueChange={(next) => requestSpeed(Number(next))}
+      >
+        <SelectTrigger className="h-9 w-24" aria-label="Playback speed">
+          <Gauge className="size-3.5 shrink-0 opacity-70" />
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {SPEEDS.map((option) => (
+            <SelectItem key={option} value={String(option)}>
+              {option}x{option === 1 ? ' (normal)' : ''}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       <div className="ml-auto flex w-44 items-center gap-2">
         <Button

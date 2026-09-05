@@ -40,6 +40,42 @@ use crate::ws::protocol::encode_audio_frame;
 /// almost exactly, so a seek is heard immediately.
 const PREBUFFER_FRAMES: usize = 3;
 
+/// Playback speeds offered, slowest first.
+///
+/// A fixed ladder rather than a free number: the client shows these as buttons, and an arbitrary speed
+/// would let a typo ask for a thousand times real time and pin a core reading the disk.
+pub const PLAYBACK_SPEEDS: [f32; 6] = [0.25, 0.5, 1.0, 1.5, 2.0, 4.0];
+
+/// Never tick faster than this, whatever the speed and frame size work out to.
+const MIN_TICK: std::time::Duration = std::time::Duration::from_millis(5);
+
+/// Snap a requested speed onto the nearest offered one.
+fn clamp_speed(value: f32) -> f32 {
+    if !value.is_finite() {
+        return 1.0;
+    }
+
+    PLAYBACK_SPEEDS
+        .into_iter()
+        .min_by(|left, right| {
+            (left - value)
+                .abs()
+                .partial_cmp(&(right - value).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or(1.0)
+}
+
+/// How often the playback cursor should tick to deliver `frame_ms` of audio at `speed`.
+///
+/// Speed is expressed as pacing rather than as anything done to the samples: at double speed the server
+/// simply hands over frames twice as often, and the client plays each one twice as fast. That keeps the
+/// cursor, the segment index and the wire format entirely speed agnostic.
+fn tick_period(frame_ms: u32, speed: f32) -> std::time::Duration {
+    let millis = (frame_ms as f32 / speed.max(0.05)).round().max(1.0) as u64;
+    std::time::Duration::from_millis(millis).max(MIN_TICK)
+}
+
 type Sink = SplitSink<WebSocket, Message>;
 
 /// Outcome of driving playback forward, which decides what the loop does next.
@@ -76,7 +112,8 @@ impl StreamSession {
         let mut cursor: Option<PlaybackCursor> = None;
 
         let frame_ms = effective_frame_ms(&state);
-        let mut ticker = tokio::time::interval(std::time::Duration::from_millis(frame_ms as u64));
+        let mut speed = 1.0f32;
+        let mut ticker = tokio::time::interval(tick_period(frame_ms, speed));
         // A stalled network must not make the cursor sprint to catch up afterwards, which would deliver a
         // burst of audio the client cannot play in order.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -133,6 +170,7 @@ impl StreamSession {
                                 &mut live_rx,
                                 &mut cursor,
                                 frame_ms,
+                                &mut speed,
                                 &mut ticker,
                             )
                             .await;
@@ -186,6 +224,17 @@ impl StreamSession {
                             mode = StreamMode::Live;
                             resume_mode = StreamMode::Live;
                             live_rx = Some(state.hub.subscribe());
+
+                            // The live feed arrives in real time, so any other speed is meaningless.
+                            if speed != 1.0 {
+                                speed = 1.0;
+                                ticker = tokio::time::interval(tick_period(frame_ms, speed));
+                                if !send_message(&mut sink, ServerMessage::Speed { value: speed })
+                                    .await
+                                {
+                                    break;
+                                }
+                            }
 
                             let edge = state.live_edge_ms().unwrap_or_else(now_ms);
                             if !send_message(
@@ -244,6 +293,7 @@ async fn handle_command(
     live_rx: &mut Option<Receiver<AudioFrame>>,
     cursor: &mut Option<PlaybackCursor>,
     frame_ms: u32,
+    speed: &mut f32,
     ticker: &mut tokio::time::Interval,
 ) -> bool {
     match command {
@@ -253,8 +303,27 @@ async fn handle_command(
             *resume_mode = StreamMode::Live;
             *live_rx = Some(state.hub.subscribe());
 
+            if *speed != 1.0 {
+                *speed = 1.0;
+                *ticker = tokio::time::interval(tick_period(frame_ms, *speed));
+                if !send_message(sink, ServerMessage::Speed { value: *speed }).await {
+                    return false;
+                }
+            }
+
             let edge = state.live_edge_ms().unwrap_or_else(now_ms);
             send_message(sink, mode_message(*mode, edge)).await
+        }
+
+        ClientMessage::Speed { value } => {
+            let applied = clamp_speed(value);
+            if applied != *speed {
+                *speed = applied;
+                // Replacing the interval rather than resetting it, because the period itself changed.
+                *ticker = tokio::time::interval(tick_period(frame_ms, applied));
+            }
+
+            send_message(sink, ServerMessage::Speed { value: applied }).await
         }
 
         ClientMessage::Seek { timestamp_ms } => {
@@ -451,5 +520,39 @@ fn effective_frame_ms(state: &Arc<AppState>) -> u32 {
         snapshot.frame_ms
     } else {
         state.settings.current().frame_ms
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speeds_snap_to_the_offered_ladder() {
+        assert_eq!(clamp_speed(1.0), 1.0);
+        assert_eq!(clamp_speed(2.0), 2.0);
+        assert_eq!(clamp_speed(1.9), 2.0);
+        assert_eq!(clamp_speed(0.3), 0.25);
+        // Absurd requests land on the extremes rather than pinning a core.
+        assert_eq!(clamp_speed(1000.0), 4.0);
+        assert_eq!(clamp_speed(0.0), 0.25);
+        assert_eq!(clamp_speed(-5.0), 0.25);
+        assert_eq!(clamp_speed(f32::NAN), 1.0);
+    }
+
+    #[test]
+    fn the_tick_period_scales_inversely_with_speed() {
+        assert_eq!(tick_period(100, 1.0), std::time::Duration::from_millis(100));
+        assert_eq!(tick_period(100, 2.0), std::time::Duration::from_millis(50));
+        assert_eq!(tick_period(100, 4.0), std::time::Duration::from_millis(25));
+        // Slower than real time means waiting longer between frames.
+        assert_eq!(tick_period(100, 0.5), std::time::Duration::from_millis(200));
+    }
+
+    #[test]
+    fn the_tick_period_never_collapses_to_a_busy_loop() {
+        // A short frame at the fastest speed still leaves room between ticks.
+        assert!(tick_period(20, 4.0) >= MIN_TICK);
+        assert!(tick_period(1, 4.0) >= MIN_TICK);
     }
 }

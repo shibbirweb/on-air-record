@@ -30,6 +30,7 @@ export type AudioEngineStats = {
   droppedFrames: number;
   resyncs: number;
   sampleRate: number;
+  speed: number;
 };
 
 export class AudioEngine {
@@ -42,10 +43,20 @@ export class AudioEngine {
   private jitterSeconds = DEFAULT_JITTER_SECONDS;
   private volume = 1;
   private muted = false;
+  /**
+   * Rate each buffer is played back at.
+   *
+   * The server paces frames to match, so this is what keeps the queue from growing at speeds above one.
+   * It shifts pitch along with tempo, the way tape does, because preserving pitch needs a phase vocoder
+   * and that is a great deal of machinery for a control whose job is scanning through recordings.
+   */
+  private speed = 1;
 
   /** Anchor pairing a context time with the media timestamp playing at that moment. */
   private anchorContextTime = 0;
   private anchorMediaMs = 0;
+  /** Rate in force when the anchor was set, so the playhead does not jump when the speed changes. */
+  private anchorSpeed = 1;
 
   private scheduledFrames = 0;
   private droppedFrames = 0;
@@ -126,6 +137,20 @@ export class AudioEngine {
   }
 
   /**
+   * Set the playback rate for buffers queued from now on.
+   *
+   * Buffers already scheduled keep the rate they were queued with. Restarting them would mean a gap on
+   * every speed change, and the amount of audio affected is one jitter buffer.
+   */
+  setSpeed(speed: number): void {
+    this.speed = Number.isFinite(speed) && speed > 0 ? Math.min(Math.max(speed, 0.1), 8) : 1;
+  }
+
+  get playbackSpeed(): number {
+    return this.speed;
+  }
+
+  /**
    * Drop everything queued and restart the clock.
    *
    * Called on a seek: the frames already scheduled belong to the old position, and playing them out first
@@ -184,6 +209,7 @@ export class AudioEngine {
 
     const source = context.createBufferSource();
     source.buffer = buffer;
+    source.playbackRate.value = this.speed;
     source.connect(gainNode);
     source.start(this.nextStartTime);
 
@@ -214,8 +240,10 @@ export class AudioEngine {
       return null;
     }
 
+    // Media time runs at the playback rate, so a second of wall clock is two seconds of recording at
+    // double speed. Using the rate the anchor was queued at keeps the playhead honest across a change.
     const elapsedSeconds = context.currentTime - this.anchorContextTime;
-    return this.anchorMediaMs + elapsedSeconds * 1000;
+    return this.anchorMediaMs + elapsedSeconds * 1000 * this.anchorSpeed;
   }
 
   stats(): AudioEngineStats {
@@ -229,6 +257,7 @@ export class AudioEngine {
       droppedFrames: this.droppedFrames,
       resyncs: this.resyncs,
       sampleRate: context?.sampleRate ?? 0,
+      speed: this.speed,
     };
   }
 

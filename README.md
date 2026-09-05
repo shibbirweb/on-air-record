@@ -206,7 +206,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Automatic hand off from history back to the live edge on catching up
 - [x] Playback transport controls (pause, resume, jump to live)
 - [x] Keep alive ping and pong so idle connections survive proxies
-- [ ] Variable speed playback
+- [x] Variable speed playback from a quarter to four times real time, forced back to real time on live
 - [ ] Plain HTTP progressive stream for non JavaScript clients
 
 ### Milestone 5: web UI
@@ -226,7 +226,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Cue marker showing the selected moment before playback has started
 - [x] Calendar day picker, with days holding no recording shown as unselectable
 - [x] Picking a day frames it on the timeline and plays from its first recorded moment
-- [x] Transport controls: play, pause, jump back thirty seconds, go live
+- [x] Transport controls: play, pause, jump back thirty seconds, go live, playback speed
 - [x] Volume slider and mute
 - [x] On air indicator and live listener count
 - [x] Input device selector marking the system default and any unplugged device

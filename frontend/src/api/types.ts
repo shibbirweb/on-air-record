@@ -158,6 +158,7 @@ export type ServerMessage =
   | { type: 'gap'; fromMs: number; toMs: number }
   | { type: 'end-of-recording'; timestampMs: number }
   | { type: 'level'; rms: number; peak: number }
+  | { type: 'speed'; value: number }
   | { type: 'pong'; clientTimeMs: number; serverTimeMs: number }
   | { type: 'error'; code: string; message: string };
 
@@ -166,6 +167,7 @@ export type ClientMessage =
   | { type: 'seek'; timestampMs: number }
   | { type: 'pause' }
   | { type: 'resume' }
+  | { type: 'speed'; value: number }
   | { type: 'ping'; clientTimeMs: number };
 
 /** One decoded audio frame off the wire. */

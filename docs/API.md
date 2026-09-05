@@ -304,6 +304,7 @@ described in [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md). Text messages are JSON cont
 | `gap` | `fromMs`, `toMs` | No recording exists in this range, playback skipped it |
 | `end-of-recording` | `timestampMs` | Playback reached the newest data while capture is stopped |
 | `level` | `rms`, `peak` | Input meter, emitted about ten times per second in live mode |
+| `speed` | `value` | The playback speed actually in force, after clamping, and whenever the server resets it |
 | `error` | `code`, `message` | Request could not be honoured, the socket stays open |
 
 ### Client to server control messages
@@ -313,8 +314,14 @@ described in [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md). Text messages are JSON cont
 | `live` | | Jump to the live edge and follow it |
 | `seek` | `timestampMs` | Start playback from this timestamp |
 | `pause` | | Stop sending audio, keep the position |
+| `speed` | `value` | Play history at `0.25`, `0.5`, `1`, `1.5`, `2` or `4` times real time. Anything else snaps to the nearest. Ignored while live |
 | `resume` | | Continue from the paused position |
 | `ping` | `clientTimeMs` | Keep alive, answered with `pong` carrying both clocks |
+
+Speed is pacing, not processing: at double speed the server simply hands over frames twice as often, and
+the client plays each one twice as fast. The cursor, the segment index and the binary format stay entirely
+speed agnostic. Rejoining the live feed always forces the speed back to `1`, because the present cannot be
+outrun, and the server announces that with its own `speed` message.
 
 ### Example session
 
