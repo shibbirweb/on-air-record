@@ -5,7 +5,7 @@
  * bug report, and this is the page the reporter already has open.
  */
 
-import { Bug } from 'lucide-react';
+import { Bug, Star } from 'lucide-react';
 import { useEffect } from 'react';
 
 import { useStatusStore } from '@/store/useStatusStore';
@@ -40,12 +40,19 @@ export function AppFooter() {
           </a>
         </span>
 
-        <span aria-hidden="true">&middot;</span>
+        <span aria-hidden="true" className="hidden sm:inline">&middot;</span>
         <span>MIT licence</span>
 
-        <span aria-hidden="true">&middot;</span>
-        <a href={REPOSITORY_URL} target="_blank" rel="noreferrer noopener" className={LINK}>
-          Source code
+        <span aria-hidden="true" className="hidden sm:inline">&middot;</span>
+        {/* Still the repository link, but asking for the thing worth asking for. */}
+        <a
+          href={REPOSITORY_URL}
+          target="_blank"
+          rel="noreferrer noopener"
+          className={`${LINK} flex items-center gap-1.5`}
+        >
+          <Star className="size-3.5" />
+          Star the repository
         </a>
 
         <a

@@ -96,7 +96,7 @@ The narrow right column is what you glance at occasionally:
 - **Source** is which microphone it is listening to.
 - **Storage** is how much disk has been used.
 
-Along the bottom of every page is a strip with the licence, a link to the source code, a link for
+Along the bottom of every page is a strip with the licence, a link to the project on GitHub, a link for
 reporting a problem, and the version number.
 
 ## The top bar
@@ -451,7 +451,7 @@ be exposed to the internet directly. Ask whoever administers it about a VPN.
 
 There is a link at the bottom of every page:
 
-![The footer strip, with the copyright, the licence, a source code link, a report an issue link and the version number](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/footer.png)
+![The footer strip, with the copyright, the licence, a link to star the repository, a report an issue link and the version number](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/footer.png)
 
 If something does not work, or the guide is wrong, open an issue:
 
