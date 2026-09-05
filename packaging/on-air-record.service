@@ -1,0 +1,61 @@
+# systemd unit for On Air Record.
+#
+# Install:
+#
+#   sudo install -m 755 on-air-record /usr/local/bin/on-air-record
+#   sudo useradd --system --home /var/lib/on-air-record --shell /usr/sbin/nologin on-air-record
+#   sudo usermod -aG audio on-air-record
+#   sudo install -d -o on-air-record -g on-air-record /var/lib/on-air-record
+#   sudo install -m 644 on-air-record.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now on-air-record
+#
+# The audio group is not optional. Without it the process starts, serves the UI, and then finds no input
+# devices at all, which looks like a hardware fault rather than a permissions one.
+
+[Unit]
+Description=On Air Record audio broadcast and DVR service
+Documentation=https://github.com/shibbirweb/on-air-record
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=on-air-record
+Group=on-air-record
+# Capture needs the audio devices, and the service account only reaches them through this group.
+SupplementaryGroups=audio
+
+# Recordings, the SQLite database and the settings all live here. Point it at a disk with room: an hour
+# of 48 kHz mono is roughly 330 MB, and retention is what keeps that bounded.
+Environment=OAR_DATA_DIR=/var/lib/on-air-record
+Environment=OAR_HOST=0.0.0.0
+Environment=OAR_PORT=8080
+Environment=OAR_LOG_LEVEL=info
+
+ExecStart=/usr/local/bin/on-air-record
+# The service closes the segment being written before exiting, so a clean stop keeps the last few seconds
+# playable. Give it room to finish rather than killing it mid flush.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=5
+
+# A recorder that dies at 3am and stays dead has failed at its one job, so no start rate limit applies.
+StartLimitIntervalSec=0
+
+# Hardening. PrivateDevices is deliberately off, because it would hide /dev/snd and there would be
+# nothing left to record.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+# The one writable path. Add another ReadWritePaths line if recordings are pointed elsewhere in settings.
+ReadWritePaths=/var/lib/on-air-record
+
+[Install]
+WantedBy=multi-user.target
