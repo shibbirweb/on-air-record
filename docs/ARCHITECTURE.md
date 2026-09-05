@@ -171,8 +171,16 @@ Rules:
    the requested bucket count.
 3. The canvas draws the envelope, the recorded coverage bands, the playhead, and the live edge.
 
+The timeline is an overview plus detail pair. `TimelineScrubber` shows the window in detail and loses all
+sense of where it sits; `TimelineMinimap` shows the surrounding calendar day with that window drawn on it,
+and dragging it there calls `scrollTo`. The minimap is framed on a calendar day rather than a rolling
+twenty four hours because an overview that slides as you pan gives you nothing to orient against. It reads
+the same peaks endpoint at a coarser bucket count, so it costs one extra request per day rather than any
+new backend surface.
+
 The window is the only state the timeline really has, and every navigation is a transform of it: `panBy`
-slides it, `zoomTo` rescales it about an anchor, `showDay` fits it to a day. The anchor is what stops
+slides it, `scrollTo` positions it absolutely, `zoomTo` rescales it about an anchor, `showDay` fits it to a
+day. The anchor is what stops
 zooming from throwing away the moment the operator is looking at, so the toolbar passes the marker and the
 scroll wheel passes the pointer. Any navigation to a specific moment also clears `followingLive`, or the
 next range poll would drag the window back to the live edge and undo it.

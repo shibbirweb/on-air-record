@@ -27,6 +27,23 @@ export function previousDayId(timestampMs: number): string {
 }
 
 /**
+ * Local midnight bounds of the calendar day containing `timestampMs`, as `[startMs, endMs)`.
+ *
+ * The end is a calendar day later rather than exactly 24 hours later, so the pair stays correct across a
+ * daylight saving transition where a local day runs 23 or 25 hours. This mirrors `day_bounds_ms` in
+ * `backend/src/util/day.rs`.
+ */
+export function dayBoundsMs(timestampMs: number): { startMs: number; endMs: number } {
+  const start = new Date(timestampMs);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+
+  return { startMs: start.getTime(), endMs: end.getTime() };
+}
+
+/**
  * Turn a day id into local midnight.
  *
  * Built from the parts rather than through `new Date('2026-09-05')`, which the language parses as UTC and

@@ -10,6 +10,7 @@ import { create } from 'zustand';
 
 import { api, ApiError } from '@/api/client';
 import type { CoverageBand, Peaks, RecordingDay, TimelineRange } from '@/api/types';
+import { dayBoundsMs } from '@/lib/day';
 import { zoomWindow } from '@/lib/timelineGeometry';
 
 /** Selectable zoom levels, in milliseconds of visible span. */
@@ -32,6 +33,14 @@ const MAX_SPAN_MS = 7 * 24 * 3_600_000;
 /** Columns requested per fetch. More than a wide screen has pixels is wasted bandwidth. */
 const PEAK_BUCKETS = 1200;
 
+/**
+ * Columns for the minimap's whole day envelope.
+ *
+ * A day across a thousand columns is roughly a minute and a half each, which is plenty to show where in
+ * the day the audio sits without fetching the detail the main timeline already has.
+ */
+const MINIMAP_BUCKETS = 1000;
+
 type TimelineState = {
   /** Left edge of the visible window, epoch milliseconds. */
   windowStartMs: number;
@@ -40,6 +49,8 @@ type TimelineState = {
   followingLive: boolean;
   range: TimelineRange | null;
   peaks: Peaks | null;
+  /** Coarse envelope covering the whole minimap day. */
+  dayPeaks: Peaks | null;
   /** Calendar days that hold recordings, newest first. */
   days: RecordingDay[];
   loadingPeaks: boolean;
@@ -49,16 +60,26 @@ type TimelineState = {
   coverage: () => CoverageBand[];
   /** The day entry the visible window sits in, if any. */
   activeDay: () => RecordingDay | null;
+  /**
+   * The twenty four hours the minimap shows: the calendar day holding the middle of the visible window.
+   *
+   * Anchored to a calendar day rather than sliding with the viewport, because a minimap that moves as you
+   * pan gives you nothing to orient against, which is the whole reason it exists.
+   */
+  minimapWindow: () => { startMs: number; endMs: number };
 
   /** Rescale the window, holding `anchorMs` in place. Falls back to the centre when no anchor is given. */
   zoomTo: (spanMs: number, anchorMs?: number | null) => void;
   panBy: (deltaMs: number) => void;
+  /** Move the window to start at `startMs`, kept inside the minimap's day. Used by the minimap drag. */
+  scrollTo: (startMs: number) => void;
   centreOn: (timestampMs: number) => void;
   setFollowingLive: (following: boolean) => void;
   showDay: (day: string) => void;
   refreshRange: () => Promise<void>;
   refreshPeaks: () => Promise<void>;
   refreshDays: () => Promise<void>;
+  refreshDayPeaks: () => Promise<void>;
 };
 
 export const useTimelineStore = create<TimelineState>((set, get) => ({
@@ -67,12 +88,18 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   followingLive: true,
   range: null,
   peaks: null,
+  dayPeaks: null,
   days: [],
   loadingPeaks: false,
   error: null,
 
   windowEndMs: () => get().windowStartMs + get().spanMs,
   coverage: () => get().range?.coverage ?? [],
+
+  minimapWindow: () => {
+    const state = get();
+    return dayBoundsMs(state.windowStartMs + state.spanMs / 2);
+  },
 
   activeDay: () => {
     const state = get();
@@ -102,6 +129,22 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // back to the present under their hands.
       followingLive: false,
     })),
+
+  scrollTo: (startMs) => {
+    const state = get();
+    const { startMs: dayStartMs, endMs: dayEndMs } = state.minimapWindow();
+    const dayLengthMs = dayEndMs - dayStartMs;
+
+    // Absolute rather than relative, so a slow drag cannot accumulate rounding error. Clamping keeps the
+    // viewport inside the frame it is being dragged within; crossing to another day is the day picker's
+    // job. A window wider than the day itself has nowhere to move, so it centres instead.
+    const clamped =
+      state.spanMs >= dayLengthMs
+        ? dayStartMs - (state.spanMs - dayLengthMs) / 2
+        : Math.min(Math.max(startMs, dayStartMs), dayEndMs - state.spanMs);
+
+    set({ windowStartMs: clamped, followingLive: false });
+  },
 
   centreOn: (timestampMs) =>
     set((state) => ({
@@ -177,6 +220,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       });
     } catch (cause) {
       set({ error: cause instanceof ApiError ? cause.message : 'could not load the timeline' });
+    }
+  },
+
+  refreshDayPeaks: async () => {
+    const { startMs, endMs } = get().minimapWindow();
+
+    try {
+      set({ dayPeaks: await api.peaks(startMs, endMs, MINIMAP_BUCKETS) });
+    } catch {
+      // The minimap is an orientation aid. Losing it should not raise an error banner over the timeline
+      // the listener is actually using, so the stale envelope simply stays on screen.
     }
   },
 

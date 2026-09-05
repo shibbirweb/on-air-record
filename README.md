@@ -216,6 +216,8 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Scrubbable CCTV style timeline with recorded coverage shading and a live edge marker
 - [x] Click to seek, drag to pan, scroll to zoom, with a hover time readout
 - [x] Zoom presets from one minute to a day, and a follow live toggle
+- [x] Twenty four hour minimap under the timeline showing where the visible window sits in the day
+- [x] Drag the window on the minimap, or click it, to move the detailed view
 - [x] Zoom anchored on the marker, and on the pointer when scrolling
 - [x] Cue marker showing the selected moment before playback has started
 - [x] Day picker that jumps the timeline to a chosen day and plays from its first moment

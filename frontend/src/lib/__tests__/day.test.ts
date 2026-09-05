@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { dayLabel, localDayId, parseDayId, previousDayId } from '../day';
+import { dayBoundsMs, dayLabel, localDayId, parseDayId, previousDayId } from '../day';
 
 describe('localDayId', () => {
   it('names the day in local time, not UTC', () => {
@@ -84,5 +84,48 @@ describe('dayLabel', () => {
   it('still labels days when the reference day is unknown', () => {
     // Before the first status poll there is no server clock to compare against.
     expect(dayLabel('2026-09-05', null, null)).toContain('5');
+  });
+});
+
+describe('dayBoundsMs', () => {
+  it('spans local midnight to local midnight', () => {
+    const { startMs, endMs } = dayBoundsMs(new Date(2026, 8, 5, 14, 37).getTime());
+
+    expect(new Date(startMs).getHours()).toBe(0);
+    expect(new Date(startMs).getDate()).toBe(5);
+    expect(new Date(endMs).getHours()).toBe(0);
+    expect(new Date(endMs).getDate()).toBe(6);
+  });
+
+  it('contains every instant of its own day', () => {
+    const midday = new Date(2026, 8, 5, 12).getTime();
+    const { startMs, endMs } = dayBoundsMs(midday);
+
+    for (const probe of [startMs, midday, endMs - 1]) {
+      expect(localDayId(probe)).toBe('2026-09-05');
+    }
+    expect(localDayId(endMs)).toBe('2026-09-06');
+  });
+
+  it('is idempotent at the boundaries', () => {
+    const { startMs, endMs } = dayBoundsMs(new Date(2026, 8, 5, 9).getTime());
+    expect(dayBoundsMs(startMs).startMs).toBe(startMs);
+    expect(dayBoundsMs(endMs - 1).endMs).toBe(endMs);
+  });
+
+  it('runs roughly a day even across a daylight saving change', () => {
+    // Stepping by calendar date rather than by 24 hours is what keeps this in range.
+    for (const date of [new Date(2026, 2, 8, 12), new Date(2026, 10, 1, 12)]) {
+      const { startMs, endMs } = dayBoundsMs(date.getTime());
+      const hours = (endMs - startMs) / 3_600_000;
+      expect(hours).toBeGreaterThanOrEqual(23);
+      expect(hours).toBeLessThanOrEqual(25);
+    }
+  });
+
+  it('gives consecutive days a shared edge', () => {
+    const first = dayBoundsMs(new Date(2026, 8, 5, 3).getTime());
+    const second = dayBoundsMs(new Date(2026, 8, 6, 3).getTime());
+    expect(first.endMs).toBe(second.startMs);
   });
 });

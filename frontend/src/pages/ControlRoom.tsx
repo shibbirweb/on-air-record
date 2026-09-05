@@ -20,6 +20,7 @@ import { DeviceSelector } from '@/features/devices/DeviceSelector';
 import { SettingsPanel } from '@/features/settings/SettingsPanel';
 import { StatusPanel } from '@/features/status/StatusPanel';
 import { StoragePanel } from '@/features/status/StoragePanel';
+import { TimelineMinimap } from '@/features/timeline/TimelineMinimap';
 import { TimelineScrubber } from '@/features/timeline/TimelineScrubber';
 import { TimelineToolbar } from '@/features/timeline/TimelineToolbar';
 import { usePolling } from '@/hooks/usePolling';
@@ -36,6 +37,8 @@ const TIMELINE_POLL_MS = 2000;
 const STORAGE_POLL_MS = 10_000;
 /** The set of recorded days only changes at midnight or when the janitor prunes, so poll it rarely. */
 const DAYS_POLL_MS = 30_000;
+/** The minimap covers a whole day, so it only needs to notice the live edge creeping along. */
+const MINIMAP_POLL_MS = 10_000;
 
 /** Wait for the window to settle before refetching the envelope, so a drag makes one request, not fifty. */
 const PEAKS_DEBOUNCE_MS = 180;
@@ -48,6 +51,7 @@ export function ControlRoom() {
   const refreshRange = useTimelineStore((state) => state.refreshRange);
   const refreshPeaks = useTimelineStore((state) => state.refreshPeaks);
   const refreshDays = useTimelineStore((state) => state.refreshDays);
+  const refreshDayPeaks = useTimelineStore((state) => state.refreshDayPeaks);
   const refreshStorage = useStorageStore((state) => state.refresh);
 
   const windowStartMs = useTimelineStore((state) => state.windowStartMs);
@@ -63,6 +67,12 @@ export function ControlRoom() {
   usePolling(refreshRange, TIMELINE_POLL_MS);
   usePolling(refreshStorage, STORAGE_POLL_MS);
   usePolling(refreshDays, DAYS_POLL_MS);
+  usePolling(refreshDayPeaks, MINIMAP_POLL_MS);
+
+  const minimapStartMs = useTimelineStore((state) => state.minimapWindow().startMs);
+  useEffect(() => {
+    void refreshDayPeaks();
+  }, [minimapStartMs, refreshDayPeaks]);
 
   const peaksTimer = useRef<number | null>(null);
   useEffect(() => {
@@ -142,12 +152,14 @@ export function ControlRoom() {
               <CardTitle>Timeline</CardTitle>
               <CardDescription>
                 Click anywhere to play from that moment, drag to pan, scroll to zoom. Shaded bands are the
-                stretches that were recorded.
+                stretches that were recorded. The bar underneath is the whole day, with the visible window
+                marked on it, and dragging that window moves the timeline.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <TimelineToolbar getPlayheadMs={playheadMs} />
               <TimelineScrubber getPlayheadMs={playheadMs} />
+              <TimelineMinimap getPlayheadMs={playheadMs} />
             </CardContent>
           </Card>
         </div>
