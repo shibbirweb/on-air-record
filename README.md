@@ -172,6 +172,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Cross platform input device enumeration (CoreAudio, ALSA, WASAPI)
 - [x] Capture through `cpal` with automatic sample format and sample rate negotiation
 - [x] Downmix to mono and conversion to 16 bit PCM, clipping rather than wrapping on overload
+- [x] Selectable recording bit rate from 768 down to 128 kbps, with anti aliased downsampling
 - [x] Software gain applied to the live signal without reopening the device
 - [x] Hot swap of the input device without restarting the service
 - [x] Fixed duration framing with sample derived timestamps and wall clock drift correction
@@ -190,7 +191,8 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
       entirely when recordings are kept forever
 - [x] Recordings can live outside the data directory, with old segments still resolving
 - [x] Storage, session, and history depth reporting
-- [ ] Opus compression for segments instead of raw PCM
+- [ ] Opus compression for segments, which would beat sample rate reduction for the same quality but
+      needs a per segment frame index before seeking still works
 - [ ] Export a time range as a downloadable WAV file
 
 ### Milestone 4: streaming
@@ -233,7 +235,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Dedicated settings page at `/settings`, with the audio pipeline living in the shell so navigating
       never interrupts playback
 - [x] Retention expressed in hours or days, with presets, or kept forever
-- [x] Projected disk needed for the chosen window, from the exact recording rate
+- [x] Projected disk needed for the chosen window, following the bit rate being chosen as you choose it
 - [x] Configurable recording directory, validated for writability before it is accepted
 - [x] Settings panel for gain, segment length, and automatic start
 - [x] Explicit save: edits are staged, counted, and committed in one request, with Discard to abandon them

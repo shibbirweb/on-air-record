@@ -9,6 +9,7 @@ import { useEffect } from 'react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { RecordingLocation } from '@/features/settings/RecordingLocation';
+import { RecordingQuality } from '@/features/settings/RecordingQuality';
 import { SettingsActionBar } from '@/features/settings/SettingsActionBar';
 import { RetentionSettings } from '@/features/settings/RetentionSettings';
 import { SettingsPanel } from '@/features/settings/SettingsPanel';
@@ -46,10 +47,12 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle>History and storage</CardTitle>
           <CardDescription>
-            How far back the timeline reaches, and how much disk that needs.
+            The bit rate recordings are kept at, how far back the timeline reaches, and how much disk
+            that needs.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
+          <RecordingQuality />
           <RetentionSettings />
         </CardContent>
       </Card>

@@ -58,6 +58,8 @@ export type Settings = {
   retentionHours: number | null;
   autoStart: boolean;
   frameMs: number;
+  /** `null` records at the capture device's own rate, which is the best quality it offers. */
+  recordingSampleRate: number | null;
   /** `null` means the default location under the data directory. */
   recordingsDir: string | null;
   /** Where segments are written right now, always absolute. Read only. */

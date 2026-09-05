@@ -16,8 +16,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Separator } from '@/components/ui/separator';
-import { formatBytes } from '@/lib/format';
+import { formatBytes, pcmBytesPerHour } from '@/lib/format';
 import { useSettingsStore } from '@/store/useSettingsStore';
+import { useStatusStore } from '@/store/useStatusStore';
 import { useStorageStore } from '@/store/useStorageStore';
 
 /** Familiar windows, so the common cases are one click rather than arithmetic. */
@@ -55,6 +56,7 @@ export function RetentionSettings() {
   const draft = useSettingsStore((state) => state.draft);
   const edit = useSettingsStore((state) => state.edit);
   const storage = useStorageStore((state) => state.storage);
+  const deviceRate = useStatusStore((state) => state.status?.capture.sampleRate ?? 0);
 
   /**
    * Both overrides mean "the person is driving now"; `null` means follow the stored setting. Deriving the
@@ -72,7 +74,11 @@ export function RetentionSettings() {
   // would make the store snapshot look like it changed on every render.
   const pending = { ...settings, ...draft };
   const forever = pending.retentionHours === null;
-  const bytesPerHour = storage?.bytesPerHour ?? 0;
+
+  // Projected from the bit rate being chosen rather than the one currently recording, so picking a
+  // smaller rate and a longer window shows the combined result while both are still unsaved.
+  const pendingRate = pending.recordingSampleRate ?? deviceRate;
+  const bytesPerHour = pendingRate > 0 ? pcmBytesPerHour(pendingRate) : (storage?.bytesPerHour ?? 0);
 
   const storedHours = pending.retentionHours ?? 24;
   const unit = unitChoice ?? splitWindow(storedHours).unit;

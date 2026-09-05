@@ -11,6 +11,7 @@ const STORED: Settings = {
   retentionHours: 24,
   autoStart: true,
   frameMs: 100,
+  recordingSampleRate: null,
   recordingsDir: null,
   effectiveRecordingsDir: '/srv/oar/recordings',
 };
@@ -77,6 +78,20 @@ describe('useSettingsStore draft', () => {
 
     // autoStart and the rest already match, so restoring defaults is a two field change.
     expect(useSettingsStore.getState().draft).toEqual({ gain: 1, retentionHours: 24 });
+  });
+
+  it('treats matching the device rate as a real change rather than an absent value', () => {
+    useSettingsStore.setState({ settings: { ...STORED, recordingSampleRate: 16_000 } });
+    useSettingsStore.getState().edit({ recordingSampleRate: null });
+    const { draft } = useSettingsStore.getState();
+
+    expect('recordingSampleRate' in draft).toBe(true);
+    expect(draft.recordingSampleRate).toBeNull();
+  });
+
+  it('stages a lower recording rate', () => {
+    useSettingsStore.getState().edit({ recordingSampleRate: 16_000 });
+    expect(useSettingsStore.getState().draft).toEqual({ recordingSampleRate: 16_000 });
   });
 
   it('stages nothing when already at the defaults', () => {

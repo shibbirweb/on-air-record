@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatBytes, formatDuration, formatOffsetFromLive, meterScale, toDecibels } from '../format';
+import {
+  formatBytes,
+  formatDuration,
+  formatOffsetFromLive,
+  meterScale,
+  pcmBitRateKbps,
+  pcmBytesPerHour,
+  toDecibels,
+} from '../format';
 
 describe('formatDuration', () => {
   it('formats hours, minutes and seconds', () => {
@@ -56,5 +64,25 @@ describe('meterScale', () => {
   it('floors anything below the visible range', () => {
     expect(meterScale(0.0001)).toBe(0);
     expect(toDecibels(0)).toBe(-100);
+  });
+});
+
+describe('pcm storage arithmetic', () => {
+  it('matches the server figure for full quality mono', () => {
+    // 48000 * 2 bytes * 3600 seconds, the same expression the backend uses.
+    expect(pcmBytesPerHour(48_000)).toBe(345_600_000);
+    expect(pcmBitRateKbps(48_000)).toBe(768);
+  });
+
+  it('scales linearly, which is the whole premise of the selector', () => {
+    expect(pcmBytesPerHour(24_000)).toBe(pcmBytesPerHour(48_000) / 2);
+    expect(pcmBytesPerHour(16_000)).toBe(pcmBytesPerHour(48_000) / 3);
+    expect(pcmBitRateKbps(8_000)).toBe(128);
+  });
+
+  it('reports nothing rather than a negative size for a missing rate', () => {
+    expect(pcmBytesPerHour(0)).toBe(0);
+    expect(pcmBytesPerHour(Number.NaN)).toBe(0);
+    expect(pcmBitRateKbps(0)).toBe(0);
   });
 });

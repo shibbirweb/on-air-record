@@ -60,7 +60,16 @@ export function SettingsActionBar() {
   const atDefaults =
     defaults !== null &&
     pending !== null &&
-    (['gain', 'segmentSeconds', 'retentionHours', 'autoStart', 'recordingsDir'] as const).every(
+    (
+      [
+        'gain',
+        'segmentSeconds',
+        'retentionHours',
+        'autoStart',
+        'recordingSampleRate',
+        'recordingsDir',
+      ] as const
+    ).every(
       (key) => Object.is(pending[key], defaults[key]),
     );
 

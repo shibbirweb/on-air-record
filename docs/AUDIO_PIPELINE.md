@@ -25,6 +25,31 @@ Normalisation in the callback:
 The callback never allocates a growing buffer, never locks a mutex held by another subsystem, and never
 touches SQLite. It fills a reusable buffer and does one non blocking channel send.
 
+### Recording rate
+
+The `recording_sample_rate` setting downsamples before framing, so the frame builder, the segment index,
+the wire protocol and the browser all see one rate: the one being recorded. Uncompressed PCM means the
+rate is the bit rate, `sample_rate * 16` for mono, and the disk cost scales exactly with it.
+
+| Setting | Rate | Bit rate | Per hour |
+| --- | --- | --- | --- |
+| Full quality | 48 kHz | 768 kbps | 330 MiB |
+| High | 32 kHz | 512 kbps | 220 MiB |
+| Good | 24 kHz | 384 kbps | 165 MiB |
+| Voice | 16 kHz | 256 kbps | 110 MiB |
+| Telephone | 8 kHz | 128 kbps | 55 MiB |
+
+Downsampling is a fourth order low pass followed by linear interpolation, both allocation free so they run
+on the callback thread. The filter is the part that matters: without it every frequency above the new
+Nyquist folds back into the audible band as aliasing, which sounds far worse than the lost treble that
+filtering costs. Linear interpolation is chosen over a windowed sinc because the filter has already
+removed the content its error would be most audible on, and a polyphase resampler would need buffering
+that does not fit a callback delivering variable chunk sizes.
+
+A rate above what the device produces is ignored: upsampling invents no detail and doubles the disk. Each
+segment records the rate it was captured at, so changing the setting never affects existing recordings and
+playback moves between rates without a gap.
+
 ## 2. Framing
 
 Audio is cut into frames of a fixed duration, 100 milliseconds by default.

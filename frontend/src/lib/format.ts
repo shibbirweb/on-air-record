@@ -91,3 +91,25 @@ export function meterScale(amplitude: number, floorDb = -60): number {
   }
   return Math.min((decibels - floorDb) / -floorDb, 1);
 }
+
+/**
+ * Bytes an hour of recording occupies at `sampleRate`.
+ *
+ * Mono, 16 bit, uncompressed, matching `bytes_per_hour` in `backend/src/dto/session_dto.rs`. Because
+ * nothing is compressed this is exact arithmetic, not an estimate, which is what lets the settings page
+ * promise a specific number of gigabytes.
+ */
+export function pcmBytesPerHour(sampleRate: number): number {
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return 0;
+  }
+  return sampleRate * 2 * 3600;
+}
+
+/** Bit rate of an uncompressed mono 16 bit stream, in kbps. */
+export function pcmBitRateKbps(sampleRate: number): number {
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
+    return 0;
+  }
+  return Math.round((sampleRate * 16) / 1000);
+}
