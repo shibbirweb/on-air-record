@@ -489,46 +489,70 @@ changing the code.
 
 ## Publishing a release
 
-For maintainers. Building the downloadable files is automatic; you decide the version and push a tag.
+For maintainers. Releases are made from the GitHub web interface, and the binaries build themselves.
+
+### 1. Decide the version
 
 The version lives in `backend/Cargo.toml` and nowhere else that matters. It is what the program reports
-from `/api/health`, what `--version` prints, and what the footer shows, so the tag has to agree with it.
-Move it with the script rather than by hand, because the same number is recorded in four files:
+from `/api/health`, what `--version` prints, and what the footer shows, so the release tag has to agree
+with it. The same number is recorded in four files, so move it with the script rather than by hand:
 
 ```sh
-python3 scripts/version.py set 0.2.0     # both manifests and both lockfiles
+node scripts/version.mjs show            # what the manifest says today
+node scripts/version.mjs set 0.2.0       # both manifests and both lockfiles
 git commit -am "chore: release 0.2.0"
-git tag v0.2.0
-git push origin master v0.2.0
+git push origin master
 ```
 
-To release the version already in the manifest, skip the first two steps and just tag it.
+To release the version the manifest already carries, there is nothing to do here.
 
-**A tag that disagrees with the manifest fails the build on purpose**, before anything is compiled:
+### 2. Create the release on GitHub
 
-```
-Tag v0.3.0 does not match backend/Cargo.toml, which says 0.1.0. Either tag v0.1.0, or run
-'python3 scripts/version.py set <version>', commit, and retag.
-```
+Go to **Releases**, then **Draft a new release**.
 
-That is the guard against shipping an archive named for one version holding a binary that reports
-another. Delete the bad tag, fix the manifest or the tag, and push again.
+- **Choose a tag**: type `v` followed by the version, so `v0.2.0`, and pick **Create new tag on publish**.
+- **Target**: `master`.
+- **Title**: the version is fine.
+- **Notes**: write them, or press **Generate release notes** to have GitHub write them from the commits.
+- Press **Publish release**.
 
-Pushing the tag starts [`.github/workflows/release.yml`](../.github/workflows/release.yml), which:
+The tag is created for you. You never have to run `git tag`.
 
-1. Builds the web interface once, so every platform ships identical assets rather than four builds that
+### 3. Wait for the files
+
+Publishing starts [`.github/workflows/release.yml`](../.github/workflows/release.yml), which:
+
+1. Checks the tag against `backend/Cargo.toml` and stops immediately if they disagree.
+2. Builds the web interface once, so every platform ships identical assets rather than four builds that
    merely ought to match.
-2. Builds the program for all four targets in parallel, each with that interface compiled in:
+3. Builds the program for all four targets in parallel, each with that interface compiled in:
    `aarch64-apple-darwin` and `x86_64-apple-darwin` on a macOS runner, `x86_64-unknown-linux-gnu` on Linux,
    and `x86_64-pc-windows-msvc` on Windows.
-3. Packs each into a `.tar.gz`, or a `.zip` on Windows, with a `.sha256` alongside.
-4. Creates a GitHub release on that tag and attaches all of them.
+4. Packs each into a `.tar.gz`, or a `.zip` on Windows, with a `.sha256` alongside.
+5. Attaches all eight files to the release you just published.
 
-To rehearse the build without publishing anything, run the workflow manually from the Actions tab using
-**Run workflow**. It produces the same files as downloadable artifacts and stops short of creating a
-release. Those are named for the manifest version plus the commit, such as
-`on-air-record-v0.1.0-dev-4f5389a-x86_64-unknown-linux-gnu.tar.gz`, so a rehearsal is never mistaken for
-a real release.
+Expect ten to fifteen minutes, most of it compiling. The release exists and is visible the whole time; the
+files appear at the end. Your notes are left exactly as you wrote them.
+
+### If the tag does not match the manifest
+
+The build stops in its first job, in seconds, before anything is compiled:
+
+```
+The release is tagged v0.3.0 but backend/Cargo.toml says 0.1.0. Either tag it v0.1.0, or run
+'node scripts/version.mjs set <version>', commit, then delete the release and its tag and create it again.
+```
+
+That is the guard against shipping an archive named for one version holding a binary that reports another.
+Delete the release from its page, delete the tag it created, fix whichever side is wrong, and publish
+again.
+
+### Rehearsing without releasing
+
+Run the workflow from the **Actions** tab with **Run workflow**. It builds the same files and offers them
+as downloadable artifacts without touching Releases. They are named for the manifest version plus the
+commit, such as `on-air-record-v0.1.0-dev-4f5389a-x86_64-unknown-linux-gnu.tar.gz`, so a rehearsal can
+never be mistaken for a real release.
 
 Separately, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push: formatting,
 linting and the full test suite on macOS, Linux and Windows, the frontend checks, and a check that the

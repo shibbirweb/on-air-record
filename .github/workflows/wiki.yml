@@ -14,7 +14,7 @@ on:
       - main
     paths:
       - 'docs/**.md'
-      - 'scripts/build_wiki.py'
+      - 'scripts/build-wiki.mjs'
       - '.github/workflows/wiki.yml'
   # Lets the wiki be republished without touching the docs, which is how you seed it the first time.
   workflow_dispatch:
@@ -34,8 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+
       - name: Build the pages
-        run: python3 scripts/build_wiki.py "$RUNNER_TEMP/wiki-pages"
+        run: node scripts/build-wiki.mjs "$RUNNER_TEMP/wiki-pages"
 
       - name: Clone the wiki
         run: |

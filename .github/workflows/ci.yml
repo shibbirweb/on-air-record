@@ -24,13 +24,16 @@ env:
 
 jobs:
   # The version lives in four files and means one thing. This is what stops them separating, and it costs
-  # seconds because it only reads them: no toolchain, no cache, no matrix.
+  # seconds because the check only reads them: no cargo, no npm install, no matrix.
   versions:
     name: versions agree
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 scripts/version.py check
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+      - run: node scripts/version.mjs check
 
   backend:
     name: backend (${{ matrix.os }})

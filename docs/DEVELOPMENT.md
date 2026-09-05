@@ -6,14 +6,14 @@ so a change to the interface means a change there too.
 
 Those two files are also **the wiki**. A GitHub wiki is a separate git repository, so nothing in `docs/`
 reaches it by being merged, and [`.github/workflows/wiki.yml`](../.github/workflows/wiki.yml) is what
-carries it across on every push to `master`. `scripts/build_wiki.py` does the conversion: it renames the
+carries it across on every push to `master`. `scripts/build-wiki.mjs` does the conversion: it renames the
 files to wiki page names, rewrites the links between them, turns links to anything that stays in the
 repository into absolute URLs, and generates `Home`, `_Sidebar` and `_Footer`.
 
 Two consequences worth knowing. **Editing a page in the wiki is pointless**, because the next push
 overwrites it; edit the source in `docs/` instead. And **the wiki has to exist before the workflow can
 push to it**: open the Wiki tab once and save any page, which is what creates the repository. Run
-`python3 scripts/build_wiki.py /tmp/wiki-preview` to see exactly what would be published.
+`node scripts/build-wiki.mjs /tmp/wiki-preview` to see exactly what would be published.
 
 ## Prerequisites
 
@@ -121,18 +121,24 @@ published to npm and nothing reads its version at build time, so mirroring is al
 Counting lockfiles, one number is recorded in four files, so do not move it by hand:
 
 ```sh
-python3 scripts/version.py show          # the authoritative version
-python3 scripts/version.py check         # verify all four agree, exit 1 if not
-python3 scripts/version.py set 0.2.0     # move all four, refreshing both lockfiles
+node scripts/version.mjs show          # the authoritative version
+node scripts/version.mjs check         # verify all four agree, exit 1 if not
+node scripts/version.mjs set 0.2.0     # move all four, refreshing both lockfiles
 ```
 
 `check` only reads files, so CI runs it as its own quick job and the four cannot drift apart unnoticed.
 `set` shells out to `cargo` and `npm` to regenerate the lockfiles rather than editing them, which is why
-it is the only mode that needs a toolchain.
+it is the only mode that needs those tools.
 
-Tags are not a version source. `release.yml` reads the manifest and **refuses to build when a pushed
-`v*` tag disagrees with it**, which is what stops an archive named for one version containing a binary
-that reports another. Cutting a release is covered in [SETUP.md](SETUP.md#publishing-a-release).
+Tags are not a version source. `release.yml` reads the manifest and **refuses to build when the release
+tag disagrees with it**, which is what stops an archive named for one version containing a binary that
+reports another. Cutting a release is covered in [SETUP.md](SETUP.md#publishing-a-release).
+
+## Repository tooling
+
+Everything in `scripts/` is plain Node with no dependencies, run as `node scripts/<name>.mjs`. Node is
+already required to build the UI, so it is the one toolchain every workflow can assume is present, and
+nothing else has to be installed to check a version or preview the wiki.
 
 ## Continuous integration and releases
 
@@ -144,10 +150,13 @@ the recorded versions agree. Ubuntu installs `libasound2-dev` because `cpal` lin
 The Windows leg is the point of the matrix. It cannot be reproduced locally on macOS, so a change that
 compiles here can still fail there and CI is the only warning you will get.
 
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs on a `v*` tag and produces one
-archive per target with a `sha256` alongside. The web UI is built once in its own job and shared, so all
-four archives ship identical assets. Trigger it manually with `workflow_dispatch` to rehearse the build
-without publishing anything.
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs when a release is **published
+from the GitHub web interface**, and attaches one archive per target with a `sha256` alongside. The web UI
+is built once in its own job and shared, so all four archives ship identical assets. Trigger it manually
+with `workflow_dispatch` to rehearse the build without publishing anything.
+
+Pushing a tag on its own no longer builds anything. The release object is what starts it, which is also
+what keeps the release notes you wrote by hand instead of overwriting them with generated ones.
 
 ## Code conventions
 

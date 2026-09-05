@@ -148,8 +148,10 @@ semicolons and trailing commas in TS). Project specifics on top of those:
 - Long argument lists become a parameter struct (`SegmentLocation`, `RecorderContext`).
 - Sources are ASCII only. Use `&middot;` and friends in JSX rather than literal glyphs.
 - **Never edit a version by hand.** `backend/Cargo.toml` is the source of truth and the same number is
-  recorded in four files; `python3 scripts/version.py set <version>` moves all of them and
-  `scripts/version.py check` is a CI job. Tags are validated against the manifest, not trusted.
+  recorded in four files; `node scripts/version.mjs set <version>` moves all of them and
+  `version.mjs check` is a CI job. A release tag is validated against the manifest, not trusted.
+- Repository tooling in `scripts/` is Node (`.mjs`, no dependencies), not Python. Node is already required
+  to build the UI, so it is the one toolchain the workflows can assume.
 
 ## Testing
 
