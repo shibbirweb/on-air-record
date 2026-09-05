@@ -1,0 +1,29 @@
+# Rust
+/backend/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+/frontend/dist/
+/frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data (recordings, sqlite database, logs)
+/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.pcm
+
+# Environment
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
