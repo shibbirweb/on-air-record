@@ -186,18 +186,34 @@ jobs:
             if curl -fsS http://127.0.0.1:8099/api/health -o health.json 2>/dev/null; then answered=1; break; fi
             sleep 1
           done
-          pkill -f 'on-air-record/on-air-record' 2>/dev/null || true
           echo "::endgroup::"
 
           if [ "$answered" -ne 1 ]; then
             echo "the service never answered on the configured port"
             cat service.log || true
+            pkill -f 'on-air-record/on-air-record' 2>/dev/null || true
             exit 1
           fi
           cat health.json; echo
           grep -q '"status":"ok"' health.json || { echo "health did not report ok"; exit 1; }
           test -f on-air-record/data/on-air-record.sqlite || { echo "the database was not created in the folder"; exit 1; }
           echo "the launcher started it on the configured port, with its data inside the folder"
+
+          # Stopping is the other half of running, and the script that does it is the one a user reaches
+          # for once their terminal is gone. Exercise it rather than reaching for pkill here.
+          echo "::group::stop via the script"
+          ./on-air-record/stop.sh
+          echo "::endgroup::"
+          if curl -fsS --max-time 2 http://127.0.0.1:8099/api/health > /dev/null 2>&1; then
+            echo "stop.sh returned but the service is still answering"
+            pkill -f 'on-air-record/on-air-record' 2>/dev/null || true
+            exit 1
+          fi
+          echo "stop.sh shut it down and freed the port"
+
+          # Saying so plainly beats failing, since there is nothing wrong with stopping what is stopped.
+          ./on-air-record/stop.sh | grep -q 'Nothing is running' || { echo "a second stop should be a no-op"; exit 1; }
+          echo "a second stop is a no-op"
 
           echo "::group::second run"
           second="$(sh "$GITHUB_WORKSPACE/scripts/install.sh" --no-start)"
@@ -250,6 +266,8 @@ jobs:
             } catch { Start-Sleep -Seconds 1 }
           }
           # start.cmd spawns powershell which spawns the program, so stopping the launcher is not enough.
+          # stop.cmd is what a user reaches for, so use it rather than reaching straight for Stop-Process.
+          & '.\on-air-record\stop.cmd'
           Stop-Process -Id $service.Id -Force -ErrorAction SilentlyContinue
           Get-Process -Name 'on-air-record' -ErrorAction SilentlyContinue | Stop-Process -Force
           Write-Host '::endgroup::'
@@ -262,6 +280,11 @@ jobs:
           if ($health.status -ne 'ok') { throw "health did not report ok: $($health.status)" }
           if (-not (Test-Path 'on-air-record\data\on-air-record.sqlite')) { throw 'the database was not created in the folder' }
           Write-Host 'start.cmd started it on the configured port, with its data inside the folder'
+
+          # Saying so plainly beats failing, since there is nothing wrong with stopping what is stopped.
+          $again = & '.\on-air-record\stop.cmd' | Out-String
+          if ($again -notmatch 'Nothing is running') { throw "a second stop should be a no-op, got: $again" }
+          Write-Host 'a second stop is a no-op'
 
           Write-Host '::group::second run'
           $second = & powershell -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\install.ps1" -NoStart | Out-String

@@ -307,6 +307,10 @@ at the right hand end the sound is too loud and will be distorted. Both are fixe
 **Stop** halts the recording. Nothing is captured while it is stopped, and that period will be a blank gap
 on the timeline for ever. Press it only when you mean to.
 
+It stops the *recording*, not the service. The page keeps working and everything already recorded stays
+playable. Shutting the service down itself is a separate thing, covered in the
+[installation guide](SETUP.md#stopping-it).
+
 The remaining rows are for support purposes. **Dropped frames** should stay at zero; a number climbing
 there means the computer cannot keep up with the audio.
 

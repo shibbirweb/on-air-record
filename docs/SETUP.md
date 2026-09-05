@@ -16,6 +16,7 @@ Nothing has to be installed on the listening devices.
 
 - [What you need](#what-you-need)
 - [The quick way](#the-quick-way)
+- [Stopping it](#stopping-it)
 - [Step 1: download](#step-1-download)
 - [Step 2: run it](#step-2-run-it)
 - [Step 3: open it](#step-3-open-it)
@@ -114,6 +115,58 @@ It will refuse to run on ARM Linux, such as a Raspberry Pi, because there is no 
 That needs [building from source](#building-from-source).
 
 The rest of this section is the same thing done by hand.
+
+## Stopping it
+
+While the terminal that started it is still open, **Ctrl+C** stops it cleanly.
+
+Once that terminal is gone, or if you started it and closed the window without the service noticing, use
+the stop script that sits beside the program:
+
+```sh
+./on-air-record/stop.sh            # macOS and Linux
+```
+
+```powershell
+.\on-air-record\stop.cmd           # Windows, or double click it in Explorer
+```
+
+It only stops the service started from **that folder**, so a second copy installed somewhere else keeps
+running. It reports what it stopped, or says nothing was running, which is not an error.
+
+### If you have lost the folder
+
+Find it by the port it is serving on:
+
+```sh
+# Linux
+sudo ss -lptn 'sport = :8080'
+
+# macOS
+sudo lsof -i :8080
+
+# then, with the process id from that
+kill <pid>
+```
+
+```powershell
+# Windows
+Get-Process on-air-record | Format-Table Id, Path
+Stop-Process -Name on-air-record
+```
+
+**Use a plain `kill`, not `kill -9`.** The service closes and indexes the segment it is part way through
+writing when it is asked to stop politely, so the last few seconds stay playable. `kill -9` throws them
+away. Only force it if a plain `kill` has had twenty seconds and done nothing.
+
+Windows has no polite equivalent for a console program, so `stop.cmd` is a hard stop there and does lose
+the few seconds not yet written out. Ctrl+C in the window keeps them.
+
+### Stopping recording is not the same as stopping the service
+
+The **Stop** button in the Recorder panel of the web interface stops *recording*. The service keeps
+running and keeps serving the page, so you can still listen back to everything already recorded. That
+button is for pausing the recorder, not for shutting the machine down.
 
 ## Step 1: download
 
@@ -673,6 +726,11 @@ sleep. A sleeping computer records nothing, and the gap will show as a blank str
 **It stopped after I closed the terminal.**
 That terminal was running it. Set it up as a service so it survives, using the section for your platform
 above.
+
+**I closed the terminal and it is still running.**
+Closing a terminal usually stops it, but not always: over SSH, or with a terminal that exits without
+signalling its children, the service is left serving. Run `./on-air-record/stop.sh` from the folder you
+installed into, or find it by its port. Both are covered under [Stopping it](#stopping-it).
 
 **Recordings older than a day or two keep vanishing.**
 That is the retention window doing its job, and it defaults to 24 hours. Raise it on the settings page,

@@ -261,6 +261,57 @@ exit $LASTEXITCODE
 rem Double click this, or run it from a command prompt, to start On Air Record.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" %*
 '@ | Set-Content -Path (Join-Path $InstallDir 'start.cmd') -Encoding ASCII
+
+    @'
+# Stops the On Air Record started from this folder.
+# Written by the installer.
+#
+# It matches on this installation's own program path rather than on the name, so a second copy running
+# from somewhere else is left alone.
+#
+# Windows has no polite signal for a console program, so this is a hard stop. The recording up to the last
+# completed segment is safe, because segments are indexed as they close; only the few seconds still being
+# written are lost. Ctrl+C in the window it is running in shuts down cleanly and keeps those too.
+$ErrorActionPreference = 'Stop'
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$program = Join-Path $here 'on-air-record.exe'
+
+# Get-Process rather than Win32_Process: it is present in every PowerShell on every platform, and its
+# Path is the same absolute path this installation was written to.
+function Get-Running {
+    param([string] $Program)
+    return @(Get-Process -Name 'on-air-record' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $Program })
+}
+
+$running = Get-Running -Program $program
+if ($running.Count -eq 0) {
+    Write-Host "Nothing is running from $here."
+    exit 0
+}
+
+Write-Host "Stopping $($running.Id -join ', ')"
+foreach ($process in $running) {
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+}
+
+foreach ($attempt in 1..20) {
+    if ((Get-Running -Program $program).Count -eq 0) {
+        Write-Host 'Stopped.'
+        exit 0
+    }
+    Start-Sleep -Seconds 1
+}
+
+Write-Error 'It is still running after 20s.'
+exit 1
+'@ | Set-Content -Path (Join-Path $InstallDir 'stop.ps1') -Encoding ASCII
+
+    @'
+@echo off
+rem Double click this, or run it from a command prompt, to stop On Air Record.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0stop.ps1" %*
+'@ | Set-Content -Path (Join-Path $InstallDir 'stop.cmd') -Encoding ASCII
 }
 
 function Get-RelativePath {
@@ -284,6 +335,7 @@ $binary     = Join-Path $installDir 'on-air-record.exe'
 $configFile = Join-Path $installDir 'config'
 $dataDir    = Join-Path $installDir 'data'
 $launcher   = Join-Path $installDir 'start.cmd'
+$stopper    = Join-Path $installDir 'stop.cmd'
 
 Write-Detail "this machine:  Windows $env:PROCESSOR_ARCHITECTURE  ->  $target"
 Write-Detail "installing to: $(Get-RelativePath $installDir)"
@@ -342,6 +394,7 @@ $chosenPort = if ($settings['OAR_PORT']) { $settings['OAR_PORT'] } else { $Defau
 
 Write-Step 'Ready'
 Write-Detail "start it again:  $(Get-RelativePath $launcher)"
+Write-Detail "stop it:         $(Get-RelativePath $stopper)"
 Write-Detail "open:            http://localhost:$chosenPort"
 Write-Detail "settings:        $(Get-RelativePath $configFile)"
 Write-Detail "recordings:      $(Get-RelativePath $dataDir)"
@@ -352,7 +405,9 @@ Write-Detail 'Windows will ask whether to allow it through the firewall the firs
 Write-Detail 'private networks, or no other machine will be able to listen.'
 
 if (-not $NoStart) {
-    Write-Step "Starting on port $chosenPort, press Ctrl+C to stop"
+    Write-Step "Starting on port $chosenPort"
+    Write-Detail 'Ctrl+C stops it cleanly while this window is open. Afterwards, or if the window goes'
+    Write-Detail "away with the service still running, use $(Get-RelativePath $stopper)."
     Write-Host ''
     & $launcher
 }

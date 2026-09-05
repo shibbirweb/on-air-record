@@ -75,6 +75,7 @@ done
 BINARY="$install_dir/on-air-record"
 CONFIG_FILE="$install_dir/config"
 LAUNCHER="$install_dir/start.sh"
+STOPPER="$install_dir/stop.sh"
 DATA_DIR="$install_dir/data"
 
 need() { command -v "$1" >/dev/null 2>&1 || die "this script needs $1, which is not installed"; }
@@ -272,6 +273,54 @@ export OAR_DATA_DIR
 exec "$here/on-air-record" "$@"
 LAUNCHER_SCRIPT
   chmod 755 "$LAUNCHER"
+
+  cat > "$STOPPER" <<'STOP_SCRIPT'
+#!/bin/sh
+# Stops the On Air Record started from this folder.
+# Written by the installer.
+#
+# It matches on this installation's own program path rather than on the name, so a second copy running
+# from somewhere else is left alone. And it sends TERM rather than KILL, because the service closes and
+# indexes the segment it is part way through writing on the way out. KILL loses those seconds.
+set -eu
+
+here="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+program="$here/on-air-record"
+
+# pgrep lives in procps, which a minimal install may not have. The fallback reads the same thing out of ps.
+running() {
+  if command -v pgrep > /dev/null 2>&1; then
+    pgrep -f "$program" 2>/dev/null || true
+  else
+    ps -eo pid=,args= 2>/dev/null | awk -v p="$program" 'index($0, p) { print $1 }' || true
+  fi
+}
+
+pids="$(running)"
+if [ -z "$pids" ]; then
+  echo "Nothing is running from $here."
+  exit 0
+fi
+
+echo "Stopping $(echo "$pids" | tr '\n' ' ')"
+for pid in $pids; do
+  kill "$pid" 2>/dev/null || true
+done
+
+# Long enough for the open segment to be flushed and indexed, which is the whole reason for TERM.
+waited=0
+while [ "$waited" -lt 20 ]; do
+  [ -z "$(running)" ] && { echo "Stopped."; exit 0; }
+  sleep 1
+  waited=$((waited + 1))
+done
+
+echo "It is still running after ${waited}s. Something is wedged, so force it:" >&2
+echo "  kill -9 $(running | tr '\n' ' ')" >&2
+echo "That loses the few seconds of audio not yet written out." >&2
+exit 1
+STOP_SCRIPT
+  chmod 755 "$STOPPER"
 }
 
 # A path relative to where the user is standing reads better than an absolute one in the closing message.
@@ -348,6 +397,7 @@ port="${OAR_PORT:-$DEFAULT_PORT}"
 
 step "Ready"
 say "  start it again:  $(relative_to_pwd "$LAUNCHER")"
+say "  stop it:         $(relative_to_pwd "$STOPPER")"
 say "  open:            http://localhost:$port"
 say "  settings:        $(relative_to_pwd "$CONFIG_FILE")"
 say "  recordings:      $(relative_to_pwd "$DATA_DIR")"
@@ -355,7 +405,9 @@ say ""
 say "  To remove it completely, delete $(relative_to_pwd "$install_dir")."
 
 if [ "$want_start" -eq 1 ]; then
-  step "Starting on port $port, press Ctrl+C to stop"
+  step "Starting on port $port"
+  say "  Ctrl+C stops it while this terminal is open. Afterwards, or if the terminal goes away with the"
+  say "  service still running, use $(relative_to_pwd "$STOPPER")."
   say ""
   exec "$LAUNCHER"
 fi
