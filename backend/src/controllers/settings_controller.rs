@@ -15,6 +15,14 @@ pub async fn show(State(state): State<Arc<AppState>>) -> AppResult<Json<Settings
     Ok(Json(state.settings.current().into()))
 }
 
+/// `GET /api/settings/defaults`
+///
+/// The values a reset restores. Exposed so the UI can say precisely what a reset will change instead of
+/// hardcoding a second copy of the defaults that drifts the first time one of them is retuned.
+pub async fn defaults() -> AppResult<Json<SettingsDto>> {
+    Ok(Json(crate::models::Settings::default().into()))
+}
+
 /// `PATCH /api/settings`
 ///
 /// Some preferences only take effect on a fresh stream, so a change to those restarts capture when it is
@@ -31,6 +39,21 @@ pub async fn update(
     let updated = state.settings.update(&patch)?;
 
     if needs_restart && state.capture.is_active() {
+        state.capture.restart().await?;
+    }
+
+    Ok(Json(updated.into()))
+}
+
+/// `POST /api/settings/reset`
+///
+/// Restores the shipped defaults, leaving the chosen input device alone. Like `PATCH`, it restarts
+/// capture when a preference that only applies to a fresh stream has actually changed.
+pub async fn reset(State(state): State<Arc<AppState>>) -> AppResult<Json<SettingsDto>> {
+    let before = state.settings.current();
+    let updated = state.settings.reset()?;
+
+    if updated.frame_ms != before.frame_ms && state.capture.is_active() {
         state.capture.restart().await?;
     }
 

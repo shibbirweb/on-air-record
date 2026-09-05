@@ -106,6 +106,10 @@ export const api = {
       body: JSON.stringify(patch),
     }),
 
+  settingsDefaults: () => request<Settings>('/settings/defaults'),
+
+  resetSettings: () => request<Settings>('/settings/reset', { method: 'POST' }),
+
   timelineRange: () => request<TimelineRange>('/timeline/range'),
 
   recordingDays: () =>

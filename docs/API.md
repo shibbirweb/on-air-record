@@ -133,6 +133,22 @@ Accepts any subset of the settings object and returns the full updated object.
 | `autoStart` | boolean | | On next service start |
 | `frameMs` | integer | 20 to 500 | On next capture start |
 
+### `GET /api/settings/defaults`
+
+The values a reset restores, in the same shape as `GET /api/settings`. Exposed so a client can say
+precisely what a reset will change rather than keeping a second copy of the defaults that drifts.
+
+### `POST /api/settings/reset`
+
+Restores the defaults and returns the new settings. Takes no body.
+
+The selected `inputDeviceId` is **preserved**, because the microphone is chosen elsewhere and silently
+moving the recorder onto another one is not what resetting the tuning asks for. As with `PATCH`, capture
+restarts if `frameMs` actually changed.
+
+Resetting `retentionHours` downwards makes the janitor delete everything outside the smaller window within
+a minute, and that audio is not recoverable, so a client should confirm before calling this.
+
 ## Timeline
 
 ### `GET /api/timeline/range`

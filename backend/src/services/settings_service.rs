@@ -69,6 +69,19 @@ impl SettingsService {
         Ok(settings)
     }
 
+    /// Restore the shipped defaults.
+    ///
+    /// The selected input device is deliberately preserved. It is chosen from a different part of the UI,
+    /// and silently moving the recorder onto another microphone is not what someone resetting the tuning
+    /// sliders is asking for.
+    pub fn reset(&self) -> AppResult<Settings> {
+        let input_device_id = self.current().input_device_id;
+        self.replace(Settings {
+            input_device_id,
+            ..Settings::default()
+        })
+    }
+
     /// Convenience used by the device endpoint, which only ever changes one field.
     pub fn set_input_device(&self, device_id: Option<String>) -> AppResult<Settings> {
         self.update(&SettingsPatch {
@@ -126,6 +139,53 @@ mod tests {
             reloaded.current().input_device_id,
             Some("Scarlett Solo USB".to_string())
         );
+    }
+
+    #[test]
+    fn reset_restores_the_defaults_but_keeps_the_device() {
+        let service = service();
+        service
+            .replace(Settings {
+                input_device_id: Some("Scarlett Solo USB".to_string()),
+                gain: 3.5,
+                segment_seconds: 60,
+                retention_hours: 168,
+                auto_start: false,
+                frame_ms: 40,
+            })
+            .expect("configure");
+
+        let reset = service.reset().expect("reset");
+
+        assert_eq!(reset.gain, Settings::default().gain);
+        assert_eq!(reset.segment_seconds, Settings::default().segment_seconds);
+        assert_eq!(reset.retention_hours, Settings::default().retention_hours);
+        assert_eq!(reset.auto_start, Settings::default().auto_start);
+        assert_eq!(reset.frame_ms, Settings::default().frame_ms);
+        // The microphone is chosen elsewhere, so resetting the tuning must not move it.
+        assert_eq!(reset.input_device_id, Some("Scarlett Solo USB".to_string()));
+    }
+
+    #[test]
+    fn reset_is_persisted_and_moves_the_live_gain() {
+        let database = Arc::new(Database::open_in_memory().expect("database"));
+        let repository = Arc::new(SettingsRepository::new(database));
+        let service = SettingsService::load(repository.clone()).expect("service");
+        let gain = service.gain_control();
+
+        service
+            .update(&SettingsPatch {
+                gain: Some(3.0),
+                ..SettingsPatch::default()
+            })
+            .expect("update");
+        assert_eq!(gain.get(), 3.0);
+
+        service.reset().expect("reset");
+
+        assert_eq!(gain.get(), Settings::default().gain);
+        let reloaded = SettingsService::load(repository).expect("reload");
+        assert_eq!(reloaded.current(), Settings::default());
     }
 
     #[test]

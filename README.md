@@ -229,6 +229,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Recorder panel: state, elapsed time, format, session, dropped frames, link health
 - [x] Storage panel with disk usage, history depth, retention, and recent sessions
 - [x] Settings panel for gain, retention, segment length, and automatic start
+- [x] Reset to defaults, with a confirmation that warns when it would shorten retention and delete audio
 - [x] Light and dark themes with a toggle, remembered per browser
 - [x] Responsive layout that reflows to a single column on narrow screens
 - [ ] Timeline bookmarks and named markers

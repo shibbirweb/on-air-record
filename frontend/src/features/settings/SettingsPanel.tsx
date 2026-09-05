@@ -5,9 +5,13 @@
  * range would otherwise fire dozens of writes, and changing the frame size restarts capture on the server.
  */
 
+import { RotateCcw, TriangleAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import type { Settings } from '@/api/types';
+import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Separator } from '@/components/ui/separator';
 
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
@@ -16,10 +20,14 @@ import { useSettingsStore } from '@/store/useSettingsStore';
 
 export function SettingsPanel() {
   const settings = useSettingsStore((state) => state.settings);
+  const defaults = useSettingsStore((state) => state.defaults);
   const saving = useSettingsStore((state) => state.saving);
   const error = useSettingsStore((state) => state.error);
   const refresh = useSettingsStore((state) => state.refresh);
   const update = useSettingsStore((state) => state.update);
+  const reset = useSettingsStore((state) => state.reset);
+
+  const [confirmingReset, setConfirmingReset] = useState(false);
 
   /**
    * While a slider is being dragged its value lives here and overrides the stored one, so the thumb
@@ -40,6 +48,21 @@ export function SettingsPanel() {
   const gain = draft.gain ?? settings.gain;
   const retentionHours = draft.retentionHours ?? settings.retentionHours;
   const segmentSeconds = draft.segmentSeconds ?? settings.segmentSeconds;
+
+  // A reset that changes nothing is just a confusing button, so it is disabled when already at defaults.
+  // The device is excluded because a reset deliberately leaves it alone.
+  const atDefaults =
+    defaults !== null &&
+    settings.gain === defaults.gain &&
+    settings.segmentSeconds === defaults.segmentSeconds &&
+    settings.retentionHours === defaults.retentionHours &&
+    settings.autoStart === defaults.autoStart &&
+    settings.frameMs === defaults.frameMs;
+
+  // Shrinking the retention window is the one genuinely destructive thing a reset can do: the janitor
+  // acts within a minute and the audio is gone.
+  const retentionShrinks =
+    defaults !== null && defaults.retentionHours < settings.retentionHours;
 
   const commit = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setDraft((current) => {
@@ -129,6 +152,60 @@ export function SettingsPanel() {
 
       {saving && <p className="text-muted-foreground text-xs">Saving...</p>}
       {error && <p className="text-destructive text-xs">{error}</p>}
+
+      <Separator />
+
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-muted-foreground text-xs">
+          {atDefaults
+            ? 'These are the default settings.'
+            : 'Some settings differ from the defaults.'}
+        </p>
+
+        <Popover open={confirmingReset} onOpenChange={setConfirmingReset}>
+          <PopoverTrigger asChild>
+            <Button size="sm" variant="outline" disabled={saving || atDefaults}>
+              <RotateCcw />
+              Reset
+            </Button>
+          </PopoverTrigger>
+
+          {/* Opens upward: the button is the last thing in a long panel, so there is rarely room below. */}
+          <PopoverContent side="top" align="end" className="w-72 space-y-3 p-3">
+            <p className="text-sm font-medium">Restore default settings?</p>
+            <p className="text-muted-foreground text-xs">
+              Gain, retention, segment length, and start up behaviour go back to their defaults. The
+              selected microphone is left alone.
+            </p>
+
+            {retentionShrinks && (
+              <p className="text-destructive flex items-start gap-1.5 text-xs">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                Retention drops from {settings.retentionHours} h to {defaults?.retentionHours} h. Audio
+                older than that is deleted within a minute, and cannot be recovered.
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button size="sm" variant="ghost" onClick={() => setConfirmingReset(false)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                variant={retentionShrinks ? 'destructive' : 'default'}
+                disabled={saving}
+                onClick={() => {
+                  void reset();
+                  setDraft({});
+                  setConfirmingReset(false);
+                }}
+              >
+                Reset
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
     </div>
   );
 }

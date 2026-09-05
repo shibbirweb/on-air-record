@@ -7,15 +7,19 @@ import type { Settings, SettingsPatch } from '@/api/types';
 
 type SettingsState = {
   settings: Settings | null;
+  /** What a reset restores, fetched from the server so the UI never keeps its own copy. */
+  defaults: Settings | null;
   loading: boolean;
   saving: boolean;
   error: string | null;
   refresh: () => Promise<void>;
   update: (patch: SettingsPatch) => Promise<void>;
+  reset: () => Promise<void>;
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: null,
+  defaults: null,
   loading: false,
   saving: false,
   error: null,
@@ -23,11 +27,25 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   refresh: async () => {
     set({ loading: true });
     try {
-      set({ settings: await api.settings(), error: null });
+      const [settings, defaults] = await Promise.all([api.settings(), api.settingsDefaults()]);
+      set({ settings, defaults, error: null });
     } catch (cause) {
       set({ error: cause instanceof ApiError ? cause.message : 'could not load settings' });
     } finally {
       set({ loading: false });
+    }
+  },
+
+  reset: async () => {
+    set({ saving: true });
+    try {
+      // No optimistic update here: the defaults live on the server, and guessing them in the UI is how
+      // the two drift apart.
+      set({ settings: await api.resetSettings(), error: null });
+    } catch (cause) {
+      set({ error: cause instanceof ApiError ? cause.message : 'could not reset settings' });
+    } finally {
+      set({ saving: false });
     }
   },
 
