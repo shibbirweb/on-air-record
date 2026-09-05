@@ -1,0 +1,114 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design tokens follow the shadcn/ui contract, so any component copied from the registry works without
+ * edits. The palette is a warm neutral with an amber accent: this is a broadcast console, and amber is
+ * what an on air light looks like, so the accent carries meaning rather than decoration.
+ */
+:root {
+  --radius: 0.65rem;
+
+  --background: oklch(0.985 0.002 90);
+  --foreground: oklch(0.21 0.006 285);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.006 285);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 285);
+  --primary: oklch(0.72 0.16 60);
+  --primary-foreground: oklch(0.21 0.02 60);
+  --secondary: oklch(0.96 0.003 90);
+  --secondary-foreground: oklch(0.28 0.008 285);
+  --muted: oklch(0.96 0.003 90);
+  --muted-foreground: oklch(0.55 0.012 285);
+  --accent: oklch(0.95 0.02 70);
+  --accent-foreground: oklch(0.28 0.02 60);
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.98 0.01 27);
+  --border: oklch(0.9 0.004 285);
+  --input: oklch(0.9 0.004 285);
+  --ring: oklch(0.72 0.16 60);
+
+  /* Signal colours used by the meter, the waveform and the timeline. */
+  --live: oklch(0.62 0.21 25);
+  --wave: oklch(0.72 0.16 60);
+  --wave-muted: oklch(0.82 0.06 60);
+  --coverage: oklch(0.88 0.04 60);
+}
+
+.dark {
+  --background: oklch(0.16 0.005 285);
+  --foreground: oklch(0.96 0.002 90);
+  --card: oklch(0.2 0.006 285);
+  --card-foreground: oklch(0.96 0.002 90);
+  --popover: oklch(0.2 0.006 285);
+  --popover-foreground: oklch(0.96 0.002 90);
+  --primary: oklch(0.78 0.16 62);
+  --primary-foreground: oklch(0.2 0.03 60);
+  --secondary: oklch(0.26 0.006 285);
+  --secondary-foreground: oklch(0.96 0.002 90);
+  --muted: oklch(0.26 0.006 285);
+  --muted-foreground: oklch(0.68 0.01 285);
+  --accent: oklch(0.3 0.02 62);
+  --accent-foreground: oklch(0.94 0.02 62);
+  --destructive: oklch(0.65 0.2 27);
+  --destructive-foreground: oklch(0.98 0.01 27);
+  --border: oklch(0.29 0.006 285);
+  --input: oklch(0.31 0.006 285);
+  --ring: oklch(0.78 0.16 62);
+
+  --live: oklch(0.7 0.2 25);
+  --wave: oklch(0.78 0.16 62);
+  --wave-muted: oklch(0.45 0.08 62);
+  --coverage: oklch(0.34 0.04 62);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-live: var(--live);
+  --color-wave: var(--wave);
+  --color-wave-muted: var(--wave-muted);
+  --color-coverage: var(--coverage);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Timestamps and counters change every frame, so they are tabular to stop the layout from jittering. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
