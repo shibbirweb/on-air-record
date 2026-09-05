@@ -18,10 +18,48 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The version comes from the manifest, never from the tag. A tag is just a label somebody typed, and one
+  # that disagreed with the code would ship an archive called v0.3.0 holding a binary that reports v0.1.0
+  # in its own footer, with nothing to catch it.
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      artifact_tag: ${{ steps.resolve.outputs.artifact_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check every manifest agrees
+        run: python3 scripts/version.py check
+
+      - name: Resolve the version to build
+        id: resolve
+        run: |
+          version="$(python3 scripts/version.py show)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match backend/Cargo.toml, which says $version." \
+                   "Either tag v$version, or run 'python3 scripts/version.py set <version>', commit, and retag."
+              exit 1
+            fi
+            echo "artifact_tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "releasing $GITHUB_REF_NAME"
+          else
+            # A rehearsal off a branch. Naming it after the branch would produce an identical filename on
+            # every run and read as though 'master' were a version.
+            tag="v$version-dev-$(git rev-parse --short HEAD)"
+            echo "artifact_tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "rehearsing $tag, nothing will be published"
+          fi
+
   # Built once and shared, so every platform ships byte identical assets rather than four separate builds
   # that merely ought to match.
   ui:
     name: web ui
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +84,7 @@ jobs:
 
   binary:
     name: ${{ matrix.target }}
-    needs: ui
+    needs: [version, ui]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -92,7 +130,7 @@ jobs:
       - name: Package
         if: runner.os != 'Windows'
         run: |
-          name="on-air-record-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="on-air-record-${{ needs.version.outputs.artifact_tag }}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp "backend/target/${{ matrix.target }}/release/on-air-record" "dist/$name/"
           cp README.md LICENSE "dist/$name/"
@@ -111,7 +149,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $name = "on-air-record-$env:GITHUB_REF_NAME-${{ matrix.target }}"
+          $name = "on-air-record-${{ needs.version.outputs.artifact_tag }}-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
           Copy-Item "backend/target/${{ matrix.target }}/release/on-air-record.exe" "dist/$name/"
           Copy-Item "README.md" "dist/$name/"

@@ -23,6 +23,15 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # The version lives in four files and means one thing. This is what stops them separating, and it costs
+  # seconds because it only reads them: no toolchain, no cache, no matrix.
+  versions:
+    name: versions agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/version.py check
+
   backend:
     name: backend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

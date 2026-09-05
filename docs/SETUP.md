@@ -489,14 +489,32 @@ changing the code.
 
 ## Publishing a release
 
-For maintainers. Building the downloadable files is automatic; you only have to tag a version.
+For maintainers. Building the downloadable files is automatic; you decide the version and push a tag.
+
+The version lives in `backend/Cargo.toml` and nowhere else that matters. It is what the program reports
+from `/api/health`, what `--version` prints, and what the footer shows, so the tag has to agree with it.
+Move it with the script rather than by hand, because the same number is recorded in four files:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+python3 scripts/version.py set 0.2.0     # both manifests and both lockfiles
+git commit -am "chore: release 0.2.0"
+git tag v0.2.0
+git push origin master v0.2.0
 ```
 
-That starts [`.github/workflows/release.yml`](../.github/workflows/release.yml), which:
+To release the version already in the manifest, skip the first two steps and just tag it.
+
+**A tag that disagrees with the manifest fails the build on purpose**, before anything is compiled:
+
+```
+Tag v0.3.0 does not match backend/Cargo.toml, which says 0.1.0. Either tag v0.1.0, or run
+'python3 scripts/version.py set <version>', commit, and retag.
+```
+
+That is the guard against shipping an archive named for one version holding a binary that reports
+another. Delete the bad tag, fix the manifest or the tag, and push again.
+
+Pushing the tag starts [`.github/workflows/release.yml`](../.github/workflows/release.yml), which:
 
 1. Builds the web interface once, so every platform ships identical assets rather than four builds that
    merely ought to match.
@@ -508,11 +526,14 @@ That starts [`.github/workflows/release.yml`](../.github/workflows/release.yml),
 
 To rehearse the build without publishing anything, run the workflow manually from the Actions tab using
 **Run workflow**. It produces the same files as downloadable artifacts and stops short of creating a
-release.
+release. Those are named for the manifest version plus the commit, such as
+`on-air-record-v0.1.0-dev-4f5389a-x86_64-unknown-linux-gnu.tar.gz`, so a rehearsal is never mistaken for
+a real release.
 
 Separately, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push: formatting,
-linting and the full test suite on macOS, Linux and Windows, plus the frontend checks. That Windows job is
-the only thing standing behind the Windows build, since it cannot be produced or tested from a Mac.
+linting and the full test suite on macOS, Linux and Windows, the frontend checks, and a check that the
+four recorded versions still agree. That Windows job is the only thing standing behind the Windows build,
+since it cannot be produced or tested from a Mac.
 
 ## Setup problems
 

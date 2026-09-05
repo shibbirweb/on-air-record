@@ -108,12 +108,38 @@ UI never means recompiling the backend. Only a release build carries the assets.
 | `npm run lint` | oxlint over the frontend |
 | `cargo build --release --target <triple>` | What the release workflow runs per platform |
 
+## Versioning
+
+**`backend/Cargo.toml` is the source of truth.** It is the only version anybody ever sees: `/api/health`
+reports it, `--version` prints it, the startup log records it, and the UI footer shows it. All four come
+from `env!("CARGO_PKG_VERSION")`.
+
+`frontend/package.json` has to carry the same number, because the frontend is compiled into that same
+binary and a manifest claiming otherwise is just a lie waiting to be quoted in a bug report. It is never
+published to npm and nothing reads its version at build time, so mirroring is all that is required.
+
+Counting lockfiles, one number is recorded in four files, so do not move it by hand:
+
+```sh
+python3 scripts/version.py show          # the authoritative version
+python3 scripts/version.py check         # verify all four agree, exit 1 if not
+python3 scripts/version.py set 0.2.0     # move all four, refreshing both lockfiles
+```
+
+`check` only reads files, so CI runs it as its own quick job and the four cannot drift apart unnoticed.
+`set` shells out to `cargo` and `npm` to regenerate the lockfiles rather than editing them, which is why
+it is the only mode that needs a toolchain.
+
+Tags are not a version source. `release.yml` reads the manifest and **refuses to build when a pushed
+`v*` tag disagrees with it**, which is what stops an archive named for one version containing a binary
+that reports another. Cutting a release is covered in [SETUP.md](SETUP.md#publishing-a-release).
+
 ## Continuous integration and releases
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request: the
 backend matrix does `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` on
-Ubuntu, macOS and Windows, and a separate job lints, tests and builds the frontend. Ubuntu installs
-`libasound2-dev` because `cpal` links against ALSA there.
+Ubuntu, macOS and Windows, a separate job lints, tests and builds the frontend, and a third checks that
+the recorded versions agree. Ubuntu installs `libasound2-dev` because `cpal` links against ALSA there.
 
 The Windows leg is the point of the matrix. It cannot be reproduced locally on macOS, so a change that
 compiles here can still fail there and CI is the only warning you will get.
