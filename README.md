@@ -193,7 +193,8 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Storage, session, and history depth reporting
 - [ ] Opus compression for segments, which would beat sample rate reduction for the same quality but
       needs a per segment frame index before seeking still works
-- [ ] Export a time range as a downloadable WAV file
+- [x] Export a time range as a downloadable WAV file, streamed rather than buffered, with gaps written
+      as silence so the file lines up with the timeline
 
 ### Milestone 4: streaming
 

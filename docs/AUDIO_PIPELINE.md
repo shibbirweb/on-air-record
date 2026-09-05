@@ -159,6 +159,21 @@ envelope. Drawing an hour of timeline reads 360 rows and 36 KB of envelope rathe
 Buckets are aligned to the segment start, not to the wall clock, and the segment start timestamp is stored,
 so the renderer can map bucket index to absolute time exactly.
 
+### Export
+
+A WAV export is the same segments with a 44 byte header in front, because they already hold exactly the
+sample format a canonical WAV carries. Nothing is transcoded unless the range spans two recording rates,
+in which case the higher material is downsampled to the lowest rate present.
+
+The header has to state the data length before any audio is sent, which is only possible because
+uncompressed audio has an exactly predictable size: the range duration times the rate times the sample
+width. The whole plan is therefore decided, and can be refused, before the first byte goes out. Gaps are
+filled with silence so the promised length is always met, whatever the recorder was doing.
+
+Reading happens on the blocking pool and reaches the socket through a bounded channel, so a large export
+neither stalls the recorder nor lets a client that stops reading make the server buffer the file in
+memory.
+
 ## 5. Playback and the DVR cursor
 
 `PlaybackService::cursor_at(timestamp)` builds an iterator over the segments that cover the requested time,

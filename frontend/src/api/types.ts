@@ -179,6 +179,18 @@ export type AudioFrame = {
   samples: Float32Array;
 };
 
+/** What an export of a range would produce, before committing to the download. */
+export type ExportPlan = {
+  fromMs: number;
+  toMs: number;
+  durationMs: number;
+  sampleRate: number;
+  channels: number;
+  totalBytes: number;
+  /** True when the range spans more than one recording rate and exports at the lowest. */
+  mixedRates: boolean;
+};
+
 /** A named moment on the timeline. */
 export type Bookmark = {
   id: number;

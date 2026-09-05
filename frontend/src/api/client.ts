@@ -9,6 +9,7 @@
 import type {
   Bookmark,
   DirectoryTest,
+  ExportPlan,
   Health,
   InputDevice,
   Peaks,
@@ -152,4 +153,19 @@ export const api = {
     request<{ sessions: RecordingSession[] }>('/sessions').then((body) => body.sessions),
 
   storage: () => request<Storage>('/storage'),
+
+  exportPlan: (fromMs: number, toMs: number) =>
+    request<ExportPlan>(
+      `/export/plan?fromMs=${Math.round(fromMs)}&toMs=${Math.round(toMs)}`,
+    ),
+
+  /**
+   * The download URL, not the bytes.
+   *
+   * Fetching a gigabyte into memory to hand it back as a blob would defeat the streaming the server
+   * does; letting the browser follow the link keeps it a normal download with a progress bar, and
+   * `Content-Disposition` supplies the filename.
+   */
+  exportUrl: (fromMs: number, toMs: number) =>
+    `${API_BASE}/export?fromMs=${Math.round(fromMs)}&toMs=${Math.round(toMs)}`,
 };

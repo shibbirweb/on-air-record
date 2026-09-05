@@ -254,6 +254,45 @@ sessions recorded on one day are reported as one entry, however many times the r
 Each value is `0..255`. A zero means either silence or no recording, so the UI reads `coverage` from
 `/api/timeline/range` to tell the two apart.
 
+## Export
+
+### `GET /api/export/plan`
+
+What an export would produce, without producing it. Same query as the download, so a client can show the
+size and format, and surface a refusal, while the range can still be adjusted.
+
+| Query parameter | Required | Notes |
+| --- | --- | --- |
+| `fromMs` | yes | Start of the range, epoch milliseconds |
+| `toMs` | yes | End of the range, must be greater than `fromMs` |
+
+```json
+{
+  "fromMs": 1757030400000,
+  "toMs": 1757030700000,
+  "durationMs": 300000,
+  "sampleRate": 48000,
+  "channels": 1,
+  "totalBytes": 28800044,
+  "mixedRates": false
+}
+```
+
+### `GET /api/export`
+
+Streams a canonical 16 bit PCM WAV file with `Content-Length` and a
+`Content-Disposition: attachment` filename naming the range. Same query parameters as the plan.
+
+Three things are worth knowing about what comes out:
+
+- **Gaps become silence** rather than being skipped, so the file's duration matches the requested range
+  and thirty seconds into the file is thirty seconds after `fromMs`.
+- **A range spanning several recording rates exports at the lowest of them**, downsampling the rest.
+  Upsampling instead would invent detail the audio never had and make the file bigger for nothing. The
+  plan reports this as `mixedRates`.
+- **Exports are capped at 2 GB.** RIFF sizes are unsigned 32 bit, so 4 GB is a hard format limit; the cap
+  sits well below it. A larger span is refused by the plan with the size it would have been.
+
 ## Bookmarks
 
 Named moments on the timeline. A bookmark addresses a point in time rather than a segment, so a moment
