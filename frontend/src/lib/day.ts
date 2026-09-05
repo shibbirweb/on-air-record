@@ -101,3 +101,37 @@ export function dayLabel(
     day: 'numeric',
   });
 }
+
+/**
+ * Format an instant for a `datetime-local` input, which expects local wall clock with no zone.
+ *
+ * Built from the local parts rather than from `toISOString`, which converts to UTC and would show a time
+ * hours away from the one on the timeline.
+ */
+export function toDateTimeLocal(timestampMs: number): string {
+  const date = new Date(timestampMs);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
+}
+
+/**
+ * Read a `datetime-local` value back into an instant, or `null` when it is incomplete.
+ *
+ * A value with no zone suffix is parsed as local time by the language, which is what the input meant, so
+ * this round trips with `toDateTimeLocal` without any offset arithmetic.
+ */
+export function fromDateTimeLocal(value: string): number | null {
+  if (value.trim() === '') {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+}

@@ -1,22 +1,26 @@
 /**
  * Downloading a span of the recording as a WAV file.
  *
- * The range defaults to the window already on screen, because framing a span is exactly what the timeline
- * is for and asking someone to type two timestamps they have already scrolled to would be perverse.
+ * The range opens on the window already framed on the timeline, because that is what the timeline is for
+ * and asking someone to type two timestamps they have already scrolled to would be perverse. Presets
+ * cover "grab what just happened", and the two fields cover everything else.
  *
- * The plan is fetched before the download is offered, so the size, the format and any refusal are all
- * visible while the range can still be adjusted, rather than arriving as a failed download.
+ * The plan is fetched whenever the range settles, so the size, the format and any refusal are visible
+ * while the range can still be adjusted, rather than arriving as a failed download.
  */
 
 import { AlertTriangle, Download, FileAudio, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { api, ApiError } from '@/api/client';
 import type { ExportPlan } from '@/api/types';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
-import { formatBytes, formatClock, formatDateTime, formatDuration } from '@/lib/format';
+import { fromDateTimeLocal, toDateTimeLocal } from '@/lib/day';
+import { formatBytes, formatDateTime, formatDuration } from '@/lib/format';
 import { useTimelineStore } from '@/store/useTimelineStore';
 
 /** Quick spans measured back from the live edge, for the common "grab what just happened" case. */
@@ -26,40 +30,95 @@ const RECENT = [
   { label: 'Last 15m', ms: 15 * 60_000 },
 ] as const;
 
+/** Wait for typing to settle before asking the server what the range would produce. */
+const PLAN_DEBOUNCE_MS = 400;
+
+type Range = { fromMs: number; toMs: number };
+
 export function ExportControls() {
   const windowStartMs = useTimelineStore((state) => state.windowStartMs);
   const spanMs = useTimelineStore((state) => state.spanMs);
-  const liveEdgeMs = useTimelineStore((state) => state.range?.liveEdgeMs ?? null);
+  const earliestMs = useTimelineStore((state) => state.range?.earliestMs ?? null);
+  /**
+   * The newest moment that can actually be exported, which is the end of the last coverage band rather
+   * than the live edge.
+   *
+   * Only closed segments are indexed, so the few seconds still being written are audible live but cannot
+   * be read back yet. Bounding the fields at the live edge would invite a range that always fails.
+   */
+  const exportableEndMs = useTimelineStore((state) => {
+    const bands = state.range?.coverage;
+    return bands && bands.length > 0 ? bands[bands.length - 1].endMs : null;
+  });
 
   const [open, setOpen] = useState(false);
-  const [range, setRange] = useState<{ fromMs: number; toMs: number } | null>(null);
+  const [range, setRange] = useState<Range | null>(null);
   const [plan, setPlan] = useState<ExportPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const load = async (fromMs: number, toMs: number) => {
-    setRange({ fromMs, toMs });
-    setPlan(null);
-    setError(null);
-    setLoading(true);
+  // A backwards range is a pure fact about the two fields, so it is judged during render rather than
+  // stored. Only the fetch needs an effect.
+  const backwards = range !== null && range.toMs <= range.fromMs;
 
-    try {
-      setPlan(await api.exportPlan(fromMs, toMs));
-    } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'could not work out the export');
-    } finally {
-      setLoading(false);
+  // Re planned whenever the range settles. Debounced because typing into a datetime field fires on every
+  // keystroke, and each one would otherwise be a request.
+  useEffect(() => {
+    if (!open || range === null || range.toMs <= range.fromMs) {
+      return;
     }
-  };
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      void (async () => {
+        try {
+          const next = await api.exportPlan(range.fromMs, range.toMs);
+          if (!cancelled) {
+            setPlan(next);
+            setError(null);
+          }
+        } catch (cause) {
+          if (!cancelled) {
+            setPlan(null);
+            setError(cause instanceof ApiError ? cause.message : 'could not work out the export');
+          }
+        } finally {
+          if (!cancelled) {
+            setLoading(false);
+          }
+        }
+      })();
+    }, PLAN_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, range]);
 
   const onOpenChange = (next: boolean) => {
     setOpen(next);
     if (next) {
-      // The visible window, snapshotted on open so it cannot shift under the dialogue while following
-      // live scrolls the timeline along.
-      void load(windowStartMs, windowStartMs + spanMs);
+      // Snapshotted on open so the range cannot shift under the dialogue while following live scrolls
+      // the timeline along.
+      setRange({ fromMs: Math.round(windowStartMs), toMs: Math.round(windowStartMs + spanMs) });
+      setPlan(null);
+      setError(null);
     }
   };
+
+  const edit = (field: keyof Range, value: string) => {
+    const parsed = fromDateTimeLocal(value);
+    if (parsed === null || range === null) {
+      return;
+    }
+    setRange({ ...range, [field]: parsed });
+  };
+
+  // Bounds on the fields, so the native picker steers towards material that can actually be read back.
+  const min = earliestMs === null ? undefined : toDateTimeLocal(earliestMs);
+  const max = exportableEndMs === null ? undefined : toDateTimeLocal(exportableEndMs);
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -69,13 +128,13 @@ export function ExportControls() {
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent align="start" className="w-80 p-0">
+      <PopoverContent align="start" className="w-84 p-0">
         <div className="space-y-1 px-3 py-2">
           <p className="text-sm font-medium">Export as WAV</p>
           <p className="text-muted-foreground text-xs">
-            {range === null
-              ? ''
-              : `${formatDateTime(range.fromMs)} to ${formatClock(range.toMs)}`}
+            {exportableEndMs === null
+              ? 'Nothing has been recorded yet.'
+              : `Available up to ${formatDateTime(exportableEndMs)}`}
           </p>
         </div>
 
@@ -85,9 +144,14 @@ export function ExportControls() {
           <div className="flex flex-wrap gap-1.5">
             <Button
               size="sm"
-              variant="secondary"
+              variant="outline"
               className="h-7"
-              onClick={() => void load(windowStartMs, windowStartMs + spanMs)}
+              onClick={() =>
+                setRange({
+                  fromMs: Math.round(windowStartMs),
+                  toMs: Math.round(windowStartMs + spanMs),
+                })
+              }
             >
               Visible window
             </Button>
@@ -97,16 +161,52 @@ export function ExportControls() {
                 size="sm"
                 variant="outline"
                 className="h-7"
-                disabled={liveEdgeMs === null}
+                disabled={exportableEndMs === null}
                 onClick={() => {
-                  if (liveEdgeMs !== null) {
-                    void load(liveEdgeMs - option.ms, liveEdgeMs);
+                  if (exportableEndMs !== null) {
+                    setRange({
+                      fromMs: Math.round(exportableEndMs - option.ms),
+                      toMs: Math.round(exportableEndMs),
+                    });
                   }
                 }}
               >
                 {option.label}
               </Button>
             ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label htmlFor="export-from" className="text-xs">
+                From
+              </Label>
+              <Input
+                id="export-from"
+                type="datetime-local"
+                step={1}
+                min={min}
+                max={max}
+                className="h-8 text-xs"
+                value={range === null ? '' : toDateTimeLocal(range.fromMs)}
+                onChange={(event) => edit('fromMs', event.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="export-to" className="text-xs">
+                To
+              </Label>
+              <Input
+                id="export-to"
+                type="datetime-local"
+                step={1}
+                min={min}
+                max={max}
+                className="h-8 text-xs"
+                value={range === null ? '' : toDateTimeLocal(range.toMs)}
+                onChange={(event) => edit('toMs', event.target.value)}
+              />
+            </div>
           </div>
 
           {loading && (
@@ -116,14 +216,14 @@ export function ExportControls() {
             </p>
           )}
 
-          {error && (
+          {(backwards || error) && !loading && (
             <p className="text-destructive flex items-start gap-1.5 text-xs">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-              {error}
+              {backwards ? 'The end of the range must be after the start.' : error}
             </p>
           )}
 
-          {plan && !loading && (
+          {plan && !loading && !backwards && (
             <>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                 <dt className="text-muted-foreground">Length</dt>
@@ -147,8 +247,8 @@ export function ExportControls() {
               )}
 
               <p className="text-muted-foreground text-xs">
-                Stretches with no recording are exported as silence, so the file lines up with the
-                timeline.
+                Gaps are exported as silence, so the file lines up with the timeline. The last few seconds
+                of live audio cannot be exported until the segment they are in is written out.
               </p>
 
               <Button asChild className="w-full">

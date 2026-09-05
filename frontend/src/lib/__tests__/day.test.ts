@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { dayBoundsMs, dayLabel, localDayId, parseDayId, previousDayId } from '../day';
+import {
+  dayBoundsMs,
+  dayLabel,
+  fromDateTimeLocal,
+  localDayId,
+  parseDayId,
+  previousDayId,
+  toDateTimeLocal,
+} from '../day';
 
 describe('localDayId', () => {
   it('names the day in local time, not UTC', () => {
@@ -127,5 +135,46 @@ describe('dayBoundsMs', () => {
     const first = dayBoundsMs(new Date(2026, 8, 5, 3).getTime());
     const second = dayBoundsMs(new Date(2026, 8, 6, 3).getTime());
     expect(first.endMs).toBe(second.startMs);
+  });
+});
+
+describe('datetime-local conversion', () => {
+  it('round trips an instant through the input format', () => {
+    const instant = new Date(2026, 8, 5, 18, 12, 17).getTime();
+    const text = toDateTimeLocal(instant);
+
+    expect(text).toBe('2026-09-05T18:12:17');
+    expect(fromDateTimeLocal(text)).toBe(instant);
+  });
+
+  it('formats in local time rather than UTC', () => {
+    // toISOString would shift this by the machine's offset and show the wrong wall clock.
+    const local = new Date(2026, 0, 1, 0, 30, 0);
+    expect(toDateTimeLocal(local.getTime())).toBe('2026-01-01T00:30:00');
+  });
+
+  it('zero pads every component', () => {
+    const early = new Date(2026, 0, 2, 3, 4, 5).getTime();
+    expect(toDateTimeLocal(early)).toBe('2026-01-02T03:04:05');
+  });
+
+  it('keeps seconds, which the export range depends on', () => {
+    const instant = new Date(2026, 8, 5, 18, 12, 59).getTime();
+    expect(toDateTimeLocal(instant).endsWith(':59')).toBe(true);
+  });
+
+  it('returns null for an empty or unparseable value', () => {
+    expect(fromDateTimeLocal('')).toBeNull();
+    expect(fromDateTimeLocal('   ')).toBeNull();
+    expect(fromDateTimeLocal('not a date')).toBeNull();
+    expect(fromDateTimeLocal('2026-13-45T99:99')).toBeNull();
+  });
+
+  it('accepts a value without seconds, which some browsers produce', () => {
+    expect(fromDateTimeLocal('2026-09-05T18:12')).toBe(new Date(2026, 8, 5, 18, 12).getTime());
+  });
+
+  it('survives a bad instant without throwing', () => {
+    expect(toDateTimeLocal(Number.NaN)).toBe('');
   });
 });

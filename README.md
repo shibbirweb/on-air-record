@@ -195,6 +195,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
       needs a per segment frame index before seeking still works
 - [x] Export a time range as a downloadable WAV file, streamed rather than buffered, with gaps written
       as silence so the file lines up with the timeline
+- [x] Pick the export range from the visible window, a recent span, or typed start and end times
 
 ### Milestone 4: streaming
 
