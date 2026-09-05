@@ -54,12 +54,22 @@ export type Settings = {
   inputDeviceId: string | null;
   gain: number;
   segmentSeconds: number;
-  retentionHours: number;
+  /** `null` means recordings are kept forever. */
+  retentionHours: number | null;
   autoStart: boolean;
   frameMs: number;
+  /** `null` means the default location under the data directory. */
+  recordingsDir: string | null;
+  /** Where segments are written right now, always absolute. Read only. */
+  effectiveRecordingsDir: string;
 };
 
-export type SettingsPatch = Partial<Settings>;
+/**
+ * A partial update. `effectiveRecordingsDir` is derived server side and cannot be written, and the two
+ * nullable fields mean something specific when sent explicitly as null: keep forever, and use the
+ * default directory.
+ */
+export type SettingsPatch = Partial<Omit<Settings, 'effectiveRecordingsDir'>>;
 
 export type CoverageBand = {
   startMs: number;
@@ -114,8 +124,14 @@ export type Storage = {
   segmentCount: number;
   oldestMs: number | null;
   newestMs: number | null;
-  retentionHours: number;
+  /** `null` when recordings are kept forever. */
+  retentionHours: number | null;
   dataDir: string;
+  recordingsDir: string;
+  /** Bytes one hour of audio occupies at the format in use. Exact, since segments are raw PCM. */
+  bytesPerHour: number;
+  /** What a full retention window would occupy, or `null` when keeping forever. */
+  projectedMaxBytes: number | null;
 };
 
 /** Playback state of the audio socket. */

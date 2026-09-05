@@ -186,7 +186,9 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Segment index in SQLite with precise time ranges and an indexed calendar day
 - [x] A fresh segment on any timeline discontinuity, so stored byte offsets never lie
 - [x] Waveform peak envelope computed during recording, one byte per 100 ms bucket
-- [x] Retention janitor pruning expired segments, index rows, and emptied directories
+- [x] Retention janitor pruning expired segments, index rows, and emptied directories, or disabled
+      entirely when recordings are kept forever
+- [x] Recordings can live outside the data directory, with old segments still resolving
 - [x] Storage, session, and history depth reporting
 - [ ] Opus compression for segments instead of raw PCM
 - [ ] Export a time range as a downloadable WAV file
@@ -228,7 +230,12 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Input device selector marking the system default and any unplugged device
 - [x] Recorder panel: state, elapsed time, format, session, dropped frames, link health
 - [x] Storage panel with disk usage, history depth, retention, and recent sessions
-- [x] Settings panel for gain, retention, segment length, and automatic start
+- [x] Dedicated settings page at `/settings`, with the audio pipeline living in the shell so navigating
+      never interrupts playback
+- [x] Retention expressed in hours or days, with presets, or kept forever
+- [x] Projected disk needed for the chosen window, from the exact recording rate
+- [x] Configurable recording directory, validated for writability before it is accepted
+- [x] Settings panel for gain, segment length, and automatic start
 - [x] Reset to defaults, with a confirmation that warns when it would shorten retention and delete audio
 - [x] Light and dark themes with a toggle, remembered per browser
 - [x] Responsive layout that reflows to a single column on narrow screens

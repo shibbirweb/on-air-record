@@ -46,7 +46,6 @@ export function SettingsPanel() {
   }
 
   const gain = draft.gain ?? settings.gain;
-  const retentionHours = draft.retentionHours ?? settings.retentionHours;
   const segmentSeconds = draft.segmentSeconds ?? settings.segmentSeconds;
 
   // A reset that changes nothing is just a confusing button, so it is disabled when already at defaults.
@@ -60,9 +59,15 @@ export function SettingsPanel() {
     settings.frameMs === defaults.frameMs;
 
   // Shrinking the retention window is the one genuinely destructive thing a reset can do: the janitor
-  // acts within a minute and the audio is gone.
+  // acts within a minute and the audio is gone. Coming back from "keep forever" always shrinks, however
+  // long the default window is.
   const retentionShrinks =
-    defaults !== null && defaults.retentionHours < settings.retentionHours;
+    defaults !== null &&
+    defaults.retentionHours !== null &&
+    (settings.retentionHours === null || defaults.retentionHours < settings.retentionHours);
+
+  const currentWindowLabel =
+    settings.retentionHours === null ? 'forever' : `${settings.retentionHours} h`;
 
   const commit = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setDraft((current) => {
@@ -91,27 +96,6 @@ export function SettingsPanel() {
         />
         <p className="text-muted-foreground text-xs">
           Applied to the live signal immediately. Anything above 1 can clip a hot microphone.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-baseline justify-between">
-          <Label htmlFor="retention">Retention</Label>
-          <span className="text-muted-foreground text-xs tabular">{retentionHours} h</span>
-        </div>
-        <Slider
-          id="retention"
-          value={[retentionHours]}
-          min={1}
-          max={168}
-          step={1}
-          onValueChange={([next]) =>
-            setDraft((current) => ({ ...current, retentionHours: next ?? 24 }))
-          }
-          onValueCommit={([next]) => commit('retentionHours', next ?? 24)}
-        />
-        <p className="text-muted-foreground text-xs">
-          How far back the timeline reaches. Older audio is deleted within a minute of ageing out.
         </p>
       </div>
 
@@ -181,8 +165,8 @@ export function SettingsPanel() {
             {retentionShrinks && (
               <p className="text-destructive flex items-start gap-1.5 text-xs">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-                Retention drops from {settings.retentionHours} h to {defaults?.retentionHours} h. Audio
-                older than that is deleted within a minute, and cannot be recovered.
+                Retention drops from {currentWindowLabel} to {defaults?.retentionHours} h. Audio older
+                than that is deleted within a minute, and cannot be recovered.
               </p>
             )}
 

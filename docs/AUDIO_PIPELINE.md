@@ -79,6 +79,15 @@ Segments are raw headerless PCM, exactly the payload format described above, app
 data/recordings/<YYYY-MM-DD>/<session_id>/<sequence>.pcm
 ```
 
+The root is `<data dir>/recordings` unless the `recordings_dir` setting points elsewhere, in which case
+that directory takes the place of the `recordings` component. Which root a session uses is fixed when it
+starts, so changing the setting never scatters one recording across two places.
+
+Segments written to the default root are indexed with a path relative to the data directory, keeping the
+whole directory relocatable. Segments written to a chosen root are indexed absolutely, because a relative
+path would have nothing to be relative to. Resolution keys off `Path::is_absolute`, so rows written by any
+earlier version keep working without a migration.
+
 Day first, session second. Grouping by day is what makes the directory browsable by hand and lets a day's
 audio be archived or deleted as a unit, and it keeps a single day's material together even when the
 recorder was stopped and restarted several times within it. The day is the host's **local** calendar day,
