@@ -7,6 +7,6 @@ pub mod segment_repository;
 pub mod session_repository;
 pub mod settings_repository;
 
-pub use segment_repository::{SegmentRepository, SegmentStorageStats};
+pub use segment_repository::{DaySummary, SegmentRepository, SegmentStorageStats};
 pub use session_repository::{SessionRepository, SessionSummary};
 pub use settings_repository::SettingsRepository;

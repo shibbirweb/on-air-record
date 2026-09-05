@@ -5,8 +5,9 @@ use std::sync::Arc;
 use crate::audio::peaks::{self, PeakSource, PEAK_BUCKET_MS};
 use crate::error::{AppError, AppResult};
 use crate::models::TimeRange;
-use crate::repositories::SegmentRepository;
+use crate::repositories::{DaySummary, SegmentRepository};
 use crate::services::BroadcastHub;
+use crate::util::day::{day_bounds_ms, is_valid_day};
 
 /// Segments separated by less than this are drawn as one continuous band.
 ///
@@ -27,6 +28,18 @@ pub struct TimelineRange {
     pub latest_ms: Option<i64>,
     pub live_edge_ms: Option<i64>,
     pub coverage: Vec<TimeRange>,
+}
+
+/// A day that holds recordings, with both the extent of the audio and the day it sits in.
+///
+/// Both are returned because the UI wants each for a different job: the recorded extent decides where to
+/// put the playhead when a day is picked, while the midnight bounds decide the window to draw, so that a
+/// twenty minute recording is visibly twenty minutes out of a day rather than filling the screen.
+#[derive(Debug, Clone)]
+pub struct RecordingDay {
+    pub summary: DaySummary,
+    pub day_start_ms: i64,
+    pub day_end_ms: i64,
 }
 
 /// A rendered waveform window.
@@ -69,6 +82,43 @@ impl TimelineService {
             live_edge_ms,
             coverage,
         })
+    }
+
+    /// Every day that holds recordings, newest first.
+    ///
+    /// A day whose bounds cannot be resolved is dropped rather than reported with nonsense bounds. That
+    /// only happens for a corrupted `day` value, and a missing entry is easier to understand than a day
+    /// that scrolls the timeline somewhere impossible.
+    pub fn days(&self) -> AppResult<Vec<RecordingDay>> {
+        let summaries = self.segments.days()?;
+        let mut days = Vec::with_capacity(summaries.len());
+
+        for summary in summaries {
+            let Some((day_start_ms, day_end_ms)) = day_bounds_ms(&summary.day) else {
+                tracing::warn!(day = summary.day, "skipping a day with an unparseable date");
+                continue;
+            };
+
+            days.push(RecordingDay {
+                summary,
+                day_start_ms,
+                day_end_ms,
+            });
+        }
+
+        Ok(days)
+    }
+
+    /// Midnight to midnight bounds of one day, for jumping the timeline straight to it.
+    pub fn day_window(&self, day: &str) -> AppResult<(i64, i64)> {
+        if !is_valid_day(day) {
+            return Err(AppError::bad_request(
+                "day must be a calendar date in YYYY-MM-DD form",
+            ));
+        }
+
+        day_bounds_ms(day)
+            .ok_or_else(|| AppError::bad_request(format!("'{day}' is not a date on the calendar")))
     }
 
     /// Render the stored envelopes of a window onto `buckets` columns.
@@ -150,6 +200,7 @@ mod tests {
             .insert(&SegmentDraft {
                 session_id: fixture.session_id,
                 sequence,
+                day: crate::util::day::local_day(start_ms),
                 path: format!("recordings/1/{sequence:06}.pcm"),
                 started_at_ms: start_ms,
                 ended_at_ms: end_ms,
@@ -181,6 +232,45 @@ mod tests {
         assert_eq!(range.latest_ms, Some(100_000));
         assert_eq!(range.coverage.len(), 2);
         assert_eq!(range.coverage[0], TimeRange::new(0, 20_000));
+    }
+
+    #[test]
+    fn days_carry_both_the_recorded_extent_and_the_whole_day() {
+        use crate::util::day::{day_bounds_ms, local_day};
+
+        let fixture = fixture();
+        let today = local_day(crate::util::time::now_ms());
+        let (today_start, today_end) = day_bounds_ms(&today).expect("bounds");
+
+        insert(
+            &fixture,
+            0,
+            today_start + 3_600_000,
+            today_start + 3_660_000,
+            90,
+        );
+
+        let days = fixture.service.days().expect("days");
+        assert_eq!(days.len(), 1);
+
+        let day = &days[0];
+        assert_eq!(day.summary.day, today);
+        assert_eq!(day.summary.start_ms, today_start + 3_600_000);
+        assert_eq!(day.day_start_ms, today_start);
+        assert_eq!(day.day_end_ms, today_end);
+        // The recording is a slice of the day, not the whole thing.
+        assert!(day.summary.start_ms > day.day_start_ms);
+        assert!(day.summary.end_ms < day.day_end_ms);
+    }
+
+    #[test]
+    fn day_window_rejects_anything_that_is_not_a_date() {
+        let fixture = fixture();
+        assert!(fixture.service.day_window("2026-09-05").is_ok());
+
+        for invalid in ["", "yesterday", "2026-13-01", "../../etc"] {
+            assert!(fixture.service.day_window(invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]

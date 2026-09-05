@@ -35,6 +35,7 @@ pub fn build(state: Arc<AppState>) -> Router {
             get(settings_controller::show).patch(settings_controller::update),
         )
         .route("/timeline/range", get(timeline_controller::range))
+        .route("/timeline/days", get(timeline_controller::days))
         .route("/timeline/peaks", get(timeline_controller::peaks))
         .route("/sessions", get(session_controller::list))
         .route("/storage", get(session_controller::storage))

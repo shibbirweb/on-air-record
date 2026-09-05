@@ -30,6 +30,10 @@ pub struct Segment {
     pub id: i64,
     pub session_id: i64,
     pub sequence: i64,
+    /// Local calendar day the segment started in, `YYYY-MM-DD`. Denormalised from `started_at_ms` so it
+    /// can be indexed, and so it keeps matching the directory the file was written to even if the host
+    /// timezone later changes.
+    pub day: String,
     /// Path relative to the configured data directory, so the directory can be relocated.
     pub path: String,
     pub started_at_ms: i64,
@@ -81,6 +85,7 @@ impl Segment {
 pub struct SegmentDraft {
     pub session_id: i64,
     pub sequence: i64,
+    pub day: String,
     pub path: String,
     pub started_at_ms: i64,
     pub ended_at_ms: i64,
@@ -99,7 +104,8 @@ mod tests {
             id: 1,
             session_id: 1,
             sequence: 0,
-            path: "recordings/1/000000.pcm".to_string(),
+            day: "2026-09-05".to_string(),
+            path: "recordings/2026-09-05/1/000000.pcm".to_string(),
             started_at_ms: 1_000_000,
             ended_at_ms: 1_010_000,
             sample_rate: 48_000,

@@ -20,4 +20,4 @@ pub use playback_service::{CursorOutput, PlaybackCursor, PlaybackService};
 pub use recorder_service::{RecorderHandle, RecorderService};
 pub use retention_service::RetentionService;
 pub use settings_service::SettingsService;
-pub use timeline_service::{TimelineRange, TimelineService};
+pub use timeline_service::{RecordingDay, TimelineRange, TimelineService};

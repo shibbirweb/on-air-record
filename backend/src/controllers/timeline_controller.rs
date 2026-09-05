@@ -6,7 +6,7 @@ use axum::extract::{Query, State};
 use axum::Json;
 
 use crate::app::AppState;
-use crate::dto::{PeaksQuery, PeaksResponse, TimelineRangeResponse};
+use crate::dto::{PeaksQuery, PeaksResponse, RecordingDaysResponse, TimelineRangeResponse};
 use crate::error::{AppError, AppResult};
 
 /// Largest window a single peaks request may cover.
@@ -18,6 +18,15 @@ const MAX_WINDOW_MS: i64 = 32 * 24 * 3_600_000;
 /// `GET /api/timeline/range`
 pub async fn range(State(state): State<Arc<AppState>>) -> AppResult<Json<TimelineRangeResponse>> {
     Ok(Json(state.timeline.range()?.into()))
+}
+
+/// `GET /api/timeline/days`
+///
+/// The list the day picker is built from: which calendar days hold audio, and where in each day it sits.
+pub async fn days(State(state): State<Arc<AppState>>) -> AppResult<Json<RecordingDaysResponse>> {
+    let days = state.timeline.days()?.into_iter().map(Into::into).collect();
+
+    Ok(Json(RecordingDaysResponse { days }))
 }
 
 /// `GET /api/timeline/peaks`

@@ -205,7 +205,7 @@ enum Located {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audio::{PcmS16Encoder, SegmentWriter};
+    use crate::audio::{PcmS16Encoder, SegmentLocation, SegmentWriter};
     use crate::db::Database;
     use crate::models::SessionDraft;
     use crate::repositories::SessionRepository;
@@ -251,13 +251,10 @@ mod tests {
 
         for (sequence, (start_ms, end_ms)) in ranges.iter().enumerate() {
             let sequence = sequence as i64;
-            let relative = SegmentWriter::relative_path_for(session.id, sequence);
-            let absolute = config.resolve_data_path(&relative);
-
             let first = AudioFrame::from_samples(*start_ms, 48_000, 1, vec![0; 4800], true);
-            let mut writer =
-                SegmentWriter::create(session.id, sequence, absolute, relative.clone(), &first)
-                    .expect("writer");
+            let location =
+                SegmentLocation::for_segment(&config.data_dir, session.id, sequence, *start_ms);
+            let mut writer = SegmentWriter::create(location, &first).expect("writer");
 
             let frames = ((end_ms - start_ms) / 100) as usize;
             for index in 0..frames {

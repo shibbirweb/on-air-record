@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 
-use crate::audio::{FrameEncoder, SegmentWriter};
+use crate::audio::{FrameEncoder, SegmentLocation, SegmentWriter};
 use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
 use crate::models::AudioFrame;
@@ -194,15 +194,13 @@ fn open_segment(
     sequence: i64,
     first_frame: &AudioFrame,
 ) -> AppResult<SegmentWriter> {
-    let relative_path = SegmentWriter::relative_path_for(context.session_id, sequence);
-    let absolute_path = context.config.resolve_data_path(&relative_path);
-    SegmentWriter::create(
+    let location = SegmentLocation::for_segment(
+        &context.config.data_dir,
         context.session_id,
         sequence,
-        absolute_path,
-        relative_path,
-        first_frame,
-    )
+        first_frame.timestamp_ms,
+    );
+    SegmentWriter::create(location, first_frame)
 }
 
 fn close_segment(
@@ -254,14 +252,8 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
 
         let first = frame_at(started_at_ms);
-        let mut writer = SegmentWriter::create(
-            1,
-            0,
-            dir.join("000000.pcm"),
-            "recordings/1/000000.pcm".to_string(),
-            &first,
-        )
-        .expect("create");
+        let location = SegmentLocation::for_segment(&dir, 1, 0, first.timestamp_ms);
+        let mut writer = SegmentWriter::create(location, &first).expect("create");
 
         for index in 0..frames {
             let frame = frame_at(started_at_ms + index as i64 * 100);

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::TimeRange;
 use crate::services::timeline_service::{PeaksView, DEFAULT_BUCKETS};
-use crate::services::TimelineRange;
+use crate::services::{RecordingDay, TimelineRange};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,4 +76,43 @@ impl From<PeaksView> for PeaksResponse {
             peaks: view.values,
         }
     }
+}
+
+/// One day that holds recordings, as offered by the day picker.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingDayDto {
+    /// Local calendar day, `YYYY-MM-DD`.
+    pub day: String,
+    /// First and last moment recorded on that day.
+    pub start_ms: i64,
+    pub end_ms: i64,
+    /// Local midnight bounds, so the timeline can frame the whole day.
+    pub day_start_ms: i64,
+    pub day_end_ms: i64,
+    pub segment_count: i64,
+    pub bytes: i64,
+    /// Audio actually captured, which is less than the span whenever the recorder was stopped part way.
+    pub recorded_ms: i64,
+}
+
+impl From<RecordingDay> for RecordingDayDto {
+    fn from(day: RecordingDay) -> Self {
+        Self {
+            day: day.summary.day,
+            start_ms: day.summary.start_ms,
+            end_ms: day.summary.end_ms,
+            day_start_ms: day.day_start_ms,
+            day_end_ms: day.day_end_ms,
+            segment_count: day.summary.segment_count,
+            bytes: day.summary.bytes,
+            recorded_ms: day.summary.recorded_ms,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingDaysResponse {
+    pub days: Vec<RecordingDayDto>,
 }

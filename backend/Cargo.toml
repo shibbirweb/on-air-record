@@ -9,6 +9,7 @@ license = "MIT"
 
 [dependencies]
 axum = { version = "0.8.4", features = ["ws", "macros"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5.61", features = ["derive"] }
 cpal = "0.16.0"
 crossbeam-channel = "0.5.16"

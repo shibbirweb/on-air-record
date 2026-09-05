@@ -83,7 +83,7 @@ impl RetentionService {
 
         if report.segments_deleted > 0 {
             report.sessions_deleted = self.sessions.delete_empty()?;
-            self.remove_empty_session_directories();
+            self.remove_empty_directories();
         }
 
         Ok(report)
@@ -123,25 +123,45 @@ impl RetentionService {
         }
     }
 
-    /// Remove session directories that no longer hold any segment file.
-    fn remove_empty_session_directories(&self) {
-        let Ok(entries) = std::fs::read_dir(self.config.recordings_dir()) else {
+    /// Remove directories the pruning emptied.
+    ///
+    /// The layout is `recordings/<day>/<session>/`, so this walks both levels: a session directory goes
+    /// once its segments have aged out, and the day directory goes once its last session does. Without
+    /// the second level a long running install would accumulate one empty directory per day forever.
+    fn remove_empty_directories(&self) {
+        let Ok(days) = std::fs::read_dir(self.config.recordings_dir()) else {
             return;
         };
 
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
+        for day in days.flatten() {
+            let day_path = day.path();
+            if !day_path.is_dir() {
                 continue;
             }
-            let is_empty = std::fs::read_dir(&path)
-                .map(|mut items| items.next().is_none())
-                .unwrap_or(false);
-            if is_empty {
-                let _ = std::fs::remove_dir(&path);
+
+            if let Ok(sessions) = std::fs::read_dir(&day_path) {
+                for session in sessions.flatten() {
+                    let session_path = session.path();
+                    if session_path.is_dir() && is_empty_dir(&session_path) {
+                        let _ = std::fs::remove_dir(&session_path);
+                    }
+                }
+            }
+
+            if is_empty_dir(&day_path) {
+                let _ = std::fs::remove_dir(&day_path);
             }
         }
     }
+}
+
+/// True when the directory exists and holds nothing.
+///
+/// An unreadable directory reports false, so a permissions problem never turns into a delete attempt.
+fn is_empty_dir(path: &std::path::Path) -> bool {
+    std::fs::read_dir(path)
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -205,8 +225,10 @@ mod tests {
         }
     }
 
+    /// Writes a real file under the day based layout and indexes it, the way the recorder would.
     fn insert_with_file(fixture: &Fixture, sequence: i64, start_ms: i64, end_ms: i64) -> PathBuf {
-        let relative = format!("recordings/{}/{sequence:06}.pcm", fixture.session_id);
+        let day = crate::util::day::local_day(start_ms);
+        let relative = format!("recordings/{day}/{}/{sequence:06}.pcm", fixture.session_id);
         let absolute = fixture.config.resolve_data_path(&relative);
         std::fs::create_dir_all(absolute.parent().expect("parent")).expect("dir");
         std::fs::write(&absolute, vec![0u8; 128]).expect("file");
@@ -216,6 +238,7 @@ mod tests {
             .insert(&SegmentDraft {
                 session_id: fixture.session_id,
                 sequence,
+                day,
                 path: relative,
                 started_at_ms: start_ms,
                 ended_at_ms: end_ms,
@@ -274,5 +297,39 @@ mod tests {
 
         let report = fixture.service.sweep_before(50_000).expect("sweep");
         assert_eq!(report.sessions_deleted, 1);
+    }
+
+    #[test]
+    fn the_day_directory_goes_once_its_last_session_does() {
+        let fixture = fixture("daydirs");
+        let file = insert_with_file(&fixture, 0, 0, 1_000);
+
+        let session_dir = file.parent().expect("session dir").to_path_buf();
+        let day_dir = session_dir.parent().expect("day dir").to_path_buf();
+        assert!(day_dir.is_dir());
+
+        fixture.service.sweep_before(50_000).expect("sweep");
+
+        assert!(
+            !session_dir.exists(),
+            "the session directory should be gone"
+        );
+        assert!(
+            !day_dir.exists(),
+            "the day directory should be gone with it"
+        );
+    }
+
+    #[test]
+    fn a_day_still_holding_audio_is_left_alone() {
+        let fixture = fixture("keepday");
+        let old = insert_with_file(&fixture, 0, 0, 1_000);
+        let kept = insert_with_file(&fixture, 1, 100_000, 101_000);
+
+        fixture.service.sweep_before(50_000).expect("sweep");
+
+        assert!(!old.exists());
+        assert!(kept.exists());
+        assert!(kept.parent().expect("session dir").is_dir());
     }
 }

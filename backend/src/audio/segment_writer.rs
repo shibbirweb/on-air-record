@@ -11,10 +11,54 @@ use crate::audio::peaks::PeakEnvelopeBuilder;
 use crate::audio::FrameEncoder;
 use crate::error::{AppError, AppResult};
 use crate::models::{AudioFrame, SegmentDraft};
+use crate::util::day::local_day;
+
+/// Where a segment lives, on disk and on the calendar.
+///
+/// This is the one place the storage layout is decided. Deriving the day and the path together from the
+/// same timestamp is what guarantees a segment's `day` column always names the directory its file is
+/// actually in, which is the property the day picker relies on.
+#[derive(Debug, Clone)]
+pub struct SegmentLocation {
+    pub session_id: i64,
+    pub sequence: i64,
+    /// Local calendar day, `YYYY-MM-DD`.
+    pub day: String,
+    /// Path relative to the data directory, which is what the index stores.
+    pub relative_path: String,
+    pub absolute_path: PathBuf,
+}
+
+impl SegmentLocation {
+    /// Lay out the segment that starts at `started_at_ms`.
+    ///
+    /// Recordings are grouped by day first and session second, so a day's audio is one directory even
+    /// when the recorder was stopped and started several times within it. That ordering is what makes
+    /// the data directory browsable by hand and a day's material trivial to archive or delete.
+    pub fn for_segment(
+        data_dir: &Path,
+        session_id: i64,
+        sequence: i64,
+        started_at_ms: i64,
+    ) -> Self {
+        let day = local_day(started_at_ms);
+        let relative_path = format!("recordings/{day}/{session_id}/{sequence:06}.pcm");
+        let absolute_path = data_dir.join(&relative_path);
+
+        Self {
+            session_id,
+            sequence,
+            day,
+            relative_path,
+            absolute_path,
+        }
+    }
+}
 
 pub struct SegmentWriter {
     session_id: i64,
     sequence: i64,
+    day: String,
     absolute_path: PathBuf,
     relative_path: String,
     writer: BufWriter<File>,
@@ -28,24 +72,19 @@ pub struct SegmentWriter {
 
 impl SegmentWriter {
     /// Create the segment file and prepare its envelope accumulator.
-    pub fn create(
-        session_id: i64,
-        sequence: i64,
-        absolute_path: PathBuf,
-        relative_path: String,
-        first_frame: &AudioFrame,
-    ) -> AppResult<Self> {
-        if let Some(parent) = absolute_path.parent() {
+    pub fn create(location: SegmentLocation, first_frame: &AudioFrame) -> AppResult<Self> {
+        if let Some(parent) = location.absolute_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        let file = File::create(&absolute_path)?;
+        let file = File::create(&location.absolute_path)?;
 
         Ok(Self {
-            session_id,
-            sequence,
-            absolute_path,
-            relative_path,
+            session_id: location.session_id,
+            sequence: location.sequence,
+            day: location.day,
+            absolute_path: location.absolute_path,
+            relative_path: location.relative_path,
             // 64 KiB is about seven frames at the default settings, so the recorder touches the disk once
             // per second rather than ten times.
             writer: BufWriter::with_capacity(64 * 1024, file),
@@ -102,6 +141,7 @@ impl SegmentWriter {
         Ok(Some(SegmentDraft {
             session_id: self.session_id,
             sequence: self.sequence,
+            day: self.day,
             path: self.relative_path,
             started_at_ms: self.started_at_ms,
             ended_at_ms: self.last_end_ms,
@@ -112,9 +152,9 @@ impl SegmentWriter {
         }))
     }
 
-    /// Build the conventional path of a segment inside the data directory.
-    pub fn relative_path_for(session_id: i64, sequence: i64) -> String {
-        format!("recordings/{session_id}/{sequence:06}.pcm")
+    /// Local calendar day this segment belongs to.
+    pub fn day(&self) -> &str {
+        &self.day
     }
 }
 
@@ -124,6 +164,7 @@ impl std::fmt::Debug for SegmentWriter {
             .debug_struct("SegmentWriter")
             .field("session_id", &self.session_id)
             .field("sequence", &self.sequence)
+            .field("day", &self.day)
             .field("path", &self.relative_path)
             .field("byte_len", &self.byte_len)
             .finish()
@@ -178,23 +219,17 @@ mod tests {
     #[test]
     fn writes_frames_and_reports_the_range() {
         let dir = temp_dir("writer");
-        let path = dir.join("000000.pcm");
         let first = AudioFrame::from_samples(1_000, 48_000, 1, vec![0; 4800], true);
+        let location = SegmentLocation::for_segment(&dir, 1, 0, first.timestamp_ms);
 
-        let mut writer = SegmentWriter::create(
-            1,
-            0,
-            path.clone(),
-            "recordings/1/000000.pcm".to_string(),
-            &first,
-        )
-        .expect("create");
+        let mut writer = SegmentWriter::create(location, &first).expect("create");
         writer.append(&first, &PcmS16Encoder).expect("append");
 
         let second = AudioFrame::from_samples(1_100, 48_000, 1, vec![1000; 4800], true);
         writer.append(&second, &PcmS16Encoder).expect("append");
 
         let draft = writer.finish().expect("finish").expect("indexed");
+        assert_eq!(draft.day, crate::util::day::local_day(1_000));
         assert_eq!(draft.started_at_ms, 1_000);
         assert_eq!(draft.ended_at_ms, 1_200);
         assert_eq!(draft.byte_len, 4800 * 2 * 2);
@@ -208,17 +243,11 @@ mod tests {
     #[test]
     fn empty_segment_is_discarded() {
         let dir = temp_dir("empty");
-        let path = dir.join("000001.pcm");
         let frame = AudioFrame::from_samples(0, 48_000, 1, vec![0; 10], true);
+        let location = SegmentLocation::for_segment(&dir, 1, 1, frame.timestamp_ms);
+        let path = location.absolute_path.clone();
 
-        let writer = SegmentWriter::create(
-            1,
-            1,
-            path.clone(),
-            "recordings/1/000001.pcm".to_string(),
-            &frame,
-        )
-        .expect("create");
+        let writer = SegmentWriter::create(location, &frame).expect("create");
         assert!(writer.finish().expect("finish").is_none());
         assert!(!path.exists());
 
@@ -228,17 +257,11 @@ mod tests {
     #[test]
     fn reads_back_the_bytes_that_were_written() {
         let dir = temp_dir("read");
-        let path = dir.join("000002.pcm");
         let frame = AudioFrame::from_samples(0, 48_000, 1, vec![1, 2, 3, 4], true);
+        let location = SegmentLocation::for_segment(&dir, 1, 2, frame.timestamp_ms);
+        let path = location.absolute_path.clone();
 
-        let mut writer = SegmentWriter::create(
-            1,
-            2,
-            path.clone(),
-            "recordings/1/000002.pcm".to_string(),
-            &frame,
-        )
-        .expect("create");
+        let mut writer = SegmentWriter::create(location, &frame).expect("create");
         writer.append(&frame, &PcmS16Encoder).expect("append");
         writer.finish().expect("finish");
 
@@ -253,10 +276,30 @@ mod tests {
     }
 
     #[test]
-    fn segment_paths_are_zero_padded() {
+    fn segments_are_laid_out_by_day_then_session() {
+        let started_at_ms = 1_757_030_400_000;
+        let day = crate::util::day::local_day(started_at_ms);
+        let location = SegmentLocation::for_segment(Path::new("/srv/oar"), 3, 12, started_at_ms);
+
+        assert_eq!(location.day, day);
         assert_eq!(
-            SegmentWriter::relative_path_for(3, 12),
-            "recordings/3/000012.pcm"
+            location.relative_path,
+            format!("recordings/{day}/3/000012.pcm")
         );
+        assert_eq!(
+            location.absolute_path,
+            PathBuf::from(format!("/srv/oar/recordings/{day}/3/000012.pcm"))
+        );
+    }
+
+    #[test]
+    fn two_sessions_on_one_day_share_the_day_directory() {
+        let started_at_ms = 1_757_030_400_000;
+        let morning = SegmentLocation::for_segment(Path::new("/srv/oar"), 1, 0, started_at_ms);
+        let evening =
+            SegmentLocation::for_segment(Path::new("/srv/oar"), 2, 0, started_at_ms + 3_600_000);
+
+        assert_eq!(morning.day, evening.day);
+        assert_ne!(morning.relative_path, evening.relative_path);
     }
 }
