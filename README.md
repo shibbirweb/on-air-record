@@ -11,8 +11,9 @@ Think of it as a small FM station plus a digital video recorder for sound:
 - The browser is the radio receiver (it plays the live signal).
 - The timeline is the tape (you can rewind, play back history, and jump back to live).
 
-If you just want to use it rather than build it, read the
-**[user guide](docs/USER_GUIDE.md)**, which walks through every part of the interface with screenshots.
+If you just want to run it rather than work on it, the two guides to read are
+**[installation and setup](docs/SETUP.md)** and the **[user guide](docs/USER_GUIDE.md)**, which walks
+through every part of the interface with screenshots.
 
 ## Table of contents
 
@@ -152,50 +153,30 @@ you last built into `frontend/dist` without a recompile.
 
 ## Running it as a service
 
-### Linux, with systemd
+[docs/SETUP.md](docs/SETUP.md) has the full instructions for all three platforms, including firewall rules
+and the pitfalls. The short version:
 
-[packaging/on-air-record.service](packaging/on-air-record.service) is a unit template, and its header
-comment carries the install commands. The one step that is easy to miss:
-
-```bash
-sudo usermod -aG audio on-air-record
-```
-
-Without membership of the `audio` group the service starts, serves the UI, and lists no input devices at
-all, which looks like a hardware fault rather than a permissions one.
-
-### Windows
-
-There is no service wrapper in the binary, because a code path nobody here can test is worse than a
-documented command. Use the built in service manager:
-
-```powershell
-sc.exe create OnAirRecord binPath= "C:\on-air-record\on-air-record.exe --data-dir C:\on-air-record\data" start= auto
-sc.exe start OnAirRecord
-```
-
-Note the space after each `=`, which `sc.exe` requires. `sc.exe` expects a service aware executable and
-will report a timeout on start even though the process is running, so for anything long lived prefer
-[NSSM](https://nssm.cc/), which supervises an ordinary console program properly and captures its output:
-
-```powershell
-nssm install OnAirRecord C:\on-air-record\on-air-record.exe
-nssm set OnAirRecord AppEnvironmentExtra OAR_DATA_DIR=C:\on-air-record\data
-nssm start OnAirRecord
-```
-
-The Windows audio session belongs to the logged in user, so a service running as `LocalSystem` may see no
-capture devices. Set the service to run as the account whose microphone you want to record.
-
-### macOS
-
-`launchd` will start the binary, but microphone access is granted per application and a background agent
-gets no permission prompt. Recording only works once the binary has been approved under System Settings,
-Privacy and Security, Microphone, which in practice means running it once in a terminal first.
+- **Linux**: [packaging/on-air-record.service](packaging/on-air-record.service) is a systemd unit template
+  whose header comment carries the install sequence. Do not skip `sudo usermod -aG audio on-air-record`, or
+  the service starts, serves the UI, and lists no input devices at all, which looks like a hardware fault
+  rather than a permissions one.
+- **Windows**: no service wrapper is built in, because a code path nobody here can test is worse than a
+  documented command. Use [NSSM](https://nssm.cc/), which supervises a console program properly, or
+  `sc.exe`. Either way the service must run as a real user account, because the Windows audio session
+  belongs to the signed in user and `LocalSystem` may see no capture devices.
+- **macOS**: use a per user LaunchAgent rather than a system LaunchDaemon. Microphone permission is granted
+  to a logged in user, and a daemon has no user to have been granted it. Run the binary by hand once first
+  so the permission prompt can appear.
 
 ## Configuration
 
-Every option can be set with a CLI flag or an environment variable. CLI flags win.
+Every option can be set with a CLI flag or an environment variable. CLI flags win, so a service's
+configured port can be overridden for a single run without editing the service.
+
+```sh
+on-air-record --port 9000 --data-dir /srv/on-air-record
+OAR_PORT=9000 OAR_DATA_DIR=/srv/on-air-record on-air-record
+```
 
 | Flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
@@ -205,8 +186,15 @@ Every option can be set with a CLI flag or an environment variable. CLI flags wi
 | `--static-dir` | `OAR_STATIC_DIR` | `../frontend/dist` | Compiled web UI to serve |
 | `--log-level` | `OAR_LOG_LEVEL` | `info` | `error`, `warn`, `info`, `debug`, or `trace` |
 
+`--data-dir` defaults to a path **relative to the working directory**, so a service started from elsewhere
+will appear to have lost its recordings when it has in fact made a second `data` directory. Give it an
+absolute path.
+
 Runtime preferences (input device, segment length, retention window, gain, auto start) live in the SQLite
 `settings` table and are editable from the UI.
+
+[docs/SETUP.md](docs/SETUP.md#choosing-a-port) explains each of these for a non technical audience,
+including what to do when the port is already in use.
 
 ## Project layout
 
@@ -365,6 +353,8 @@ What the automated tests do not cover, and what to check by hand after a change 
 
 ## Documentation
 
+- [docs/SETUP.md](docs/SETUP.md): installing and running it on macOS, Linux and Windows, choosing a port,
+  and keeping it running as a service.
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md): how to use the app, in plain language and with screenshots.
   This is the one to hand to somebody who just wants to listen.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): layers, design patterns, and data flow.

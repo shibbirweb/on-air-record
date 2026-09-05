@@ -96,7 +96,10 @@ jobs:
           mkdir -p "dist/$name"
           cp "backend/target/${{ matrix.target }}/release/on-air-record" "dist/$name/"
           cp README.md "dist/$name/"
-          cp packaging/on-air-record.service "dist/$name/"
+          # The systemd unit is only useful on Linux, so it does not belong in the macOS archives.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            cp packaging/on-air-record.service "dist/$name/"
+          fi
           tar -czf "dist/$name.tar.gz" -C dist "$name"
           if command -v sha256sum > /dev/null; then
             (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")

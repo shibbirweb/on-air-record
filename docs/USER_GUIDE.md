@@ -20,6 +20,9 @@ time, you can still go back and hear it, the same way you would rewind a securit
 You do not need to install anything to listen. There is no account, no password, and no app. You open a
 web address in an ordinary browser.
 
+If nothing is running yet, start with the **[installation guide](SETUP.md)**, which covers downloading and
+running it on macOS, Linux and Windows.
+
 > The screenshots in this guide come from a demonstration setup with several days of example recordings
 > already on disk, so the timeline looks busy. A brand new installation starts empty and fills up as it
 > records.
@@ -65,6 +68,11 @@ set the service up can tell you what it is. It looks something like:
 ```
 http://192.168.1.24:8080
 ```
+
+The `8080` on the end is the port. 8080 is only the default and whoever installed it may have chosen
+another number, in which case your address ends in that number instead. Either way the port has to be
+included, because a browser assumes a different one if you leave it out. Changing it is covered in the
+[installation guide](SETUP.md#choosing-a-port).
 
 Anyone who can open that address can listen and can change the settings. There is no login. This is
 intended for a network you trust, such as an office or a home, and not for the open internet.
