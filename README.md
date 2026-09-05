@@ -220,7 +220,8 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Drag the window on the minimap, or click it, to move the detailed view
 - [x] Zoom anchored on the marker, and on the pointer when scrolling
 - [x] Cue marker showing the selected moment before playback has started
-- [x] Day picker that jumps the timeline to a chosen day and plays from its first moment
+- [x] Calendar day picker, with days holding no recording shown as unselectable
+- [x] Picking a day frames it on the timeline and plays from its first recorded moment
 - [x] Transport controls: play, pause, jump back thirty seconds, go live
 - [x] Volume slider and mute
 - [x] On air indicator and live listener count

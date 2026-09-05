@@ -190,6 +190,7 @@ next range poll would drag the window back to the live edge and undo it.
 | I want to | Touch this |
 | --- | --- |
 | Add a REST endpoint | `dto`, `controllers`, `routes` |
+| Add a shadcn primitive | Copy it into `components/ui`, styling it against the theme tokens rather than importing a library stylesheet |
 | Offer a new way to navigate history | `TimelineService`, `dto/timeline_dto.rs`, `useTimelineStore`, a component under `features/timeline` |
 | Add a stored preference | `models/settings.rs`, `repositories/settings_repository.rs`, settings DTO, frontend `settingsStore` |
 | Support a new codec | Implement `FrameEncoder`, register it in `audio::encoder::build_encoder` |
