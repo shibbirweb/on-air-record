@@ -88,6 +88,7 @@ That reads `config`, so the port is only chosen once. Useful options:
 | macOS and Linux | Windows | What it does |
 | --- | --- | --- |
 | `--port 9000` | `-Port 9000` | Use this port without asking |
+| `--release v0.1.0` | `-Release v0.1.0` | Install that exact version instead of the newest |
 | `--reconfigure` | `-Reconfigure` | Ask for the port again |
 | `--update` | `-Update` | Fetch a newer release over the top |
 | `--no-start` | `-NoStart` | Install and configure, but do not start |
@@ -600,9 +601,14 @@ Publishing starts [`.github/workflows/release.yml`](../.github/workflows/release
    and `x86_64-pc-windows-msvc` on Windows.
 4. Packs each into a `.tar.gz`, or a `.zip` on Windows, with a `.sha256` alongside.
 5. Attaches all eight files to the release you just published.
+6. Installs what it just published, on macOS, Linux and Windows, using the installer scripts exactly as a
+   user would, and checks the service starts and reports the version the archive is named for.
 
 Expect ten to fifteen minutes, most of it compiling. The release exists and is visible the whole time; the
 files appear at the end. Your notes are left exactly as you wrote them.
+
+That last step runs after publishing, because there is nothing to install until the files exist. So if it
+fails, the release is already public and broken. Delete it and its tag, fix the problem, and cut it again.
 
 ### If the tag does not match the manifest
 

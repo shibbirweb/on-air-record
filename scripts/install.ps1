@@ -26,6 +26,9 @@ param(
     # Use this port and do not ask
     [int] $Port,
 
+    # Install this exact version, like v0.1.0, instead of the latest
+    [string] $Release,
+
     # Ask for the port again, even if a config already exists
     [switch] $Reconfigure,
 
@@ -291,7 +294,13 @@ if (-not (Test-Path $parent)) { Stop-WithError "$parent does not exist" }
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 
-if ((Test-Path $binary) -and -not $Update) {
+if ($Release) {
+    # An explicit version is an instruction, not a preference, so it overwrites whatever is already here.
+    if ($Release -notmatch '^v\d') { Stop-WithError "-Release wants a tag like v0.1.0, not $Release" }
+    Write-Step "Installing $Release"
+    Install-Release -Target $target -Version $Release -InstallDir $installDir
+    Write-Detail 'installed'
+} elseif ((Test-Path $binary) -and -not $Update) {
     # `on-air-record 0.1.0` -> `0.1.0`. Anything unexpected, including a binary that will not run at all,
     # falls back rather than printing an empty version.
     $installed = 'unknown'

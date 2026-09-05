@@ -199,3 +199,112 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/*.sha256
+
+  # The last word on whether the release is usable: install it the way a person would, on each platform,
+  # from the files that were just attached, and check the service comes up.
+  #
+  # This runs after publishing rather than before, because there is nothing to install until the assets
+  # exist. A failure here means the release is already public and broken, which is worth knowing loudly:
+  # fix it, delete the release and its tag, and cut it again.
+  verify:
+    name: verify the install (${{ matrix.os }})
+    needs: [version, publish]
+    if: github.event_name == 'release'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the ALSA runtime
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2
+
+      - name: Install and run this release
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.version.outputs.artifact_tag }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -eu
+          work="$RUNNER_TEMP/verify"
+          mkdir -p "$work"
+          cd "$work"
+
+          # Pinned to the tag rather than resolving "latest", so this cannot quietly test the previous
+          # release while GitHub is still catching up.
+          sh "$GITHUB_WORKSPACE/scripts/install.sh" --release "$RELEASE_TAG" --port 8099 --no-start
+
+          reported="$(./on-air-record/on-air-record --version | awk '{print $2}')"
+          echo "the archive is named $RELEASE_TAG and the binary inside reports $reported"
+          if [ "$reported" != "$RELEASE_VERSION" ]; then
+            echo "the released binary disagrees with the tag it shipped under"
+            exit 1
+          fi
+
+          ./on-air-record/start.sh > service.log 2>&1 &
+          answered=0
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8099/api/health -o health.json 2>/dev/null; then answered=1; break; fi
+            sleep 1
+          done
+          pkill -f 'on-air-record/on-air-record' 2>/dev/null || true
+
+          if [ "$answered" -ne 1 ]; then
+            echo "the released service never answered"
+            cat service.log || true
+            exit 1
+          fi
+          cat health.json; echo
+          grep -q "\"version\":\"$RELEASE_VERSION\"" health.json || { echo "health reported the wrong version"; exit 1; }
+          echo "release verified end to end on $(uname -s)"
+
+      - name: Install and run this release
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          RELEASE_TAG: ${{ needs.version.outputs.artifact_tag }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'verify'
+          New-Item -ItemType Directory -Path $work -Force | Out-Null
+          Set-Location $work
+
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\install.ps1" `
+            -Release $env:RELEASE_TAG -Port 8099 -NoStart
+          if ($LASTEXITCODE -ne 0) { throw "the installer exited with $LASTEXITCODE" }
+
+          $reported = (& '.\on-air-record\on-air-record.exe' --version) -split '\s+' | Select-Object -Last 1
+          Write-Host "the archive is named $env:RELEASE_TAG and the binary inside reports $reported"
+          if ($reported -ne $env:RELEASE_VERSION) {
+            throw "the released binary disagrees with the tag it shipped under"
+          }
+
+          $service = Start-Process -FilePath '.\on-air-record\start.cmd' -PassThru -NoNewWindow `
+            -RedirectStandardOutput service.log -RedirectStandardError service.err
+          $health = $null
+          foreach ($attempt in 1..60) {
+            try {
+              $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8099/api/health' -TimeoutSec 2
+              break
+            } catch { Start-Sleep -Seconds 1 }
+          }
+          Stop-Process -Id $service.Id -Force -ErrorAction SilentlyContinue
+          Get-Process -Name 'on-air-record' -ErrorAction SilentlyContinue | Stop-Process -Force
+
+          if (-not $health) {
+            Get-Content service.log, service.err -ErrorAction SilentlyContinue | Write-Host
+            throw 'the released service never answered'
+          }
+          Write-Host ($health | ConvertTo-Json -Compress)
+          if ($health.version -ne $env:RELEASE_VERSION) { throw "health reported the wrong version" }
+          Write-Host 'release verified end to end on Windows'

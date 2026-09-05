@@ -24,6 +24,7 @@ want_reconfigure=0
 want_update=0
 want_start=1
 forced_port=""
+forced_version=
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n==> %s\n' "$*"; }
@@ -38,6 +39,7 @@ Creates an `on-air-record` folder in the current directory and installs into it.
 
   --dir <path>      Install into this folder instead
   --port <number>   Use this port and do not ask
+  --release <tag>   Install this exact version, like v0.1.0, instead of the latest
   --reconfigure     Ask for the port again, even if a config already exists
   --update          Download the latest release even if a program is already installed
   --no-start        Install and configure, but do not start the service
@@ -58,6 +60,8 @@ while [ $# -gt 0 ]; do
     --dir=*) install_dir="${1#--dir=}"; shift ;;
     --port) [ $# -ge 2 ] || die "--port needs a number"; forced_port="$2"; shift 2 ;;
     --port=*) forced_port="${1#--port=}"; shift ;;
+    --release) [ $# -ge 2 ] || die "--release needs a version, like v0.1.0"; forced_version="$2"; shift 2 ;;
+    --release=*) forced_version="${1#--release=}"; shift ;;
     --reconfigure) want_reconfigure=1; shift ;;
     --update) want_update=1; shift ;;
     --no-start) want_start=0; shift ;;
@@ -291,7 +295,16 @@ parent="$(dirname -- "$install_dir")"
 
 mkdir -p "$install_dir" "$DATA_DIR"
 
-if [ -x "$BINARY" ] && [ "$want_update" -eq 0 ]; then
+if [ -n "$forced_version" ]; then
+  # An explicit version is an instruction, not a preference, so it overwrites whatever is already here.
+  case "$forced_version" in
+    v*) ;;
+    *) die "--release wants a tag like v0.1.0, not $forced_version" ;;
+  esac
+  step "Installing $forced_version"
+  install_release "$target" "$forced_version"
+  say "  installed"
+elif [ -x "$BINARY" ] && [ "$want_update" -eq 0 ]; then
   installed="$("$BINARY" --version 2>/dev/null | awk '{print $2}')"
   step "Already installed here: version ${installed:-unknown}"
   say "  run with --update to fetch the latest release"

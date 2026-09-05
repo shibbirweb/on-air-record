@@ -194,6 +194,12 @@ It downloads from the **latest published release**, so it is testing the current
 release, not against the working tree. A script change that depends on something only in an unreleased
 binary will pass here and fail for users.
 
+`release.yml` closes that gap from the other side. After the files are attached it runs the same
+installers again on all three platforms, pinned to the tag being released with `--release`, and asserts
+that the binary inside the archive reports the version the archive is named for. That runs after
+publishing because there is nothing to install until the assets exist, so a failure means an already
+public release is broken and has to be deleted and cut again.
+
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs when a release is **published
 from the GitHub web interface**, and attaches one archive per target with a `sha256` alongside. The web UI
 is built once in its own job and shared, so all four archives ship identical assets. Trigger it manually
