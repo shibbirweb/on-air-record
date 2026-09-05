@@ -9,7 +9,7 @@
 import { create } from 'zustand';
 
 import { api, ApiError } from '@/api/client';
-import type { CoverageBand, Peaks, TimelineRange } from '@/api/types';
+import type { CoverageBand, Peaks, RecordingDay, TimelineRange } from '@/api/types';
 
 /** Selectable zoom levels, in milliseconds of visible span. */
 export const ZOOM_LEVELS = [
@@ -35,18 +35,24 @@ type TimelineState = {
   followingLive: boolean;
   range: TimelineRange | null;
   peaks: Peaks | null;
+  /** Calendar days that hold recordings, newest first. */
+  days: RecordingDay[];
   loadingPeaks: boolean;
   error: string | null;
 
   windowEndMs: () => number;
   coverage: () => CoverageBand[];
+  /** The day entry the visible window sits in, if any. */
+  activeDay: () => RecordingDay | null;
 
   setSpan: (spanMs: number) => void;
   panBy: (deltaMs: number) => void;
   centreOn: (timestampMs: number) => void;
   setFollowingLive: (following: boolean) => void;
+  showDay: (day: string) => void;
   refreshRange: () => Promise<void>;
   refreshPeaks: () => Promise<void>;
+  refreshDays: () => Promise<void>;
 };
 
 export const useTimelineStore = create<TimelineState>((set, get) => ({
@@ -55,11 +61,20 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   followingLive: true,
   range: null,
   peaks: null,
+  days: [],
   loadingPeaks: false,
   error: null,
 
   windowEndMs: () => get().windowStartMs + get().spanMs,
   coverage: () => get().range?.coverage ?? [],
+
+  activeDay: () => {
+    const state = get();
+    const centre = state.windowStartMs + state.spanMs / 2;
+    return (
+      state.days.find((day) => centre >= day.dayStartMs && centre < day.dayEndMs) ?? null
+    );
+  },
 
   setSpan: (spanMs) => {
     const state = get();
@@ -96,6 +111,44 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       return;
     }
     set({ followingLive });
+  },
+
+  /**
+   * Frame a whole day's recording on the timeline.
+   *
+   * The window is fitted to the audio that exists rather than to midnight-to-midnight, because a day
+   * holding twenty minutes of recording would otherwise show a sliver of waveform in an ocean of empty
+   * timeline and be impossible to click accurately. The fit is padded slightly so the material does not
+   * touch the edges, floored at five minutes so a very short recording is still readable, and capped at
+   * the day itself so the view never spills into neighbouring days.
+   */
+  showDay: (dayId) => {
+    const state = get();
+    const entry = state.days.find((item) => item.day === dayId);
+    if (!entry) {
+      return;
+    }
+
+    const dayLengthMs = entry.dayEndMs - entry.dayStartMs;
+    const recordedSpanMs = Math.max(entry.endMs - entry.startMs, 0);
+    const spanMs = Math.min(Math.max(recordedSpanMs * 1.1, 5 * 60_000), dayLengthMs);
+    const centreMs = (entry.startMs + entry.endMs) / 2;
+
+    set({
+      followingLive: false,
+      spanMs,
+      windowStartMs: centreMs - spanMs / 2,
+    });
+  },
+
+  refreshDays: async () => {
+    try {
+      set({ days: await api.recordingDays(), error: null });
+    } catch (cause) {
+      set({
+        error: cause instanceof ApiError ? cause.message : 'could not load the recorded days',
+      });
+    }
   },
 
   refreshRange: async () => {

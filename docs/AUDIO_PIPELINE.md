@@ -76,8 +76,15 @@ the WebSocket frame type alone. They are documented in [API.md](API.md).
 Segments are raw headerless PCM, exactly the payload format described above, appended in order.
 
 ```
-data/recordings/<session_id>/<sequence>.pcm
+data/recordings/<YYYY-MM-DD>/<session_id>/<sequence>.pcm
 ```
+
+Day first, session second. Grouping by day is what makes the directory browsable by hand and lets a day's
+audio be archived or deleted as a unit, and it keeps a single day's material together even when the
+recorder was stopped and restarted several times within it. The day is the host's **local** calendar day,
+decided by where the segment *starts*, so a segment straddling midnight belongs to the day it began in.
+Playback does not care, because it is driven by timestamps rather than by day boundaries, so audio crosses
+midnight seamlessly.
 
 Raw PCM was chosen for the first release because it is seekable by arithmetic. The byte offset of any
 timestamp inside a segment is a multiplication, with no index and no decoder state, which is what makes
@@ -92,12 +99,18 @@ One SQLite row per closed segment:
 | --- | --- |
 | `id` | Auto increment primary key |
 | `session_id` | Owning capture session |
+| `day` | Local calendar day, `YYYY-MM-DD`, denormalised from `started_at_ms` |
 | `sequence` | Zero based index inside the session |
 | `path` | Path relative to the data directory |
 | `started_at_ms` / `ended_at_ms` | Inclusive start, exclusive end, in epoch milliseconds |
 | `sample_rate` / `channels` | Format needed to interpret the file |
 | `byte_len` | File size, used for storage reporting and integrity checks |
 | `peaks` | Peak envelope blob, see below |
+
+The `day` column is written from the same value that built the path, so a segment's day always names the
+directory its file is actually in. It is stored rather than computed on read for two reasons: it can be
+indexed, and it pins the grouping to the timezone in force when the audio was captured, so changing the
+host timezone later does not silently reshuffle old recordings into different days than their folders.
 
 Segments are 10 seconds by default. Shorter segments mean more rows and more file handles, longer ones mean
 more data lost if the process is killed mid segment, since only closed segments are indexed. The recorder

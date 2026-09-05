@@ -34,6 +34,8 @@ import { useTransportStore } from '@/store/useTransportStore';
 const STATUS_POLL_MS = 1000;
 const TIMELINE_POLL_MS = 2000;
 const STORAGE_POLL_MS = 10_000;
+/** The set of recorded days only changes at midnight or when the janitor prunes, so poll it rarely. */
+const DAYS_POLL_MS = 30_000;
 
 /** Wait for the window to settle before refetching the envelope, so a drag makes one request, not fifty. */
 const PEAKS_DEBOUNCE_MS = 180;
@@ -45,6 +47,7 @@ export function ControlRoom() {
   const refreshStatus = useStatusStore((state) => state.refresh);
   const refreshRange = useTimelineStore((state) => state.refreshRange);
   const refreshPeaks = useTimelineStore((state) => state.refreshPeaks);
+  const refreshDays = useTimelineStore((state) => state.refreshDays);
   const refreshStorage = useStorageStore((state) => state.refresh);
 
   const windowStartMs = useTimelineStore((state) => state.windowStartMs);
@@ -59,6 +62,7 @@ export function ControlRoom() {
   usePolling(refreshStatus, STATUS_POLL_MS);
   usePolling(refreshRange, TIMELINE_POLL_MS);
   usePolling(refreshStorage, STORAGE_POLL_MS);
+  usePolling(refreshDays, DAYS_POLL_MS);
 
   const peaksTimer = useRef<number | null>(null);
   useEffect(() => {

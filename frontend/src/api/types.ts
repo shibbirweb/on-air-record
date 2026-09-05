@@ -74,6 +74,22 @@ export type TimelineRange = {
   coverage: CoverageBand[];
 };
 
+/** One calendar day that holds recordings, as offered by the day picker. */
+export type RecordingDay = {
+  /** Local calendar day on the host, `YYYY-MM-DD`. */
+  day: string;
+  /** First and last moment actually recorded that day. */
+  startMs: number;
+  endMs: number;
+  /** Local midnight bounds, for framing the whole day on the timeline. */
+  dayStartMs: number;
+  dayEndMs: number;
+  segmentCount: number;
+  bytes: number;
+  /** Audio actually captured, which is less than the span if the recorder was stopped part way. */
+  recordedMs: number;
+};
+
 export type Peaks = {
   fromMs: number;
   toMs: number;

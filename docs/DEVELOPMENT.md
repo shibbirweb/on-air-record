@@ -111,10 +111,18 @@ Do not add co author trailers.
 data/
   on-air-record.sqlite      settings, sessions, segment index
   recordings/
-    1/                      session id
-      000000.pcm            segment sequence, zero padded
-      000001.pcm
+    2026-09-05/             local calendar day
+      1/                    session id
+        000000.pcm          segment sequence, zero padded
+        000001.pcm
+      2/                    a second session on the same day
+        000000.pcm
+    2026-09-04/
+      ...
 ```
+
+Grouping by day first means a day's audio can be archived or dropped as a unit, and it survives the
+recorder being stopped and restarted several times within one day.
 
 Deleting `data/` resets the service completely. Deleting only `recordings/` while keeping the database leaves
 orphaned index rows, which the janitor cleans up on the next pass.

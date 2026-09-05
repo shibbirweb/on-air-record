@@ -10,6 +10,7 @@ import type {
   Health,
   InputDevice,
   Peaks,
+  RecordingDay,
   RecordingSession,
   ServiceStatus,
   Settings,
@@ -106,6 +107,9 @@ export const api = {
     }),
 
   timelineRange: () => request<TimelineRange>('/timeline/range'),
+
+  recordingDays: () =>
+    request<{ days: RecordingDay[] }>('/timeline/days').then((body) => body.days),
 
   peaks: (fromMs: number, toMs: number, buckets: number) =>
     request<Peaks>(

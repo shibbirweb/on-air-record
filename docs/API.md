@@ -155,6 +155,39 @@ The extent of the recorded material and where the gaps are.
 Adjacent segments are merged into coverage bands, with a gap declared when segments are more than one frame
 apart.
 
+### `GET /api/timeline/days`
+
+Every calendar day that holds recordings, newest first. This is what the day picker is built from, so it
+never offers a date with nothing behind it.
+
+```json
+{
+  "days": [
+    {
+      "day": "2026-09-05",
+      "startMs": 1757030400000,
+      "endMs": 1757052040000,
+      "dayStartMs": 1757008800000,
+      "dayEndMs": 1757095200000,
+      "segmentCount": 342,
+      "bytes": 328212480,
+      "recordedMs": 3420000
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `day` | Local calendar day on the host, `YYYY-MM-DD` |
+| `startMs` / `endMs` | First and last moment actually recorded that day |
+| `dayStartMs` / `dayEndMs` | Local midnight bounds, for framing the whole day |
+| `segmentCount` / `bytes` | What is on disk for the day |
+| `recordedMs` | Audio actually captured, which is less than `endMs - startMs` whenever the recorder was stopped part way through the day |
+
+Days are **local to the host machine**, not UTC, and a segment belongs to the day it *started* in. All
+sessions recorded on one day are reported as one entry, however many times the recorder was restarted.
+
 ### `GET /api/timeline/peaks`
 
 | Query parameter | Required | Default | Notes |

@@ -35,6 +35,8 @@ Think of it as a small FM station plus a digital video recorder for sound:
   recorder keeps running even when nobody is listening.
 - **DVR timeline.** Seek to any timestamp inside the retention window, play history at real time pace, and
   return to the live edge with one click.
+- **Day by day history.** Recordings are filed on disk by calendar day and indexed the same way, so you can
+  pick a day and play from any point in it, the way you would scrub a CCTV recording.
 - **Waveform with timeline.** Amplitude peaks are computed while recording and stored alongside each
   segment, so the UI can draw the waveform for both live audio and history.
 - **Device picker.** All host input devices are enumerated at runtime, and the selected device is persisted
@@ -171,6 +173,7 @@ Legend: `[x]` done, `[~]` in progress, `[ ]` planned.
 ### Milestone 3: recording and storage
 
 - [x] Continuous segmented recorder writing raw PCM to disk
+- [x] Day based storage layout, `recordings/<YYYY-MM-DD>/<session>/`
 - [x] Segment index in SQLite with precise time ranges
 - [x] Waveform peak envelope computed while recording
 - [x] Retention janitor that prunes segments past the retention window
@@ -196,6 +199,7 @@ Legend: `[x]` done, `[~]` in progress, `[ ]` planned.
 - [x] Web Audio playback scheduler with jitter buffer
 - [x] Live waveform visualiser
 - [x] Scrubbable CCTV style timeline with recorded range shading
+- [x] Day picker that jumps the timeline to a chosen day and plays from its first moment
 - [x] Input device selector backed by the settings API
 - [x] Recorder and listener status panel
 - [x] Settings panel (gain, retention, segment length, auto start)
@@ -227,6 +231,7 @@ What the automated tests do not cover, and what to check by hand after a change 
 
 - Press play and confirm sound comes out, since browsers only start audio from a user gesture.
 - Click somewhere in a shaded band on the timeline and confirm playback jumps there.
+- Pick an earlier day from the day selector and confirm it frames that day and starts playing it.
 - Let it play forward to the live edge and confirm the badge flips back to `on air` on its own.
 
 ## Documentation

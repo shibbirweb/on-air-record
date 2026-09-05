@@ -139,7 +139,7 @@ Rules:
   | `useTransportStore` | Play state, mode, volume, and the transport actions |
   | `useDeviceStore` | The host input list and the current selection |
   | `useSettingsStore` | Runtime preferences, updated optimistically |
-  | `useTimelineStore` | The visible window, coverage bands and the fetched envelope |
+  | `useTimelineStore` | The visible window, coverage bands, recorded days and the fetched envelope |
   | `useStorageStore` | Disk usage and recent sessions |
 - High frequency data (audio frames, level meters, playhead position at 60fps) bypasses React state and is
   pushed through refs and imperative canvas drawing. Only low frequency state changes go through Zustand.
@@ -176,6 +176,7 @@ Rules:
 | I want to | Touch this |
 | --- | --- |
 | Add a REST endpoint | `dto`, `controllers`, `routes` |
+| Offer a new way to navigate history | `TimelineService`, `dto/timeline_dto.rs`, `useTimelineStore`, a component under `features/timeline` |
 | Add a stored preference | `models/settings.rs`, `repositories/settings_repository.rs`, settings DTO, frontend `settingsStore` |
 | Support a new codec | Implement `FrameEncoder`, register it in `audio::encoder::build_encoder` |
 | Add a live audio consumer | Subscribe to `BroadcastHub`, nothing else |
