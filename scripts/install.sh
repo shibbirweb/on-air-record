@@ -187,9 +187,14 @@ ask() {
   if [ -t 0 ]; then
     printf '%s' "$prompt" >&2
     IFS= read -r answer || answer=""
-  elif { : < /dev/tty; } 2>/dev/null; then
+  elif (exec < /dev/tty) 2>/dev/null; then
     # Readable by permission is not the same as openable: with no controlling terminal, as under cron or
     # a CI runner, /dev/tty exists and still fails to open. Try it for real before promising a prompt.
+    #
+    # The test has to happen inside a subshell. In dash, which is /bin/sh on Debian and Ubuntu, a failed
+    # redirection on a compound command kills the shell outright with status 2, and 2>/dev/null hides the
+    # message without preventing the death. A subshell contains it, and `if` just sees a false condition.
+    # bash is more forgiving, which is exactly why this passed on macOS and died on Ubuntu.
     printf '%s' "$prompt" >&2
     IFS= read -r answer < /dev/tty || answer=""
   else

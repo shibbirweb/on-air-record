@@ -160,6 +160,18 @@ covers everything except actually launching the program:
 PROCESSOR_ARCHITECTURE=AMD64 pwsh -NoProfile -File scripts/install.ps1 -Port 9000 -NoStart
 ```
 
+**Test `install.sh` under dash, not just the `sh` on your Mac.** `/bin/sh` is bash on macOS and dash on
+Debian and Ubuntu, and they disagree about failures in ways that pass locally and break for half the
+users. The one that has already bitten: a failed redirection on a compound command, `{ : < /dev/tty; }`,
+only fails that command under bash but kills dash outright with status 2, and `2>/dev/null` hides the
+message without preventing it. Put such a test in a subshell, `(exec < /dev/tty)`, which contains the
+death and leaves `if` a plain false. A container is the honest way to check:
+
+```sh
+docker run --rm -v "$PWD:/repo:ro" ubuntu:24.04 sh -c \
+  'apt-get update -qq && apt-get install -y -qq curl ca-certificates && cd /tmp && sh /repo/scripts/install.sh --no-start < /dev/null'
+```
+
 Both resolve the latest release from the redirect on `/releases/latest` rather than the API, which has an
 hourly rate limit that an installer would hit on a shared network. Two things that bit during the port and
 are easy to reintroduce: `Invoke-WebRequest` hands back the checksum file as a byte array rather than
