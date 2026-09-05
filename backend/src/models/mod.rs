@@ -15,4 +15,4 @@ pub use capture_state::{CaptureSnapshot, CaptureState, LevelSnapshot};
 pub use device::InputDevice;
 pub use segment::{Segment, SegmentDraft, TimeRange};
 pub use session::{RecordingSession, SessionDraft};
-pub use settings::Settings;
+pub use settings::{Settings, SettingsPatch};

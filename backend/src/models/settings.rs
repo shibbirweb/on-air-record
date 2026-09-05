@@ -109,6 +109,68 @@ impl Settings {
     }
 }
 
+/// A partial settings update.
+///
+/// Every field is optional so a caller can change one preference without having to send back values it
+/// does not care about, and without risking a lost update when two clients edit different fields.
+#[derive(Debug, Clone, Default)]
+pub struct SettingsPatch {
+    /// `Some(None)` clears the stored device and returns to the system default, while `None` leaves it
+    /// untouched. The nesting is deliberate: those are genuinely different requests.
+    pub input_device_id: Option<Option<String>>,
+    pub gain: Option<f32>,
+    pub segment_seconds: Option<u32>,
+    pub retention_hours: Option<u32>,
+    pub auto_start: Option<bool>,
+    pub frame_ms: Option<u32>,
+}
+
+impl SettingsPatch {
+    pub fn is_empty(&self) -> bool {
+        self.input_device_id.is_none()
+            && self.gain.is_none()
+            && self.segment_seconds.is_none()
+            && self.retention_hours.is_none()
+            && self.auto_start.is_none()
+            && self.frame_ms.is_none()
+    }
+
+    /// Apply the patch to `base` and return the clamped result.
+    pub fn apply_to(&self, base: &Settings) -> Settings {
+        let mut updated = base.clone();
+
+        if let Some(device_id) = &self.input_device_id {
+            updated.input_device_id = device_id
+                .as_ref()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+        }
+        if let Some(gain) = self.gain {
+            updated.gain = gain;
+        }
+        if let Some(segment_seconds) = self.segment_seconds {
+            updated.segment_seconds = segment_seconds;
+        }
+        if let Some(retention_hours) = self.retention_hours {
+            updated.retention_hours = retention_hours;
+        }
+        if let Some(auto_start) = self.auto_start {
+            updated.auto_start = auto_start;
+        }
+        if let Some(frame_ms) = self.frame_ms {
+            updated.frame_ms = frame_ms;
+        }
+
+        updated.clamped()
+    }
+
+    /// True when the patch changes something that only takes effect on a fresh capture stream.
+    pub fn requires_capture_restart(&self, base: &Settings) -> bool {
+        let updated = self.apply_to(base);
+        updated.input_device_id != base.input_device_id || updated.frame_ms != base.frame_ms
+    }
+}
+
 fn parse_f32(raw: Option<&String>, fallback: f32) -> f32 {
     raw.and_then(|value| value.trim().parse::<f32>().ok())
         .unwrap_or(fallback)
@@ -182,5 +244,76 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(settings.retention_ms(), 7_200_000);
+    }
+    #[test]
+    fn patch_only_touches_the_fields_it_sets() {
+        let base = Settings::default();
+        let patch = SettingsPatch {
+            gain: Some(2.0),
+            ..SettingsPatch::default()
+        };
+        let updated = patch.apply_to(&base);
+        assert_eq!(updated.gain, 2.0);
+        assert_eq!(updated.retention_hours, base.retention_hours);
+    }
+
+    #[test]
+    fn patch_can_clear_the_device_or_leave_it_alone() {
+        let base = Settings {
+            input_device_id: Some("mic".to_string()),
+            ..Settings::default()
+        };
+
+        let untouched = SettingsPatch::default().apply_to(&base);
+        assert_eq!(untouched.input_device_id, Some("mic".to_string()));
+
+        let cleared = SettingsPatch {
+            input_device_id: Some(None),
+            ..SettingsPatch::default()
+        }
+        .apply_to(&base);
+        assert_eq!(cleared.input_device_id, None);
+    }
+
+    #[test]
+    fn patch_clamps_what_it_applies() {
+        let patch = SettingsPatch {
+            gain: Some(-3.0),
+            ..SettingsPatch::default()
+        };
+        assert_eq!(patch.apply_to(&Settings::default()).gain, GAIN_RANGE.0);
+    }
+
+    #[test]
+    fn only_device_and_frame_size_force_a_capture_restart() {
+        let base = Settings::default();
+
+        let gain_only = SettingsPatch {
+            gain: Some(2.0),
+            ..SettingsPatch::default()
+        };
+        assert!(!gain_only.requires_capture_restart(&base));
+
+        let device_change = SettingsPatch {
+            input_device_id: Some(Some("other".to_string())),
+            ..SettingsPatch::default()
+        };
+        assert!(device_change.requires_capture_restart(&base));
+
+        let frame_change = SettingsPatch {
+            frame_ms: Some(40),
+            ..SettingsPatch::default()
+        };
+        assert!(frame_change.requires_capture_restart(&base));
+    }
+
+    #[test]
+    fn an_empty_patch_is_detected() {
+        assert!(SettingsPatch::default().is_empty());
+        assert!(!SettingsPatch {
+            auto_start: Some(false),
+            ..SettingsPatch::default()
+        }
+        .is_empty());
     }
 }

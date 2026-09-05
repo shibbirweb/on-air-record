@@ -63,6 +63,9 @@ pub struct CaptureOptions {
     pub device_id: Option<String>,
     pub frame_ms: u32,
     pub gain: GainControl,
+    /// Counter the callback bumps when the consumer cannot keep up. Owned by the caller so the count
+    /// survives a capture restart and stays visible in the status endpoint.
+    pub dropped_frames: Arc<AtomicU64>,
 }
 
 /// What the engine actually negotiated with the device.
@@ -128,7 +131,7 @@ const STOP_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 /// report a precise failure instead of a capture that silently never starts.
 pub fn spawn(options: CaptureOptions, sink: Sender<AudioFrame>) -> AppResult<CaptureHandle> {
     let stop = Arc::new(AtomicBool::new(false));
-    let dropped_frames = Arc::new(AtomicU64::new(0));
+    let dropped_frames = options.dropped_frames.clone();
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<AppResult<CaptureRuntime>>();
 
     let thread_stop = stop.clone();
