@@ -5,8 +5,15 @@
 | Tool | Version | Notes |
 | --- | --- | --- |
 | Rust | 1.82+ | Install with [rustup](https://rustup.rs) |
-| Node.js | 18+ | 20 or 22 recommended |
+| Node.js | 18+ | 22 is what the project is built and tested against |
 | npm | 9+ | Ships with Node |
+
+`frontend/.nvmrc` pins the major version, so `nvm use` inside `frontend/` picks the right toolchain:
+
+```bash
+cd frontend
+nvm use          # reads .nvmrc, installs with `nvm install` if it is missing
+```
 
 Platform specific audio dependencies:
 
