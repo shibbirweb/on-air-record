@@ -29,11 +29,29 @@ jobs:
     name: versions agree
     runs-on: ubuntu-latest
     steps:
+      # Tags and full history, because the release report below works out what is unreleased with
+      # `git describe`, and a shallow clone has neither.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: frontend/.nvmrc
+
       - run: node scripts/version.mjs check
+
+      # Answers "is a release due?" on every run without anybody having to remember to ask. It is a note
+      # in the run summary, not a rule: work waiting to be released is normal and never a build failure.
+      - name: Report whether a release is due
+        run: |
+          {
+            echo '### Release status'
+            echo ''
+            echo '```'
+            node scripts/version.mjs pending
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   backend:
     name: backend (${{ matrix.os }})

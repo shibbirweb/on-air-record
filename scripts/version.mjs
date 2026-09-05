@@ -10,6 +10,8 @@
  *     node scripts/version.mjs show          print the authoritative version
  *     node scripts/version.mjs check         verify all four agree, exit 1 if they do not
  *     node scripts/version.mjs set 0.2.0     move all four at once
+ *     node scripts/version.mjs bump          show what is unreleased and pick the next version
+ *     node scripts/version.mjs pending       report whether a release is due, for CI to surface
  *
  * `check` reads files and nothing else, no cargo and no npm, so CI can run it in a couple of seconds.
  * Only `set` needs the package managers, to regenerate the lockfiles rather than hand editing them.
@@ -17,6 +19,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createInterface } from 'node:readline/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -170,6 +173,206 @@ function commandSet(version) {
   return commandCheck();
 }
 
+// ------------------------------------------------------------------ releasing
+
+/** Run a git command, or return null when git has nothing to say. */
+function git(...args) {
+  try {
+    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function lastTag() {
+  return git('describe', '--tags', '--abbrev=0', '--match', 'v*');
+}
+
+/** Commit subjects since a tag, newest first. Everything when there is no tag yet. */
+function commitsSince(tag) {
+  const range = tag ? `${tag}..HEAD` : 'HEAD';
+  const out = git('log', range, '--format=%s');
+  return out ? out.split('\n').filter(Boolean) : [];
+}
+
+/** The next OAR ticket, so the suggested commit line is ready to paste. */
+function nextTicket() {
+  const out = git('log', '--format=%s') ?? '';
+  const used = [...out.matchAll(/\[OAR-(\d+)\]/g)].map((match) => Number(match[1]));
+  return used.length > 0 ? Math.max(...used) + 1 : 1;
+}
+
+function nextVersions(current) {
+  const [major, minor, patch] = current.split('-')[0].split('.').map(Number);
+  return {
+    patch: `${major}.${minor}.${patch + 1}`,
+    minor: `${major}.${minor + 1}.0`,
+    major: `${major + 1}.0.0`,
+  };
+}
+
+/**
+ * What the commits since the last release imply.
+ *
+ * The commit convention carries this already: a `feat:` is a new feature and a `fix:` is a bug fix, so
+ * the suggestion is read off the log rather than guessed at.
+ */
+function suggest(subjects) {
+  const kind = (subject) => (subject.split(/[:(\[]/, 1)[0] ?? '').trim().toLowerCase();
+  const kinds = subjects.map(kind);
+  if (kinds.includes('feat')) {
+    return 'minor';
+  }
+  if (kinds.includes('fix')) {
+    return 'patch';
+  }
+  return 'patch';
+}
+
+function summarise(subjects) {
+  const counts = new Map();
+  for (const subject of subjects) {
+    const kind = (subject.split(/[:(\[]/, 1)[0] ?? '?').trim().toLowerCase() || '?';
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([kind, count]) => `${count} ${kind}`)
+    .join(', ');
+}
+
+/**
+ * Everything worth knowing about whether a release is due.
+ *
+ * `git describe` needs the tags, so anywhere this runs on a shallow clone has to fetch them first.
+ */
+function releaseState() {
+  const current = authoritative();
+  const tag = lastTag();
+  return {
+    current,
+    tag,
+    released: tag !== null && git('rev-parse', '--verify', `refs/tags/v${current}`) !== null,
+    subjects: commitsSince(tag),
+  };
+}
+
+/**
+ * A read only answer to "is there anything to release?", for CI to put in its run summary. Always exits
+ * zero: this is a note, not a rule, and a release being due is not a build failure.
+ */
+function commandPending() {
+  const { current, tag, subjects } = releaseState();
+
+  console.log(`Current version  ${current}`);
+  console.log(`Last release     ${tag ?? 'none yet'}`);
+
+  if (subjects.length === 0) {
+    console.log('');
+    console.log('Nothing has landed since that release. Nothing to do.');
+    return 0;
+  }
+
+  const level = suggest(subjects);
+  console.log(`Unreleased       ${subjects.length} commits (${summarise(subjects)})`);
+  console.log('');
+  console.log(`A ${level} release would make this ${nextVersions(current)[level]}.`);
+  console.log('Run `node scripts/version.mjs bump` to cut it.');
+  return 0;
+}
+
+async function commandBump(requested) {
+  const { current, tag, released } = releaseState();
+
+  console.log(`Current version  ${current}`);
+  console.log(`Last release     ${tag ?? 'none yet'}`);
+
+  if (!released && tag !== null) {
+    console.log(
+      `\n${current} is in the manifests but has never been released. Nothing to bump: create a release` +
+        `\ntagged v${current} instead, or pass an explicit level to move past it.`,
+    );
+    if (!requested) {
+      return 0;
+    }
+  }
+
+  const subjects = commitsSince(tag);
+  if (subjects.length === 0) {
+    console.log('\nNothing has landed since that release, so there is nothing to put in a new one.');
+    return 0;
+  }
+
+  console.log(`\n${subjects.length} commits since ${tag ?? 'the beginning'} (${summarise(subjects)}):\n`);
+  for (const subject of subjects.slice(0, 20)) {
+    console.log(`  ${subject}`);
+  }
+  if (subjects.length > 20) {
+    console.log(`  ... and ${subjects.length - 20} more`);
+  }
+
+  const next = nextVersions(current);
+  const suggested = suggest(subjects);
+  const levels = ['patch', 'minor', 'major'];
+  const describe = {
+    patch: 'bug fixes only',
+    minor: 'new features, nothing broken',
+    major: 'something that was working now behaves differently',
+  };
+
+  let level = requested;
+  if (level && !levels.includes(level)) {
+    console.error(`\n'${level}' is not one of: ${levels.join(', ')}`);
+    return 2;
+  }
+
+  if (!level) {
+    console.log('\nWhat kind of release is this?\n');
+    levels.forEach((name, index) => {
+      const mark = name === suggested ? '  <- suggested by the commits above' : '';
+      console.log(`  ${index + 1}) ${name.padEnd(6)} ${next[name].padEnd(8)} ${describe[name]}${mark}`);
+    });
+    console.log('  4) cancel');
+
+    if (!process.stdin.isTTY) {
+      console.error('\nNo terminal to ask at. Pass the level: version.mjs bump minor');
+      return 2;
+    }
+
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const answer = (await rl.question(`\nWhich? [${levels.indexOf(suggested) + 1}] `)).trim();
+    rl.close();
+
+    if (answer === '4' || answer.toLowerCase() === 'cancel') {
+      console.log('Nothing changed.');
+      return 0;
+    }
+    const chosen = answer === '' ? suggested : levels[Number(answer) - 1] ?? answer;
+    if (!levels.includes(chosen)) {
+      console.error(`'${answer}' is not one of the options.`);
+      return 2;
+    }
+    level = chosen;
+  }
+
+  const target = next[level];
+  console.log(`\n${level}: ${current} -> ${target}\n`);
+
+  const result = commandSet(target);
+  if (result !== 0) {
+    return result;
+  }
+
+  console.log(`\nNothing is released yet. To finish:\n`);
+  console.log(`  git commit -am "chore:[OAR-${nextTicket()}] release ${target}"`);
+  console.log('  git push origin master');
+  console.log('');
+  console.log(`Then on GitHub: Releases, Draft a new release, create the tag v${target}, Publish.`);
+  console.log('The workflow refuses any other tag, builds all four platforms, attaches them, and then');
+  console.log('installs the result on macOS, Linux and Windows to prove it works.');
+  return 0;
+}
+
 const [action, argument, ...rest] = process.argv.slice(2);
 
 if (action === 'show' && argument === undefined) {
@@ -178,13 +381,20 @@ if (action === 'show' && argument === undefined) {
   process.exit(commandCheck());
 } else if (action === 'set' && argument !== undefined && rest.length === 0) {
   process.exit(commandSet(argument));
+} else if (action === 'bump' && rest.length === 0) {
+  process.exit(await commandBump(argument));
+} else if (action === 'pending' && argument === undefined) {
+  process.exit(commandPending());
 } else {
   console.error(
     [
       'Usage:',
-      '  node scripts/version.mjs show          print the authoritative version',
-      '  node scripts/version.mjs check         verify all four recorded versions agree',
-      '  node scripts/version.mjs set 0.2.0     move all four at once',
+      '  node scripts/version.mjs show                 print the authoritative version',
+      '  node scripts/version.mjs check                verify all four recorded versions agree',
+      '  node scripts/version.mjs set 0.2.0            move all four to an exact version',
+      '  node scripts/version.mjs bump                 show what is unreleased and choose the next version',
+      '  node scripts/version.mjs bump minor           the same without the question',
+      '  node scripts/version.mjs pending              report whether a release is due, never fails',
     ].join('\n'),
   );
   process.exit(2);

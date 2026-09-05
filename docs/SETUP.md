@@ -569,11 +569,20 @@ from `/api/health`, what `--version` prints, and what the footer shows, so the r
 with it. The same number is recorded in four files, so move it with the script rather than by hand:
 
 ```sh
-node scripts/version.mjs show            # what the manifest says today
-node scripts/version.mjs set 0.2.0       # both manifests and both lockfiles
-git commit -am "chore: release 0.2.0"
+node scripts/version.mjs bump
+```
+
+That lists everything that has landed since the last release, suggests whether it is a patch, a minor or
+a major from the commit types, and moves all four files once you choose. It prints the commit line to
+paste afterwards. Nothing is committed, tagged or pushed for you:
+
+```sh
+git commit -am "chore:[OAR-56] release 0.2.0"
 git push origin master
 ```
+
+You never have to work out whether a release is due: every CI run says so in its summary, and
+`node scripts/version.mjs pending` answers the same question locally.
 
 To release the version the manifest already carries, there is nothing to do here.
 

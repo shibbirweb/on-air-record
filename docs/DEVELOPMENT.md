@@ -123,8 +123,41 @@ Counting lockfiles, one number is recorded in four files, so do not move it by h
 ```sh
 node scripts/version.mjs show          # the authoritative version
 node scripts/version.mjs check         # verify all four agree, exit 1 if not
-node scripts/version.mjs set 0.2.0     # move all four, refreshing both lockfiles
+node scripts/version.mjs set 0.2.0     # move all four to an exact version
+node scripts/version.mjs bump          # show what is unreleased and choose the next version
+node scripts/version.mjs pending       # report whether a release is due, never fails
 ```
+
+### Knowing a release is due
+
+Two ways, so it does not depend on anybody remembering.
+
+`bump` lists everything that has landed since the last tag, counts it by commit type, and suggests a
+level from that: a `feat:` in there means minor, otherwise patch. Pressing enter takes the suggestion.
+
+```
+Current version  0.1.0
+Last release     v0.1.0
+
+8 commits since v0.1.0 (3 feat, 2 test, 2 docs, 1 fix):
+  ...
+
+What kind of release is this?
+
+  1) patch  0.1.1    bug fixes only
+  2) minor  0.2.0    new features, nothing broken  <- suggested by the commits above
+  3) major  1.0.0    something that was working now behaves differently
+  4) cancel
+```
+
+It then moves all four files and prints the commit line to paste, with the next `OAR-` number already
+worked out. Nothing is committed, tagged or pushed for you.
+
+`bump minor` skips the question, which is what to use from a script or with no terminal.
+
+The passive half is `pending`, which the `versions` job runs on **every** CI run and writes into the run
+summary. So a build page tells you a release is waiting without anybody going looking. It always exits
+zero: unreleased work is normal, not a failure.
 
 `check` only reads files, so CI runs it as its own quick job and the four cannot drift apart unnoticed.
 `set` shells out to `cargo` and `npm` to regenerate the lockfiles rather than editing them, which is why
