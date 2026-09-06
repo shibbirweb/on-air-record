@@ -160,20 +160,30 @@ through every part of the interface with screenshots.
 
 ## How it works
 
-```
- host machine                                          browser (LAN)
-+-----------------------------------------+           +----------------------------+
-|  cpal input stream (selected mic)       |           |  React + Zustand UI        |
-|            |                            |           |            |               |
-|            v                            |           |            v               |
-|  CaptureService  --(mono i16 frames)-->  BroadcastHub  --WS-->  Web Audio player  |
-|            |                            |           |            ^               |
-|            v                            |           |            |               |
-|  SegmentRecorder --> data/recordings/*.pcm          |     timeline scrubber      |
-|            |                            |           |            |               |
-|            v                            |    REST   |            v               |
-|  SQLite (sessions, segments, peaks, settings) <----------- peaks and device API   |
-+-----------------------------------------+           +----------------------------+
+```mermaid
+flowchart LR
+    mic["Microphone"] --> capture
+
+    subgraph host["Host machine, one process"]
+        direction TB
+        capture["CaptureService<br/>downmix to mono, gain, i16"]
+        capture --> frames["FrameBuilder<br/>fixed 100 ms frames"]
+        frames --> recorder["SegmentRecorder<br/>the only publisher"]
+        recorder --> hub["BroadcastHub"]
+        recorder --> pcm[("Raw PCM on disk<br/>one folder per day")]
+        recorder --> index[("SQLite<br/>segments, peaks, settings")]
+        pcm --> cursor["PlaybackCursor<br/>reads history, paced"]
+    end
+
+    hub -- "WebSocket, live" --> player["Web Audio player"]
+    cursor -- "WebSocket, historic" --> player
+    index -- "REST: peaks, days, devices" --> ui["Timeline and controls"]
+
+    subgraph browser["Any browser on the network"]
+        direction TB
+        player
+        ui
+    end
 ```
 
 1. `CaptureService` opens the selected input device with `cpal`, downmixes to mono, and converts every

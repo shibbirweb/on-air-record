@@ -376,6 +376,29 @@ longer reaches that far back, the bookmark is a link to nothing.
 
 ## WebSocket `GET /api/ws/stream`
 
+One socket carries both live audio and DVR playback. The session is in exactly one of three modes, and
+every control message below is a transition between them. `Paused` remembers where it came from, so
+resuming returns you to live or to history rather than always to live:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Live: connect
+    Live --> Playback: seek
+    Playback --> Live: go-live, or caught up
+    Live --> Paused: pause
+    Playback --> Paused: pause
+    Paused --> Live: resume, if it was live
+    Paused --> Playback: resume, if it was in history
+```
+
+"Caught up" is the cursor reaching the live edge on its own, at which point the server sends
+`switched-to-live` and resubscribes the session to the hub.
+
+`seek` and `go-live` also work from `Paused`, and a `seek` while already in `Playback` just moves the
+cursor. They are left off the diagram because they do the obvious thing and drawing them obscured the part
+that matters, which is that `Paused` remembers where it came from.
+
+
 One socket carries both the live broadcast and DVR playback. Binary messages are audio frames in the format
 described in [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md). Text messages are JSON control messages.
 

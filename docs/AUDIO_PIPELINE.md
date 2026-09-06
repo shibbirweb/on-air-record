@@ -2,6 +2,32 @@
 
 Everything about how a sound wave becomes bytes, reaches the browser, and comes back out of the timeline.
 
+```mermaid
+flowchart TD
+    device["cpal input stream<br/>whatever rate the device offers"]
+    mono["Downmix to mono, apply gain"]
+    resample["Resample<br/>only if a lower rate was chosen"]
+    builder["FrameBuilder<br/>fixed 100 ms frames, timestamps from a sample count"]
+    recorder["SegmentRecorder"]
+    writer["SegmentWriter<br/>append raw PCM"]
+    peaks["PeakEnvelopeBuilder<br/>one byte per 100 ms"]
+    row[("segments row<br/>range, path, byte length, envelope")]
+    hub["BroadcastHub"]
+    socket["WebSocket sessions"]
+
+    device --> mono --> resample --> builder --> recorder
+    recorder --> writer
+    recorder --> hub --> socket
+    writer -- "on rollover" --> peaks --> row
+
+    classDef disk fill:#f6f6f6,stroke:#999
+    class row disk
+```
+
+Two properties of that picture are load bearing. The recorder is the **only** publisher into the hub, so a
+live listener hears exactly what reached the disk, in the same order. And the envelope is computed during
+recording, while the samples are still in cache, rather than by re reading the file later.
+
 ## 1. Capture
 
 `cpal` is the cross platform audio layer. It uses CoreAudio on macOS, ALSA on Linux, and WASAPI on Windows.
@@ -200,6 +226,20 @@ UI shows the timeline as empty there rather than pretending audio existed.
 Live handoff: when the cursor reaches the end of the newest segment, the session sends `switched-to-live` and
 resubscribes to `BroadcastHub`. There is a small overlap because the open segment is not on disk yet, so the
 session skips forward to the live edge rather than replaying it.
+
+```mermaid
+flowchart TD
+    seek["seek at a timestamp"] --> find{"is a segment<br/>covering it indexed?"}
+    find -- no --> gap["send a gap message<br/>the UI draws nothing there"]
+    find -- yes --> offset["byte offset by arithmetic<br/>no index, no decoder warm up"]
+    offset --> read["read one frame, paced by a tokio interval"]
+    read --> more{"more of this segment?"}
+    more -- yes --> read
+    more -- no --> next{"another segment<br/>after this one?"}
+    next -- yes --> read
+    next -- no --> handoff["send switched-to-live<br/>resubscribe to the hub"]
+    gap --> next
+```
 
 ## 6. Browser playback
 

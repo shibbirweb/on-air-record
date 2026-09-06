@@ -12,6 +12,14 @@ This page is for whoever puts On Air Record on a machine and gets it running. On
 You install it on **one** computer, the one with the microphone. Everybody else just opens a web address.
 Nothing has to be installed on the listening devices.
 
+```mermaid
+flowchart LR
+    mic["Microphone"] --> host["The host computer<br/>runs On Air Record<br/>keeps the recordings"]
+    host -- "http://its-address:8080" --> laptop["Laptop"]
+    host -- "http://its-address:8080" --> phone["Phone"]
+    host -- "http://its-address:8080" --> tablet["Tablet"]
+```
+
 ## Contents
 
 - [What you need](#what-you-need)

@@ -33,6 +33,29 @@ web server, no reverse proxy requirement, and no database server.
 The backend follows a layered MVC style separation. Dependencies always point downwards, never sideways and
 never upwards.
 
+```mermaid
+flowchart TD
+    routes["routes<br/>compose the axum router"]
+    controllers["controllers<br/>parse, call a service, map to a DTO"]
+    dto["dto<br/>serde shapes on the HTTP boundary"]
+    services["services<br/>business rules, orchestration"]
+    audio["audio<br/>devices, framing, encoding, peaks"]
+    repositories["repositories<br/>SQL and row mapping"]
+    db["db<br/>connection handling, migrations"]
+    models["models<br/>domain entities"]
+
+    routes --> controllers
+    controllers --> services
+    controllers --> dto
+    services --> repositories
+    services --> audio
+    repositories --> db
+    dto --> models
+    services --> models
+    audio --> models
+    repositories --> models
+```
+
 | Layer | Directory | Responsibility | May depend on |
 | --- | --- | --- | --- |
 | Routes | `src/routes` | Compose the axum router, mount middleware | Controllers |
@@ -101,6 +124,30 @@ therefore never breaks the frontend contract by accident.
 
 ## 4. Concurrency model
 
+Three threads matter, and the arrows between them are the whole design. The recorder being the single
+publisher into the hub is what guarantees a live listener hears exactly what was written to disk, in order.
+
+```mermaid
+flowchart TB
+    subgraph osthread["OS audio thread, owned by cpal"]
+        callback["input callback<br/>never blocks, allocates or panics"]
+    end
+
+    subgraph recthread["Recorder thread, not tokio"]
+        writer["SegmentWriter and SQLite insert<br/>every step blocking"]
+    end
+
+    subgraph runtime["Tokio runtime"]
+        http["HTTP handlers"]
+        session["One task per WebSocket"]
+    end
+
+    callback -- "crossbeam channel<br/>drops oldest when full" --> writer
+    writer -- "the only publisher" --> hub["BroadcastHub"]
+    hub -- "one subscription each" --> session
+    http -- "reads state" --> hub
+```
+
 - The `cpal` input callback runs on a realtime audio thread owned by the operating system. It must never
   block, allocate heavily, or touch SQLite. It only converts samples and does a non blocking send.
 - A bounded `std::sync::mpsc` style channel (a `crossbeam` channel) hands frames from the audio thread to the
@@ -153,6 +200,37 @@ Rules:
   can call `seek` without being handed a WebSocket and the store stays free of side effects.
 
 ## 6. Data flow for the three core scenarios
+
+One socket carries all three of the first two scenarios, which is why the session is a state machine rather
+than a set of flags:
+
+```mermaid
+sequenceDiagram
+    participant UI as Browser
+    participant WS as ws::session
+    participant Hub as BroadcastHub
+    participant PS as PlaybackService
+
+    UI->>WS: open /api/ws/stream
+    WS->>Hub: subscribe
+    WS-->>UI: stream-info
+    loop while live
+        Hub-->>WS: captured frame
+        WS-->>UI: binary frame, live
+    end
+
+    UI->>WS: seek, timestampMs
+    WS->>PS: open a cursor at that moment
+    WS-->>UI: mode, playback
+    loop paced by a tokio interval
+        PS-->>WS: frame read from disk
+        WS-->>UI: binary frame, historic
+    end
+
+    Note over WS,PS: the cursor catches up with the live edge
+    WS-->>UI: switched-to-live
+    WS->>Hub: subscribe again
+```
 
 ### Listening live
 
