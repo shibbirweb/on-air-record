@@ -225,24 +225,29 @@ function Test-PortFree {
 }
 
 function Read-Port {
+    # With input redirected, or no user session at all, Read-Host keeps returning nothing, so the default
+    # would come back and fail the same way forever. Under CI that is a job hanging until its time limit.
+    $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+
     while ($true) {
         $answer = Read-Host "Which port should the web interface use? [$DefaultPort]"
         if ([string]::IsNullOrWhiteSpace($answer)) { $answer = "$DefaultPort" }
 
         $number = 0
+        $problem = $null
         if (-not [int]::TryParse($answer.Trim(), [ref] $number)) {
-            Write-Detail "'$answer' is not a number, try again."
-            continue
+            $problem = "'$answer' is not a number"
+        } elseif ($number -lt 1024 -or $number -gt 65535) {
+            $problem = "$number is not between 1024 and 65535"
+        } elseif (-not (Test-PortFree -Number $number)) {
+            $problem = "something is already listening on $number"
         }
-        if ($number -lt 1024 -or $number -gt 65535) {
-            Write-Detail 'pick a number between 1024 and 65535.'
-            continue
+
+        if (-not $problem) { return $number }
+        if (-not $interactive) {
+            Stop-WithError "$problem, and there is nobody to ask for another. Run it again with -Port <number>."
         }
-        if (-not (Test-PortFree -Number $number)) {
-            Write-Detail "something is already listening on $number, pick another."
-            continue
-        }
-        return $number
+        Write-Detail "$problem, pick another."
     }
 }
 

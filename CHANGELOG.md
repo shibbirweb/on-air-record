@@ -14,6 +14,12 @@ Every release of On Air Record, newest first. The format follows
   choice is remembered, so later updates stay on betas; `--stable` goes back, and never to a version older
   than the one installed. Anybody who does not ask for betas keeps getting stable releases only. (OAR-69)
 
+### Fixed
+
+- The installers no longer hang when run with no terminal to answer, such as from a script, while the
+  default port 8080 is already in use. They stop at once and say to pass `--port` (`-Port` on Windows).
+  (OAR-70)
+
 ## [0.3.0] - 2026-09-26
 
 ### Added

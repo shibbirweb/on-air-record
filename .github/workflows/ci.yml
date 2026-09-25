@@ -231,7 +231,8 @@ jobs:
           echo "stop.sh shut it down and freed the port"
 
           # Saying so plainly beats failing, since there is nothing wrong with stopping what is stopped.
-          ./on-air-record/stop.sh | grep -q 'Nothing is running' || { echo "a second stop should be a no-op"; exit 1; }
+          stopped_again="$(./on-air-record/stop.sh)"
+          echo "$stopped_again" | grep -q 'Nothing is running' || { echo "a second stop should be a no-op"; exit 1; }
           echo "a second stop is a no-op"
 
           echo "::group::second run"
@@ -255,8 +256,11 @@ jobs:
           grep -q '^OAR_CHANNEL=beta$' on-air-record/config || { echo "the beta channel was not saved"; exit 1; }
           grep -q '^OAR_PORT=8096$' on-air-record/config || { echo "saving the channel lost the port"; exit 1; }
           echo "beta install: $(./on-air-record/on-air-record --version)"
-          sh "$GITHUB_WORKSPACE/scripts/install.sh" --no-start | grep -q 'on beta releases' \
-            || { echo "a plain re-run forgot the beta channel"; exit 1; }
+          # Captured first, never piped straight into grep -q: this shell runs with pipefail, and grep -q
+          # stops reading at the first match, so the installer dies of a broken pipe mid output and the
+          # whole pipeline counts as failed even though the text was there.
+          again="$(sh "$GITHUB_WORKSPACE/scripts/install.sh" --no-start)"
+          echo "$again" | grep -q 'on beta releases' || { echo "$again"; echo "a plain re-run forgot the beta channel"; exit 1; }
           echo "the beta channel is saved and remembered"
 
       # Windows PowerShell 5.1 on purpose: it is what a Windows machine has out of the box, it negotiates
