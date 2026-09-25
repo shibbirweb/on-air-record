@@ -1,10 +1,15 @@
-# Cuts the next beta from develop in one click: Actions, "Beta release", Run workflow, on develop.
+# Starts the next beta from develop: Actions, "Beta release", Run workflow, on develop.
 #
-# It does exactly what the manual steps in docs/SETUP.md do, in order: bump the version with
-# version.mjs, commit and push it to develop, publish a pre-release tagged with it using the [Unreleased]
-# changelog section as the notes, then build and attach the files and install them on all three platforms
-# by calling release.yml. Tick "dry run" to see the version, commit and notes it would use, with nothing
-# pushed or published.
+# develop only takes changes by pull request, and GitHub gives the built in token no way past that rule,
+# so this does not push the version bump itself. It opens a release pull request carrying it, like
+# `chore:[OAR-72] release 0.4.0-beta.1`, with the release notes in its description. Merging that pull
+# request is the decision to release. Once CI passes on develop after the merge, beta-publish.yml sees an
+# unpublished beta version there and publishes it, builds it and installs it on all three platforms.
+#
+# Tick "dry run" to see the version, commit and notes it would use, with nothing pushed or opened.
+#
+# Needs one repository setting: Settings, Actions, General, Workflow permissions, "Allow GitHub Actions to
+# create and approve pull requests". Without it GitHub refuses to open the pull request, and says so.
 #
 # Stable releases stay manual, from master, because they also date the changelog and are the ones that
 # reach everybody.
@@ -14,25 +19,24 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Dry run, only show what would happen and push or publish nothing
+        description: Dry run, only show what would happen and push or open nothing
         type: boolean
         default: false
 
 permissions:
   contents: write
+  pull-requests: write
   actions: read
 
-# Two betas at once would race for the same version number.
+# Two runs at once would race for the same version number.
 concurrency:
   group: beta-release
   cancel-in-progress: false
 
 jobs:
   prepare:
-    name: bump and publish
+    name: open the release pull request
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.bump.outputs.tag }}
     steps:
       - name: Only from develop
         if: github.ref != 'refs/heads/develop'
@@ -57,7 +61,7 @@ jobs:
         working-directory: backend
         run: cargo fetch --locked
 
-      # A beta is something people install, so it is only cut from a commit CI has passed on all three
+      # A beta is something people install, so it only starts from a commit CI has passed on all three
       # platforms, never from one it failed on or has not finished with.
       - name: Check CI passed on this commit
         env:
@@ -72,6 +76,29 @@ jobs:
           fi
           echo "CI passed on ${sha:0:7}"
 
+      # One release at a time. A release pull request already open, or a beta already merged but not yet
+      # published, has to finish first; bumping past it would skip a version nobody ever got.
+      - name: Check no release is already under way
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current="$(node scripts/version.mjs show)"
+          case "$current" in
+            *-beta.*)
+              if ! git rev-parse --verify --quiet "refs/tags/v$current" > /dev/null; then
+                echo "::error::develop is already at $current, which has not been published. Once CI passes on develop, Publish beta publishes it; if that failed, re-run it from Actions."
+                exit 1
+              fi
+              ;;
+          esac
+
+          open="$(gh pr list --repo "$GITHUB_REPOSITORY" --base develop --state open --json headRefName,url \
+            --jq '[.[] | select(.headRefName | startswith("release/"))][0].url // ""')"
+          if [ -n "$open" ]; then
+            echo "::error::A release pull request is already open: $open. Merge or close it first."
+            exit 1
+          fi
+
       - name: Bump to the next beta
         id: bump
         run: |
@@ -79,8 +106,8 @@ jobs:
           node scripts/version.mjs bump beta
           version="$(node scripts/version.mjs show)"
 
-          # bump leaves the version alone when nothing has landed since the last release, and cutting the
-          # same version twice would fail at the tag anyway. Say so plainly instead.
+          # bump leaves the version alone when nothing has landed since the last release. Say so plainly
+          # rather than open a pull request that changes nothing.
           if [ "$version" = "$before" ]; then
             echo "::error::Nothing has landed on develop since $before was released, so there is nothing for a new beta to hold."
             exit 1
@@ -100,40 +127,46 @@ jobs:
         run: |
           node scripts/version.mjs notes > "$RUNNER_TEMP/notes.md"
           {
-            echo "### ${{ steps.bump.outputs.tag }}${{ inputs.dry_run && ' (dry run, nothing published)' || '' }}"
+            echo "Merging this releases **${{ steps.bump.outputs.tag }}** as a beta: once CI passes on develop,"
+            echo "the Publish beta workflow publishes it as a pre-release, builds every platform and installs"
+            echo "it on macOS, Linux and Windows. It changes only the version, in the four files that carry it."
+            echo ''
+            echo 'Close it instead to cancel this beta; nothing is published until it is merged.'
+            echo ''
+            echo '## Release notes'
+            echo ''
+            cat "$RUNNER_TEMP/notes.md"
+          } > "$RUNNER_TEMP/body.md"
+          {
+            echo "### ${{ steps.bump.outputs.tag }}${{ inputs.dry_run && ' (dry run, nothing pushed or opened)' || '' }}"
             echo ''
             echo "Commit: \`chore:[OAR-${{ steps.bump.outputs.ticket }}] release ${{ steps.bump.outputs.version }}\`"
             echo ''
             cat "$RUNNER_TEMP/notes.md"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # A push rejected because develop moved on while this ran stops here, before anything is published,
-      # which is the safe way round. Run it again to cut the beta from the newer develop.
-      - name: Commit and push to develop
+      - name: Push the release branch
         if: ${{ !inputs.dry_run }}
         run: |
+          branch="release/${{ steps.bump.outputs.tag }}"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
           git commit -am "chore:[OAR-${{ steps.bump.outputs.ticket }}] release ${{ steps.bump.outputs.version }}"
-          git push origin HEAD:develop
+          git push origin "$branch"
 
-      # A pre-release, so GitHub never counts it as the latest release and the installers only hand it to
-      # people who asked for --beta. release.yml checks this against the version too.
-      - name: Publish the pre-release
+      - name: Open the release pull request
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.bump.outputs.tag }}" \
-            --target "$(git rev-parse HEAD)" \
-            --prerelease \
-            --title "${{ steps.bump.outputs.tag }}" \
-            --notes-file "$RUNNER_TEMP/notes.md"
-
-  build:
-    name: build, attach and verify
-    needs: prepare
-    if: ${{ !inputs.dry_run }}
-    uses: ./.github/workflows/release.yml
-    with:
-      tag: ${{ needs.prepare.outputs.tag }}
+          title="chore:[OAR-${{ steps.bump.outputs.ticket }}] release ${{ steps.bump.outputs.version }}"
+          if ! url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base develop \
+                --head "release/${{ steps.bump.outputs.tag }}" --title "$title" --body-file "$RUNNER_TEMP/body.md" 2>&1)"; then
+            echo "$url"
+            echo "::error::GitHub would not open the pull request. If it says Actions may not create pull requests, tick Settings, Actions, General, 'Allow GitHub Actions to create and approve pull requests', delete the release/${{ steps.bump.outputs.tag }} branch, and run this again."
+            exit 1
+          fi
+          echo "Opened $url"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Release pull request: $url" >> "$GITHUB_STEP_SUMMARY"

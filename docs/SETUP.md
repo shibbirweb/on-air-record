@@ -932,24 +932,29 @@ flowchart LR
 
 The steps are the same for both; where they differ it says so below.
 
-### A beta in one click
+### A beta in two clicks
 
-A beta can skip all the steps below. On GitHub, open **Actions**, choose **Beta release**, press **Run
-workflow**, leave **Use workflow from** on `develop`, and run it. It:
+A beta can skip all the steps below. `develop` only takes changes by pull request, so the version bump
+arrives as one too, and merging it is the decision to release:
 
-1. refuses unless CI has passed on the newest `develop` commit, and unless something has landed since the
-   last release;
-2. works out the next beta version, `0.4.0-beta.1` or the next number after the current beta, and commits
-   `chore:[OAR-N] release 0.4.0-beta.1` to `develop`;
-3. publishes it as a pre-release, with the `[Unreleased]` section of `CHANGELOG.md` as its notes;
-4. builds every platform, attaches the files, and installs them on macOS, Linux and Windows, exactly as
-   below.
+1. On GitHub, open **Actions**, choose **Beta release**, press **Run workflow**, leave **Use workflow
+   from** on `develop`, and run it. It refuses unless CI has passed on the newest `develop` commit,
+   something has landed since the last release, and no other release is under way. Then it works out the
+   next beta version, `0.4.0-beta.1` or the next number after the current beta, and opens a pull request
+   `chore:[OAR-N] release 0.4.0-beta.1` that changes only the version, with the release notes from the
+   `[Unreleased]` section of `CHANGELOG.md` in its description.
+2. **Merge that pull request.** Once CI passes on `develop` afterwards, the **Publish beta** workflow
+   starts by itself: it publishes the pre-release from the commit CI passed on, then builds every
+   platform, attaches the files and installs them on macOS, Linux and Windows, exactly as below.
 
-Tick **Dry run** to see the version, commit and notes it would use in the run's summary, with nothing
-pushed or published. That is the way to try it the first time.
+Close the pull request instead to cancel; nothing is published until it is merged. Tick **Dry run** in step
+1 to see the version, commit and notes in the run summary, with nothing pushed or opened.
 
-If `develop` requires pull requests for every change, allow GitHub Actions to push to it in the branch
-rules, or the commit in step 2 is refused. Nothing is published when that happens.
+It needs one setting, once: **Settings**, **Actions**, **General**, **Workflow permissions**, tick **Allow
+GitHub Actions to create and approve pull requests**. Without it the first step says so and stops.
+
+If publishing fails after the merge, open **Actions**, **Publish beta**, and re-run it; it picks up where
+it left off, and a new beta cannot be started until this one is out.
 
 Stable releases are still made by hand, with the steps below, because they also date the changelog and are
 the ones that reach everybody.

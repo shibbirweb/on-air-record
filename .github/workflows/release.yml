@@ -17,9 +17,9 @@ on:
     types: [published]
   # Useful for rehearsing the build without cutting a release: artifacts are produced, nothing is published.
   workflow_dispatch:
-  # How beta.yml hands over a release it has just published. It has to call this rather than wait for the
-  # "published" event, because GitHub starts no workflow for anything done with the built in token, which
-  # is what beta.yml publishes with.
+  # How beta-publish.yml hands over a release it has just published. It has to call this rather than wait
+  # for the "published" event, because GitHub starts no workflow for anything done with the built in token,
+  # which is what beta-publish.yml publishes with.
   workflow_call:
     inputs:
       tag:
@@ -48,8 +48,8 @@ jobs:
       # its caller's event.
       publish: ${{ steps.resolve.outputs.publish }}
     steps:
-      # Called by beta.yml, check out the tag it just made; otherwise the default, which for a published
-      # release is its tag already. Every checkout below does the same.
+      # Called by beta-publish.yml, check out the tag it just made; otherwise the default, which for a
+      # published release is its tag already. Every checkout below does the same.
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
