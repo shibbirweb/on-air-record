@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A Rust service that captures a microphone on the host machine, records it continuously to disk, and
 broadcasts it over WebSocket to browsers on the local network. The React UI plays the live feed and lets
 you scrub back to any point in the retention window on a CCTV style timeline. One binary serves the API,
-the WebSocket, and the compiled UI. No authentication, by design. See `README.md` for the feature status
-checklist, which is kept current as work lands.
+the WebSocket, and the compiled UI. Logins are optional, chosen on first visit. See `README.md` for the
+feature status checklist, which is kept current as work lands.
 
 ## Environment
 
@@ -34,7 +34,7 @@ The underlying commands:
 ```sh
 # Backend, from backend/
 cargo run                                    # API on :8080, reads ../frontend/dist
-cargo test                                   # ~204 unit tests
+cargo test                                   # ~257 unit and router tests
 cargo test day_bounds                        # single test by name substring
 cargo test --lib services::playback_service  # one module
 cargo clippy --all-targets -- -D warnings    # must be clean
@@ -43,7 +43,7 @@ cargo fmt
 # Frontend, from frontend/
 npm run dev      # Vite on :5173, proxies /api and the WebSocket to :8080
 npm run build    # tsc -b then vite build, writes dist/, which a release backend embeds
-npm test         # Vitest, ~90 tests
+npm test         # Vitest, ~99 tests
 npm run lint     # oxlint
 ```
 
@@ -120,6 +120,35 @@ sample rate and channels on every frame so the input device can change mid strea
 `frontend/src/lib/audio/frameCodec.ts` is the mirror of `ws/protocol.rs`. **Change one and you must change
 the other**, and both have tests that encode and decode the documented layout.
 
+### Access control
+
+The `auth_state` table holds one of three modes: `undecided` (behaves as `open`), `open`, or `accounts`.
+With accounts there are two roles, admin and listener. `models::authorize` is the single rule, kept free of
+HTTP so it is tested exhaustively.
+
+- **One guard, default deny.** `routes/guard.rs` sits in front of every `/api` route as a `route_layer`.
+  `required_access` decides by method and path: a named public list, then reads (`GET`) need a listener and
+  everything else needs an admin, with named exceptions (`/auth/password` is listener, `/users*` is admin).
+  **A new route needs no auth code**; think only about whether its method matches its intent. A `GET` that
+  reveals something only admins should see must be added to the exceptions.
+- **Other websites are refused in every mode.** The guard rejects state changing requests and the
+  WebSocket when `Origin` does not match `Host`. Browsers send bodiless `POST`s and WebSockets cross site
+  without asking, so this is the open mode's only protection. **Never add a CORS layer.** The Vite proxy
+  runs with `changeOrigin: false` for the same reason.
+- **Sessions are checked on every request**, by SHA-256 of the cookie, so revocation is immediate. A
+  WebSocket is only checked at the handshake by the guard, so `ws/session.rs` re-checks every 15 seconds
+  and closes the socket; keep that if the session loop is restructured.
+- **Argon2 runs off the runtime.** Hashing takes tens of milliseconds by design; controllers call it
+  through `auth_controller::blocking`. Debug builds optimise `argon2` and `blake2` via `[profile.dev]` so
+  tests and `cargo run` logins stay fast.
+- **Recovery is on the host**: `on-air-record auth reset-password <email>` and `auth disable`, in
+  `cli.rs`. There is no mail server; shell access is what proves ownership.
+
+The frontend's `AuthGate` renders before `AppShell`, so with accounts on no audio engine or socket exists
+until somebody is signed in. Any `401` calls the handler registered with `setUnauthorizedHandler`, which
+sends the page back through the gate. Hide admin only controls with `useCanAdminister()`; the server
+enforces the rule regardless.
+
 ### Frontend
 
 `api/` is transport only, `store/` holds all shared state as Zustand slices, `lib/` is framework free
@@ -174,8 +203,13 @@ the playback cursor walking a real directory of real PCM across a recording gap.
 data directory plus an in memory SQLite, because the interaction between the two is the thing worth
 testing.
 
-Frontend tests cover `lib/` and the Zustand slices in `store/`. Components are not unit tested, because what would break in them is
-canvas drawing and Web Audio scheduling and neither is meaningfully exercised in jsdom.
+`routes/tests.rs` drives the real router over HTTP with `tower::ServiceExt::oneshot`, on a temp data
+directory, to prove the access rules through the wiring rather than in isolation. Add a case there when a
+route's access changes.
+
+Frontend tests cover `lib/` and the Zustand slices in `store/`. Components are not unit tested, because
+what would break in them is canvas drawing and Web Audio scheduling and neither is meaningfully exercised
+in jsdom.
 
 Verify audio changes by running the service and listening. Browsers require a user gesture before audio
 starts, so headless checks cannot confirm playback. A useful trick for exercising the DVR without waiting

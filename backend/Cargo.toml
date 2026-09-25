@@ -10,22 +10,37 @@ repository = "https://github.com/shibbirweb/on-air-record"
 homepage = "https://shibbirweb.github.io"
 
 [dependencies]
+argon2 = "0.5.3"
 axum = { version = "0.8.4", features = ["ws", "macros"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5.61", features = ["derive"] }
 cpal = "0.16.0"
 crossbeam-channel = "0.5.16"
 futures-util = "0.3.34"
+rand_core = { version = "0.6.4", features = ["getrandom"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rust-embed = { version = "8.12.0", features = ["mime-guess"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+sha2 = "0.10.9"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["full"] }
 tower = "0.5.3"
-tower-http = { version = "0.7.1", features = ["fs", "trace", "cors", "compression-gzip"] }
+tower-http = { version = "0.7.1", features = ["fs", "trace", "compression-gzip"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[dev-dependencies]
+# `oneshot`, for driving the real router in tests without binding a port.
+tower = { version = "0.5.3", features = ["util"] }
+
+# Argon2 is deliberately expensive, and unoptimised it takes seconds per hash, which makes every login in
+# `cargo run` and every password test crawl. Optimising only the hashing crates keeps debug builds fast.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
 
 [profile.release]
 opt-level = 3

@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useCanAdminister } from '@/store/useAuthStore';
 import { useDeviceStore } from '@/store/useDeviceStore';
 import { useStatusStore } from '@/store/useStatusStore';
 
@@ -26,6 +27,8 @@ export function DeviceSelector() {
   const error = useDeviceStore((state) => state.error);
   const refresh = useDeviceStore((state) => state.refresh);
   const select = useDeviceStore((state) => state.select);
+  // Listeners see which microphone is in use but cannot switch it.
+  const mayAdminister = useCanAdminister();
 
   const activeDeviceName = useStatusStore((state) => state.status?.capture.deviceName ?? null);
   const capturing = useStatusStore((state) => state.status?.capture.state === 'recording');
@@ -55,7 +58,7 @@ export function DeviceSelector() {
 
       <Select
         value={value}
-        disabled={selecting}
+        disabled={selecting || !mayAdminister}
         onValueChange={(next) => void select(next === SYSTEM_DEFAULT ? null : next)}
       >
         <SelectTrigger id="input-device" className="w-full">

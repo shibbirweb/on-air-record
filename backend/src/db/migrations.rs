@@ -88,6 +88,44 @@ const MIGRATIONS: &[Migration] = &[
         CREATE INDEX idx_bookmarks_timestamp ON bookmarks (timestamp_ms);
     "#,
     },
+    Migration {
+        version: 4,
+        name: "accounts and login sessions",
+        // The mode lives in a one row table rather than in `settings`, because settings are edited through
+        // the settings endpoint and whether a login is required must never be changeable that way. Every
+        // existing install arrives here as undecided, so its owner is asked the question on the next visit.
+        //
+        // Login sessions store a SHA-256 of the cookie value, never the value itself, so a copied database
+        // file cannot be used to sign in.
+        sql: r#"
+        CREATE TABLE auth_state (
+            id            INTEGER PRIMARY KEY CHECK (id = 1),
+            mode          TEXT NOT NULL CHECK (mode IN ('undecided', 'open', 'accounts')),
+            decided_at_ms INTEGER
+        );
+
+        INSERT INTO auth_state (id, mode, decided_at_ms) VALUES (1, 'undecided', NULL);
+
+        CREATE TABLE users (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            email                  TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            password_hash          TEXT NOT NULL,
+            role                   TEXT NOT NULL CHECK (role IN ('admin', 'listener')),
+            created_at_ms          INTEGER NOT NULL,
+            password_changed_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE auth_sessions (
+            token_hash      BLOB PRIMARY KEY,
+            user_id         INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+            created_at_ms   INTEGER NOT NULL,
+            expires_at_ms   INTEGER NOT NULL,
+            last_seen_at_ms INTEGER NOT NULL
+        );
+
+        CREATE INDEX idx_auth_sessions_user ON auth_sessions (user_id);
+    "#,
+    },
 ];
 
 /// Apply every migration newer than the database's recorded version.

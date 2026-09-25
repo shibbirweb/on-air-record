@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod audio;
+pub mod cli;
 pub mod config;
 pub mod controllers;
 pub mod db;

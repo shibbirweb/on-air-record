@@ -7,7 +7,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 8080;
@@ -42,6 +42,29 @@ pub struct CliArgs {
     /// Log level: error, warn, info, debug or trace
     #[arg(long)]
     pub log_level: Option<String>,
+
+    /// Run a one off maintenance command instead of the service
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+/// Maintenance commands, run on the host against the same data directory as the service.
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Manage accounts when the web interface cannot be used
+    #[command(subcommand)]
+    Auth(AuthCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuthCommand {
+    /// Give an account a new generated password, and sign it out everywhere
+    ResetPassword {
+        /// The email address the account signs in with
+        email: String,
+    },
+    /// Switch accounts off and delete every account, returning to no login
+    Disable,
 }
 
 #[derive(Debug, Clone)]
@@ -246,6 +269,7 @@ mod tests {
             data_dir: None,
             static_dir: None,
             log_level: None,
+            command: None,
         };
         let config = AppConfigBuilder::new().with_cli(args).build();
         assert_eq!(config.host, "127.0.0.1");

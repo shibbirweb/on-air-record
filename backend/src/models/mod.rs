@@ -10,6 +10,7 @@ pub mod device;
 pub mod segment;
 pub mod session;
 pub mod settings;
+pub mod user;
 
 pub use audio_frame::AudioFrame;
 pub use bookmark::{Bookmark, BookmarkDraft, BookmarkPatch};
@@ -18,3 +19,4 @@ pub use device::InputDevice;
 pub use segment::{Segment, SegmentDraft, TimeRange};
 pub use session::{RecordingSession, SessionDraft};
 pub use settings::{Settings, SettingsPatch};
+pub use user::{authorize, Access, AuthMode, Denied, Role, User};

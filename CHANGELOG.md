@@ -5,6 +5,30 @@ Every release of On Air Record, newest first. The format follows
 [Semantic Versioning](https://semver.org/). Each release's section is also used as its notes on the
 [releases page](https://github.com/shibbirweb/on-air-record/releases).
 
+## [Unreleased]
+
+### Added
+
+- **Optional logins.** The first time anyone opens the page, it asks whether to set up accounts or keep
+  the recorder open. With accounts, everybody signs in with an email and password. Admins control
+  everything; listeners can listen, scrub back, change day and export, and the controls they cannot use
+  are not shown to them. Admins add, change and remove accounts under Settings, Access, and everyone can
+  change their own password from the account menu. An existing installation asks the question on its next
+  visit, so open the page yourself straight after upgrading. (OAR-67)
+- **Recovery from the host.** `on-air-record auth reset-password <email>` prints a new password for an
+  account, and `on-air-record auth disable` switches logins off. Both work while the service is running.
+  (OAR-67)
+
+### Security
+
+- Other websites can no longer control the recorder or listen to it through a visitor's browser, with or
+  without accounts. Previously any page opened on the same network could start or stop recording, change
+  settings, delete recordings through a shorter retention window, download audio, and listen live.
+  (OAR-67)
+- Removing an account, changing a password or signing out now ends that person's live stream within 15
+  seconds, not only their next page load. (OAR-67)
+- After five wrong passwords, a device must wait 15 minutes before trying again. (OAR-67)
+
 ## [0.3.0] - 2026-09-26
 
 ### Added
@@ -96,6 +120,7 @@ The first release.
 - There is no authentication, by design. Anyone who can reach the port can listen, so keep it on a network
   you trust.
 
+[Unreleased]: https://github.com/shibbirweb/on-air-record/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/shibbirweb/on-air-record/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shibbirweb/on-air-record/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shibbirweb/on-air-record/releases/tag/v0.1.0

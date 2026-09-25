@@ -6,14 +6,17 @@
  */
 
 import { useEffect } from 'react';
+import { Navigate } from 'react-router';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AccessSettings } from '@/features/settings/AccessSettings';
 import { RecordingLocation } from '@/features/settings/RecordingLocation';
 import { RecordingQuality } from '@/features/settings/RecordingQuality';
 import { SettingsActionBar } from '@/features/settings/SettingsActionBar';
 import { RetentionSettings } from '@/features/settings/RetentionSettings';
 import { SettingsPanel } from '@/features/settings/SettingsPanel';
 import { usePolling } from '@/hooks/usePolling';
+import { useCanAdminister } from '@/store/useAuthStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useStorageStore } from '@/store/useStorageStore';
 
@@ -21,6 +24,7 @@ import { useStorageStore } from '@/store/useStorageStore';
 const STORAGE_POLL_MS = 5000;
 
 export function SettingsPage() {
+  const mayAdminister = useCanAdminister();
   const refreshSettings = useSettingsStore((state) => state.refresh);
   const refreshStorage = useStorageStore((state) => state.refresh);
 
@@ -33,6 +37,11 @@ export function SettingsPage() {
   }, [refreshSettings]);
 
   usePolling(refreshStorage, STORAGE_POLL_MS);
+
+  // The link is hidden from listeners, but a typed or bookmarked URL still lands here.
+  if (!mayAdminister) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <main className="mx-auto max-w-3xl space-y-4 px-4 py-6">
@@ -74,6 +83,16 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent>
           <SettingsPanel />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Access</CardTitle>
+          <CardDescription>Who can use the recorder. Changes here apply at once, not on Save.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <AccessSettings />
         </CardContent>
       </Card>
 

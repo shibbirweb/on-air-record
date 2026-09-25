@@ -214,3 +214,22 @@ export type DirectoryTest = {
   writable: boolean;
   message: string;
 };
+
+/** Whether the install asks for a login. `undecided` behaves like `open` until the first visitor chooses. */
+export type AuthMode = 'undecided' | 'open' | 'accounts';
+
+/** Admins control everything; listeners listen, scrub and export. */
+export type Role = 'admin' | 'listener';
+
+export type User = {
+  id: number;
+  email: string;
+  role: Role;
+  createdAtMs: number;
+};
+
+export type AuthState = {
+  mode: AuthMode;
+  /** The signed in account. Always `null` without accounts. */
+  user: User | null;
+};

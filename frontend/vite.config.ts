@@ -21,7 +21,10 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8080',
-        changeOrigin: true,
+        // Keep the browser's Host header. The backend refuses state changes and the stream when the
+        // page's Origin does not match Host, and rewriting Host to the target would make every request
+        // from this dev server look like it came from another site.
+        changeOrigin: false,
         ws: true,
       },
     },

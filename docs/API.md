@@ -1,7 +1,48 @@
 # API reference
 
-Base URL: `http://<host>:8080`. All REST payloads are JSON with `camelCase` keys. There is no
-authentication, by design, so the service should only be exposed to a trusted network.
+Base URL: `http://<host>:8080`. All REST payloads are JSON with `camelCase` keys.
+
+## Access
+
+Each install is in one of three modes, chosen once by whoever opens the page first:
+
+| Mode | Meaning |
+| --- | --- |
+| `undecided` | Nobody has answered the first run question yet. Behaves exactly like `open`. |
+| `open` | No login. Every route works for anyone who can reach the service. |
+| `accounts` | Every route except the public ones below needs a signed in session. |
+
+With accounts on there are two roles. **Listeners** may call every `GET` (listen, scrub, export, read
+state) and change their own password. **Admins** may call everything, including the account routes. A
+listener calling an admin route gets `403 forbidden`; a request with no valid session gets
+`401 unauthenticated`. The rule is "reading is listening, changing is administering", enforced by one guard
+in front of the whole API (`backend/src/routes/guard.rs`), so it also covers any route added later.
+
+Public in every mode: `GET /api/health`, `GET /api/auth/state`, `POST /api/auth/open`,
+`POST /api/auth/setup`, `POST /api/auth/login`, `POST /api/auth/logout`.
+
+**Sessions** are an `oar_session` cookie: `HttpOnly`, `SameSite=Strict`, 30 days. It is marked `Secure`
+when a reverse proxy sends `X-Forwarded-Proto: https`. The token is never in a response body, and only its
+SHA-256 is stored. Every request checks it against the database, so signing out, removing an account or
+changing a password takes effect on the next request. An open stream re-checks every 15 seconds and is
+closed once its session is no longer valid.
+
+**Other websites** are refused in every mode. A request that changes state (anything but `GET`, `HEAD`,
+`OPTIONS`), and the WebSocket handshake, must carry either no `Origin` header, like `curl` or a script, or
+an `Origin` whose host and port match the `Host` header. Otherwise the answer is `403 forbidden`. There is
+no CORS policy, so another site's scripts cannot read any response either.
+
+**Failed logins** are limited to 5 per client address in 15 minutes, after which that address gets
+`429 rate_limited` until the window passes. The count is kept in memory, so restarting the service clears
+it.
+
+**Scripting with accounts on**: log in once, keep the cookie, send it with each request:
+
+```sh
+curl -c jar -H 'content-type: application/json' \
+  -d '{"email":"owner@example.com","password":"..."}' http://recorder:8080/api/auth/login
+curl -b jar http://recorder:8080/api/status
+```
 
 ## Error format
 
@@ -19,10 +60,91 @@ Every failing request returns the same envelope with an appropriate status code.
 | Code | Status | Meaning |
 | --- | --- | --- |
 | `bad_request` | 400 | Malformed or out of range parameters |
-| `not_found` | 404 | Unknown device, session, or timestamp |
-| `conflict` | 409 | Action not valid in the current state, for example starting an active capture |
+| `unauthenticated` | 401 | Accounts are on and there is no valid session, or the email or password was wrong |
+| `forbidden` | 403 | A listener asked for an admin route, or the request came from another website |
+| `not_found` | 404 | Unknown device, session, account, or timestamp |
+| `conflict` | 409 | Action not valid in the current state, for example starting an active capture, or removing the only admin |
+| `rate_limited` | 429 | Too many failed logins from this address; wait out the window the message names |
 | `audio_error` | 503 | The host audio system rejected the operation |
 | `internal` | 500 | Unexpected failure, details are in the server log |
+
+## Login and accounts
+
+### `GET /api/auth/state`
+
+What the page needs to decide between the first run question, the login page and the app. `user` is the
+signed in account, and always `null` without accounts.
+
+```json
+{ "mode": "accounts", "user": { "id": 1, "email": "owner@example.com", "role": "admin", "createdAtMs": 1790000000000 } }
+```
+
+### `POST /api/auth/open`
+
+Answers the first run question with "keep it open". Returns the new state. `409` once the question has been
+answered either way.
+
+### `POST /api/auth/setup`
+
+Creates the first admin, switches accounts on, and signs that admin in (`Set-Cookie`). Works while the mode
+is `undecided` or `open`; `409` once accounts are on.
+
+```json
+{ "email": "owner@example.com", "password": "at least eight characters" }
+```
+
+Passwords are 8 to 128 characters with no other rules. The email is only a login name and is never sent
+anything; it is unique regardless of case.
+
+### `POST /api/auth/login`
+
+Same body as setup. Returns the state and sets the cookie. A wrong email and a wrong password fail
+identically, with `401`, and take the same time. `409` without accounts.
+
+### `POST /api/auth/logout`
+
+Ends the session, if there is one, and always clears the cookie.
+
+### `POST /api/auth/password`
+
+Change your own password. Signs the account out everywhere except this session. Any signed in role. `204`.
+
+```json
+{ "currentPassword": "...", "newPassword": "..." }
+```
+
+### `GET /api/users` (admin)
+
+```json
+{ "users": [ { "id": 1, "email": "owner@example.com", "role": "admin", "createdAtMs": 1790000000000 } ] }
+```
+
+### `POST /api/users` (admin)
+
+`{ "email": "...", "password": "...", "role": "listener" }`, role `admin` or `listener`. Returns the account
+with `201`. `409` if the email is taken or accounts are off.
+
+### `PATCH /api/users/{id}` (admin)
+
+`{ "role": "admin" }`. `409` when it would demote the only admin.
+
+### `POST /api/users/{id}/password` (admin)
+
+`{ "password": "..." }`. For somebody who forgot theirs; signs that account out everywhere. `204`.
+
+### `DELETE /api/users/{id}` (admin)
+
+Removes the account and ends its sessions and streams. `409` for the only admin. `204`.
+
+### Recovery on the host
+
+Somebody locked out of the web interface uses the program itself, against the same data directory, whether
+or not the service is running:
+
+```sh
+on-air-record auth reset-password owner@example.com   # prints a generated password
+on-air-record auth disable                            # accounts off, every account deleted
+```
 
 ## Service
 
@@ -403,6 +525,11 @@ that matters, which is that `Paused` remembers where it came from.
 
 One socket carries both the live broadcast and DVR playback. Binary messages are audio frames in the format
 described in [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md). Text messages are JSON control messages.
+
+The handshake is refused with `403` from a page served by another site, and with `401` when accounts are
+on and there is no valid session. An open socket re-checks its session every 15 seconds and the server
+closes it once the session has ended, the account was removed, or accounts were switched on after it
+connected.
 
 ### Server to client control messages
 
