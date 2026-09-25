@@ -654,7 +654,8 @@ Go to **Releases**, then **Draft a new release**.
 - **Choose a tag**: type `v` followed by the version, so `v0.2.0`, and pick **Create new tag on publish**.
 - **Target**: `master`.
 - **Title**: the version is fine.
-- **Notes**: write them, or press **Generate release notes** to have GitHub write them from the commits.
+- **Notes**: paste the version's section from [`CHANGELOG.md`](../CHANGELOG.md), after replacing
+  "Unreleased" in its heading with today's date and committing that.
 - Press **Publish release**.
 
 The tag is created for you. You never have to run `git tag`.
@@ -730,6 +731,12 @@ here.
 **It recorded nothing while I was away.**
 Check that **Record on start up** is switched on in the app's settings, and that the machine did not go to
 sleep. A sleeping computer records nothing, and the gap will show as a blank stretch on the timeline.
+
+**After a reboot it records silence, but Stop and then Start fixes it.**
+The service started before the microphone was ready, most often a USB microphone on a machine that starts
+the service at boot. It could not find the chosen microphone, so it recorded from the computer's built in
+input instead, which usually has nothing plugged in. Set **Start up delay** in the app's settings to ten
+or twenty seconds, so recording waits for the microphone to appear.
 
 **It stopped after I closed the terminal.**
 That terminal was running it. Set it up as a service so it survives, using the section for your platform

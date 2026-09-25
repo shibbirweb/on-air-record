@@ -13,6 +13,7 @@ pub struct SettingsDto {
     /// `null` means recordings are kept forever.
     pub retention_hours: Option<u32>,
     pub auto_start: bool,
+    pub auto_start_delay_seconds: u32,
     pub frame_ms: u32,
     /// `null` follows the capture device's own rate.
     pub recording_sample_rate: Option<u32>,
@@ -37,6 +38,7 @@ impl SettingsDto {
             segment_seconds: settings.segment_seconds,
             retention_hours: settings.retention_hours,
             auto_start: settings.auto_start,
+            auto_start_delay_seconds: settings.auto_start_delay_seconds,
             frame_ms: settings.frame_ms,
             recording_sample_rate: settings.recording_sample_rate,
             recordings_dir: settings.recordings_dir,
@@ -62,6 +64,8 @@ pub struct SettingsPatchRequest {
     #[serde(default)]
     pub auto_start: Option<bool>,
     #[serde(default)]
+    pub auto_start_delay_seconds: Option<u32>,
+    #[serde(default)]
     pub frame_ms: Option<u32>,
     /// Present and null follows the device's own rate.
     #[serde(default, deserialize_with = "deserialize_nested_option_u32")]
@@ -79,6 +83,7 @@ impl From<SettingsPatchRequest> for SettingsPatch {
             segment_seconds: request.segment_seconds,
             retention_hours: request.retention_hours,
             auto_start: request.auto_start,
+            auto_start_delay_seconds: request.auto_start_delay_seconds,
             frame_ms: request.frame_ms,
             recording_sample_rate: request.recording_sample_rate,
             recordings_dir: request.recordings_dir,
@@ -141,6 +146,15 @@ mod tests {
         .expect("serialise");
         assert_eq!(json["segmentSeconds"], 10);
         assert_eq!(json["autoStart"], true);
+        assert_eq!(json["autoStartDelaySeconds"], 0);
+    }
+
+    #[test]
+    fn the_auto_start_delay_is_carried_through_to_the_patch() {
+        let request: SettingsPatchRequest =
+            serde_json::from_str(r#"{"autoStartDelaySeconds":20}"#).expect("parse");
+        let patch: SettingsPatch = request.into();
+        assert_eq!(patch.auto_start_delay_seconds, Some(20));
     }
 }
 

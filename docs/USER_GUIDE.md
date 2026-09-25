@@ -398,6 +398,12 @@ seconds available sooner. Ten seconds suits almost everyone.
 waiting for anyone to open the page. Leave this on if the point is to have a recording running whether or
 not anyone is watching.
 
+**Start up delay** makes that automatic start wait a number of seconds first. Leave it at None unless the
+recording after a reboot turns out silent while pressing Stop and then Start fixes it. That means the
+microphone was not ready yet when the service started, which is common with USB microphones on a machine
+that runs the service at boot. Ten to thirty seconds is usually plenty. The page itself is available
+straight away; only the recording waits.
+
 ## On a phone or a tablet
 
 ![The full interface on a narrow phone screen, stacked into a single column](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/phone.png)

@@ -260,8 +260,8 @@ OAR_PORT=9000 OAR_DATA_DIR=/srv/on-air-record on-air-record
 will appear to have lost its recordings when it has in fact made a second `data` directory. Give it an
 absolute path.
 
-Runtime preferences (input device, segment length, retention window, gain, auto start) live in the SQLite
-`settings` table and are editable from the UI.
+Runtime preferences (input device, segment length, retention window, gain, auto start and its delay) live
+in the SQLite `settings` table and are editable from the UI.
 
 [docs/SETUP.md](docs/SETUP.md#choosing-a-port) explains each of these for a non technical audience,
 including what to do when the port is already in use.
@@ -319,7 +319,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Fixed duration framing with sample derived timestamps and wall clock drift correction
 - [x] Capture level metering (RMS and peak)
 - [x] Dropped frame accounting when the recorder cannot keep up
-- [x] Optional automatic capture on service start
+- [x] Optional automatic capture on service start, with a configurable delay for slow USB devices
 
 ### Milestone 3: recording and storage
 

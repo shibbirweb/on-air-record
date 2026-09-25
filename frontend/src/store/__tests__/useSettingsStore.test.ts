@@ -10,6 +10,7 @@ const STORED: Settings = {
   segmentSeconds: 10,
   retentionHours: 24,
   autoStart: true,
+  autoStartDelaySeconds: 0,
   frameMs: 100,
   recordingSampleRate: null,
   recordingsDir: null,
@@ -78,6 +79,13 @@ describe('useSettingsStore draft', () => {
 
     // autoStart and the rest already match, so restoring defaults is a two field change.
     expect(useSettingsStore.getState().draft).toEqual({ gain: 1, retentionHours: 24 });
+  });
+
+  it('restores an immediate auto start along with the other defaults', () => {
+    useSettingsStore.setState({ settings: { ...STORED, autoStartDelaySeconds: 30 } });
+    useSettingsStore.getState().stageDefaults();
+
+    expect(useSettingsStore.getState().draft).toEqual({ autoStartDelaySeconds: 0 });
   });
 
   it('treats matching the device rate as a real change rather than an absent value', () => {

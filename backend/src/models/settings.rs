@@ -12,6 +12,7 @@ pub const KEY_GAIN: &str = "gain";
 pub const KEY_SEGMENT_SECONDS: &str = "segment_seconds";
 pub const KEY_RETENTION_HOURS: &str = "retention_hours";
 pub const KEY_AUTO_START: &str = "auto_start";
+pub const KEY_AUTO_START_DELAY_SECONDS: &str = "auto_start_delay_seconds";
 pub const KEY_FRAME_MS: &str = "frame_ms";
 pub const KEY_RECORDINGS_DIR: &str = "recordings_dir";
 pub const KEY_RECORDING_SAMPLE_RATE: &str = "recording_sample_rate";
@@ -34,6 +35,9 @@ pub const SEGMENT_SECONDS_RANGE: (u32, u32) = (5, 300);
 /// representation rather than being encoded as an implausibly large number.
 pub const RETENTION_HOURS_RANGE: (u32, u32) = (1, 87_600);
 pub const FRAME_MS_RANGE: (u32, u32) = (20, 500);
+/// Ten minutes is far longer than any USB interface takes to enumerate. A delay beyond that is more
+/// likely a typo than a plan, and would leave a freshly booted recorder silently idle for too long.
+pub const AUTO_START_DELAY_SECONDS_RANGE: (u32, u32) = (0, 600);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
@@ -45,6 +49,12 @@ pub struct Settings {
     /// makes the disk the only limit.
     pub retention_hours: Option<u32>,
     pub auto_start: bool,
+    /// How long auto start waits after the service boots before opening the device.
+    ///
+    /// Exists for hosts started by a service manager, where the process can come up before a USB
+    /// microphone has enumerated. Opening too early falls back to the default input and records silence
+    /// from a device nobody meant to use, so the operator can buy the hardware a few seconds.
+    pub auto_start_delay_seconds: u32,
     pub frame_ms: u32,
     /// Rate the recorder downsamples to. `None` keeps the device's own rate, which is the best quality
     /// the hardware offers and the largest files.
@@ -64,6 +74,7 @@ impl Default for Settings {
             segment_seconds: 10,
             retention_hours: Some(24),
             auto_start: true,
+            auto_start_delay_seconds: 0,
             frame_ms: 100,
             recording_sample_rate: None,
             recordings_dir: None,
@@ -91,6 +102,10 @@ impl Settings {
                 defaults.retention_hours,
             ),
             auto_start: parse_bool(pairs.get(KEY_AUTO_START), defaults.auto_start),
+            auto_start_delay_seconds: parse_u32(
+                pairs.get(KEY_AUTO_START_DELAY_SECONDS),
+                defaults.auto_start_delay_seconds,
+            ),
             frame_ms: parse_u32(pairs.get(KEY_FRAME_MS), defaults.frame_ms),
             recording_sample_rate: pairs
                 .get(KEY_RECORDING_SAMPLE_RATE)
@@ -125,6 +140,10 @@ impl Settings {
                     .unwrap_or_default(),
             ),
             (KEY_AUTO_START.to_string(), self.auto_start.to_string()),
+            (
+                KEY_AUTO_START_DELAY_SECONDS.to_string(),
+                self.auto_start_delay_seconds.to_string(),
+            ),
             (KEY_FRAME_MS.to_string(), self.frame_ms.to_string()),
             (
                 KEY_RECORDING_SAMPLE_RATE.to_string(),
@@ -153,6 +172,10 @@ impl Settings {
             .retention_hours
             .map(|hours| hours.clamp(RETENTION_HOURS_RANGE.0, RETENTION_HOURS_RANGE.1));
         self.frame_ms = self.frame_ms.clamp(FRAME_MS_RANGE.0, FRAME_MS_RANGE.1);
+        self.auto_start_delay_seconds = self.auto_start_delay_seconds.clamp(
+            AUTO_START_DELAY_SECONDS_RANGE.0,
+            AUTO_START_DELAY_SECONDS_RANGE.1,
+        );
         self.recording_sample_rate = self.recording_sample_rate.map(nearest_supported_rate);
         self
     }
@@ -194,6 +217,7 @@ pub struct SettingsPatch {
     /// `Some(None)` switches to keeping forever, `None` leaves the current window alone.
     pub retention_hours: Option<Option<u32>>,
     pub auto_start: Option<bool>,
+    pub auto_start_delay_seconds: Option<u32>,
     pub frame_ms: Option<u32>,
     /// `Some(None)` returns to the device's own rate.
     pub recording_sample_rate: Option<Option<u32>>,
@@ -208,6 +232,7 @@ impl SettingsPatch {
             && self.segment_seconds.is_none()
             && self.retention_hours.is_none()
             && self.auto_start.is_none()
+            && self.auto_start_delay_seconds.is_none()
             && self.frame_ms.is_none()
             && self.recording_sample_rate.is_none()
             && self.recordings_dir.is_none()
@@ -234,6 +259,9 @@ impl SettingsPatch {
         }
         if let Some(auto_start) = self.auto_start {
             updated.auto_start = auto_start;
+        }
+        if let Some(auto_start_delay_seconds) = self.auto_start_delay_seconds {
+            updated.auto_start_delay_seconds = auto_start_delay_seconds;
         }
         if let Some(frame_ms) = self.frame_ms {
             updated.frame_ms = frame_ms;
@@ -309,6 +337,7 @@ mod tests {
             segment_seconds: 20,
             retention_hours: Some(48),
             auto_start: false,
+            auto_start_delay_seconds: 15,
             frame_ms: 40,
             recording_sample_rate: Some(16_000),
             recordings_dir: Some("/mnt/audio".to_string()),
@@ -329,11 +358,27 @@ mod tests {
             (KEY_GAIN.to_string(), "99".to_string()),
             (KEY_SEGMENT_SECONDS.to_string(), "1".to_string()),
             (KEY_FRAME_MS.to_string(), "5000".to_string()),
+            (
+                KEY_AUTO_START_DELAY_SECONDS.to_string(),
+                "86400".to_string(),
+            ),
         ]);
         let settings = Settings::from_pairs(&pairs);
         assert_eq!(settings.gain, GAIN_RANGE.1);
         assert_eq!(settings.segment_seconds, SEGMENT_SECONDS_RANGE.0);
         assert_eq!(settings.frame_ms, FRAME_MS_RANGE.1);
+        assert_eq!(
+            settings.auto_start_delay_seconds,
+            AUTO_START_DELAY_SECONDS_RANGE.1
+        );
+    }
+
+    #[test]
+    fn an_existing_install_keeps_starting_immediately() {
+        // A database written before the delay existed has no row for it, and must behave as it always
+        // did rather than quietly gaining a pause at boot.
+        let pairs = HashMap::from([(KEY_AUTO_START.to_string(), "true".to_string())]);
+        assert_eq!(Settings::from_pairs(&pairs).auto_start_delay_seconds, 0);
     }
 
     #[test]

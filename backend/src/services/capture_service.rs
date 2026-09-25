@@ -195,21 +195,53 @@ impl CaptureService {
         self.start().await
     }
 
-    /// Start capture if the settings ask for it. Called once during boot.
-    pub async fn start_if_configured(&self) -> AppResult<()> {
-        if !self.settings.current().auto_start {
+    /// Start capture if the settings ask for it, after the configured delay. Spawned once during boot.
+    ///
+    /// Runs as its own task so a long delay never holds up the HTTP listener, since the UI is where an
+    /// operator would go to see why nothing is recording yet. The settings are read again once the wait
+    /// is over, so switching auto start off, or starting by hand, during the delay is respected rather
+    /// than overridden.
+    pub async fn start_if_configured(
+        self: Arc<Self>,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
+    ) {
+        let settings = self.settings.current();
+        if !settings.auto_start {
             tracing::info!("auto start is disabled, waiting for a manual start");
-            return Ok(());
+            return;
         }
 
-        match self.start().await {
-            Ok(_) => Ok(()),
-            Err(error) => {
-                // A missing microphone at boot must not stop the web UI from coming up, since the UI is
-                // where the operator would go to fix it.
-                tracing::warn!(%error, "auto start failed, the service is running without capture");
-                Ok(())
+        let delay_seconds = settings.auto_start_delay_seconds;
+        if delay_seconds > 0 {
+            tracing::info!(
+                delay_seconds,
+                "auto start is waiting before opening the device"
+            );
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(delay_seconds.into())) => {}
+                // Stopping during the delay must not open a device on the way out.
+                _ = shutdown.changed() => return,
             }
+
+            if !self.settings.current().auto_start {
+                tracing::info!("auto start was switched off during the delay");
+                return;
+            }
+        }
+
+        if *shutdown.borrow() {
+            return;
+        }
+
+        if self.is_active() {
+            tracing::info!("capture was already started by hand, auto start has nothing to do");
+            return;
+        }
+
+        if let Err(error) = self.start().await {
+            // A missing microphone at boot must not stop the web UI from coming up, since the UI is where
+            // the operator would go to fix it.
+            tracing::warn!(%error, "auto start failed, the service is running without capture");
         }
     }
 

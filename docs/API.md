@@ -112,6 +112,7 @@ a new recording session because the sample rate may differ. Returns the status b
   "segmentSeconds": 10,
   "retentionHours": 24,
   "autoStart": true,
+  "autoStartDelaySeconds": 0,
   "frameMs": 100
 }
 ```
@@ -131,6 +132,7 @@ Accepts any subset of the settings object and returns the full updated object.
 | `segmentSeconds` | integer | 5 to 300 | On next segment rollover |
 | `retentionHours` | integer | 1 to 8760 | On next janitor pass, which runs every minute |
 | `autoStart` | boolean | | On next service start |
+| `autoStartDelaySeconds` | integer | 0 to 600 | On next service start. Seconds auto start waits before opening the device; the HTTP server does not wait |
 | `frameMs` | integer | 20 to 500 | On next capture start |
 
 ### `GET /api/settings/defaults`
