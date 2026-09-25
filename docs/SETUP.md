@@ -932,6 +932,28 @@ flowchart LR
 
 The steps are the same for both; where they differ it says so below.
 
+### A beta in one click
+
+A beta can skip all the steps below. On GitHub, open **Actions**, choose **Beta release**, press **Run
+workflow**, leave **Use workflow from** on `develop`, and run it. It:
+
+1. refuses unless CI has passed on the newest `develop` commit, and unless something has landed since the
+   last release;
+2. works out the next beta version, `0.4.0-beta.1` or the next number after the current beta, and commits
+   `chore:[OAR-N] release 0.4.0-beta.1` to `develop`;
+3. publishes it as a pre-release, with the `[Unreleased]` section of `CHANGELOG.md` as its notes;
+4. builds every platform, attaches the files, and installs them on macOS, Linux and Windows, exactly as
+   below.
+
+Tick **Dry run** to see the version, commit and notes it would use in the run's summary, with nothing
+pushed or published. That is the way to try it the first time.
+
+If `develop` requires pull requests for every change, allow GitHub Actions to push to it in the branch
+rules, or the commit in step 2 is refused. Nothing is published when that happens.
+
+Stable releases are still made by hand, with the steps below, because they also date the changelog and are
+the ones that reach everybody.
+
 ### 1. Decide the version
 
 The version lives in `backend/Cargo.toml` and nowhere else that matters. It is what the program reports

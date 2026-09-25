@@ -17,6 +17,15 @@ on:
     types: [published]
   # Useful for rehearsing the build without cutting a release: artifacts are produced, nothing is published.
   workflow_dispatch:
+  # How beta.yml hands over a release it has just published. It has to call this rather than wait for the
+  # "published" event, because GitHub starts no workflow for anything done with the built in token, which
+  # is what beta.yml publishes with.
+  workflow_call:
+    inputs:
+      tag:
+        description: The already published release to build and attach files to, like v0.4.0-beta.1
+        type: string
+        required: true
 
 permissions:
   contents: write
@@ -34,8 +43,16 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       artifact_tag: ${{ steps.resolve.outputs.artifact_tag }}
+      # True for a real release, which gets files attached and is then installed to prove it works. False
+      # for a rehearsal. An output rather than a check on the event name, because a called workflow sees
+      # its caller's event.
+      publish: ${{ steps.resolve.outputs.publish }}
     steps:
+      # Called by beta.yml, check out the tag it just made; otherwise the default, which for a published
+      # release is its tag already. Every checkout below does the same.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -47,11 +64,17 @@ jobs:
       - name: Resolve the version to build
         id: resolve
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
           RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="$(node scripts/version.mjs show)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # A called run has no release event to read the flag from, so ask the release itself.
+          if [ -n "$RELEASE_TAG" ] && [ -z "$RELEASE_PRERELEASE" ]; then
+            RELEASE_PRERELEASE="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)"
+          fi
 
           if [ -n "$RELEASE_TAG" ]; then
             if [ "$RELEASE_TAG" != "v$version" ]; then
@@ -83,12 +106,14 @@ jobs:
             esac
 
             echo "artifact_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "building $RELEASE_TAG"
           else
             # A rehearsal off a branch. Naming it after the branch would produce an identical filename on
             # every run and read as though 'master' were a version.
             tag="v$version-dev-$(git rev-parse --short HEAD)"
             echo "artifact_tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "rehearsing $tag, nothing will be published"
           fi
 
@@ -100,6 +125,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -137,6 +164,8 @@ jobs:
             os: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       # Must land before cargo build, because a release build reads this directory at compile time and
       # embeds whatever it finds.
@@ -208,7 +237,7 @@ jobs:
     needs: [version, binary]
     runs-on: ubuntu-latest
     # Only a published release gets files attached. A manual rehearsal stops at the artifacts above.
-    if: github.event_name == 'release'
+    if: needs.version.outputs.publish == 'true'
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -221,7 +250,7 @@ jobs:
       # regenerating them would throw that away.
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name }}
+          tag_name: ${{ needs.version.outputs.artifact_tag }}
           files: |
             dist/*.tar.gz
             dist/*.zip
@@ -236,7 +265,7 @@ jobs:
   verify:
     name: verify the install (${{ matrix.os }})
     needs: [version, publish]
-    if: github.event_name == 'release'
+    if: needs.version.outputs.publish == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -247,6 +276,8 @@ jobs:
           - windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Install the ALSA runtime
         if: runner.os == 'Linux'
