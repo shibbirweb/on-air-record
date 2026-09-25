@@ -6,6 +6,10 @@
 # Releases are cut from the GitHub web interface: Releases, Draft a new release, pick or create the tag,
 # Publish. That publish is what starts this. Creating the release first also means the notes are whatever
 # you wrote there, rather than something a workflow generated over the top of them.
+#
+# Betas go the same way, from develop, with a version like 0.4.0-beta.1 and "Set as a pre-release" ticked.
+# GitHub never counts a pre-release as the latest release, so the installers keep handing stable users the
+# last stable version, and only somebody who asks for --beta gets one.
 name: Release
 
 on:
@@ -44,6 +48,7 @@ jobs:
         id: resolve
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           version="$(node scripts/version.mjs show)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -55,6 +60,28 @@ jobs:
                    "then delete the release and its tag and create it again."
               exit 1
             fi
+
+            # The version decides the channel, and the release has to agree. A beta published as a normal
+            # release would become "latest", which is what the installers hand to everybody; a stable
+            # version published as a pre-release would be hidden from them.
+            case "$version" in
+              *-*)
+                if [ "$RELEASE_PRERELEASE" != "true" ]; then
+                  echo "::error::v$version is a beta, but the release is not marked as a pre-release." \
+                       "Edit the release, tick 'Set as a pre-release', and publish it again."
+                  exit 1
+                fi
+                ;;
+              *)
+                if [ "$RELEASE_PRERELEASE" = "true" ]; then
+                  echo "::error::v$version is a stable version, but the release is marked as a" \
+                       "pre-release. Untick 'Set as a pre-release', or give it a beta version such as" \
+                       "$version-beta.1."
+                  exit 1
+                fi
+                ;;
+            esac
+
             echo "artifact_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
             echo "building $RELEASE_TAG"
           else

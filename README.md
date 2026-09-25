@@ -38,7 +38,9 @@ on-air-record/
 Nothing is written anywhere else, so moving the installation is moving that folder, and removing it is
 deleting it. Start it again any time with `./on-air-record/start.sh`, which reads the config, so the port
 only has to be chosen once. Re-run the installer with `--update` for a newer release, `--release v0.1.0`
-for a specific one, or `--reconfigure` to change the port. `--help` lists the rest.
+for a specific one, `--beta` to try new features before everybody else
+([Trying a beta](docs/SETUP.md#trying-a-beta)), or `--reconfigure` to change the port. `--help` lists the
+rest.
 
 There is no prebuilt binary for ARM Linux, such as a Raspberry Pi. The installer says so and points at
 [building from source](#build-from-source).

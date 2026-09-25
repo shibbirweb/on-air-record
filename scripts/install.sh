@@ -25,6 +25,8 @@ want_update=0
 want_start=1
 forced_port=""
 forced_version=
+# stable or beta, from --stable or --beta. Empty means "whatever this folder was installed with".
+forced_channel=
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n==> %s\n' "$*"; }
@@ -42,6 +44,8 @@ Creates an `on-air-record` folder in the current directory and installs into it.
   --release <tag>   Install this exact version, like v0.1.0, instead of the latest
   --reconfigure     Ask for the port again, even if a config already exists
   --update          Download the latest release even if a program is already installed
+  --beta            Use beta releases: the newest release, beta or stable. Remembered for --update
+  --stable          Go back to stable releases only, once one is newer than what is installed
   --no-start        Install and configure, but do not start the service
   --help            Show this message
 
@@ -64,6 +68,8 @@ while [ $# -gt 0 ]; do
     --release=*) forced_version="${1#--release=}"; shift ;;
     --reconfigure) want_reconfigure=1; shift ;;
     --update) want_update=1; shift ;;
+    --beta) [ "$forced_channel" != stable ] || die "--beta and --stable cannot be used together"; forced_channel=beta; shift ;;
+    --stable) [ "$forced_channel" != beta ] || die "--beta and --stable cannot be used together"; forced_channel=stable; shift ;;
     --no-start) want_start=0; shift ;;
     --help|-h) usage; exit 0 ;;
     *) die "unknown option: $1. Try --help." ;;
@@ -120,6 +126,53 @@ latest_version() {
     v*) printf '%s' "$version" ;;
     *) die "could not work out the latest version from $url" ;;
   esac
+}
+
+# The newest release of any kind, beta or stable, for the beta channel. /releases/latest never counts a
+# pre-release, so this one has to ask the API, which lists releases newest first. That costs one call
+# against the unauthenticated hourly limit, which only people on betas ever spend. A GITHUB_TOKEN in the
+# environment is used when present, which CI relies on: its runners share addresses and so share the limit.
+newest_release() {
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    json="$(curl -fsSL -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $GITHUB_TOKEN" \
+      "https://api.github.com/repos/$REPOSITORY/releases?per_page=1")" \
+      || die "could not reach GitHub to find the newest release"
+  else
+    json="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+      "https://api.github.com/repos/$REPOSITORY/releases?per_page=1")" \
+      || die "could not reach GitHub to find the newest release"
+  fi
+  version="$(printf '%s' "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\(v[^"]*\)".*/\1/p' | head -n 1)"
+  [ -n "$version" ] || die "could not work out the newest release from GitHub's answer"
+  printf '%s' "$version"
+}
+
+# True when version $1 is older than $2. Both look like 0.4.0 or 0.4.0-beta.2, with or without the v, and
+# a beta comes before the release it leads up to: 0.4.0-beta.2 is older than 0.4.0.
+is_older() {
+  awk -v a="${1#v}" -v b="${2#v}" '
+    function core(v) { sub(/-.*/, "", v); return v }
+    function beta(v) { if (v ~ /-beta\.[0-9]+$/) { sub(/.*-beta\./, "", v); return v + 0 } return -1 }
+    BEGIN {
+      split(core(a), x, "."); split(core(b), y, ".")
+      for (i = 1; i <= 3; i++) {
+        if (x[i] + 0 < y[i] + 0) exit 0
+        if (x[i] + 0 > y[i] + 0) exit 1
+      }
+      ba = beta(a); bb = beta(b)
+      if (ba == bb) exit 1
+      if (ba == -1) exit 1
+      if (bb == -1) exit 0
+      exit (ba < bb) ? 0 : 1
+    }'
+}
+
+# Record the channel in the config, keeping every other setting as it was.
+save_channel() {
+  [ -f "$CONFIG_FILE" ] || return 0
+  grep -v '^OAR_CHANNEL=' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" || true
+  printf 'OAR_CHANNEL=%s\n' "$1" >> "$CONFIG_FILE.tmp"
+  mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 }
 
 sha256_of() {
@@ -349,6 +402,18 @@ parent="$(dirname -- "$install_dir")"
 
 mkdir -p "$install_dir" "$DATA_DIR"
 
+# Which releases this folder follows: a flag wins, then what it was installed with, then stable.
+saved_channel=""
+if [ -f "$CONFIG_FILE" ]; then
+  # shellcheck disable=SC1090
+  saved_channel="$(. "$CONFIG_FILE" > /dev/null 2>&1; printf '%s' "${OAR_CHANNEL:-}")"
+fi
+channel="${forced_channel:-${saved_channel:-stable}}"
+# Asking for the other channel is asking for its release, so it installs without needing --update too.
+if [ -n "$forced_channel" ] && [ "$forced_channel" != "${saved_channel:-stable}" ]; then
+  want_update=1
+fi
+
 if [ -n "$forced_version" ]; then
   # An explicit version is an instruction, not a preference, so it overwrites whatever is already here.
   case "$forced_version" in
@@ -361,12 +426,36 @@ if [ -n "$forced_version" ]; then
 elif [ -x "$BINARY" ] && [ "$want_update" -eq 0 ]; then
   installed="$("$BINARY" --version 2>/dev/null | awk '{print $2}')"
   step "Already installed here: version ${installed:-unknown}"
-  say "  run with --update to fetch the latest release"
+  if [ "$channel" = beta ]; then
+    say "  on beta releases; run with --update to fetch the newest one"
+  else
+    say "  run with --update to fetch the latest release"
+  fi
 else
-  version="$(latest_version)"
-  step "Installing $version"
-  install_release "$target" "$version"
-  say "  installed"
+  if [ "$channel" = beta ]; then
+    version="$(newest_release)"
+  else
+    version="$(latest_version)"
+  fi
+
+  installed=""
+  if [ -x "$BINARY" ]; then
+    installed="$("$BINARY" --version 2>/dev/null | awk '{print $2}')"
+  fi
+
+  # Never step backwards on the way to a channel. Going from a beta back to an older stable version can
+  # drop features the data now relies on; stable 0.3.0, for one, has no logins at all, so a recorder that
+  # had accounts would quietly open up. The switch is remembered and happens once stable catches up.
+  if [ -n "$installed" ] && is_older "$version" "$installed"; then
+    step "Keeping version $installed"
+    say "  the newest $channel release, $version, is older than what is installed here."
+    say "  Going back could lose features this version's data relies on, so it stays until a newer"
+    say "  $channel release is out, which --update will then install."
+  else
+    step "Installing $version"
+    install_release "$target" "$version"
+    say "  installed"
+  fi
 fi
 
 if [ -n "$forced_port" ]; then
@@ -389,6 +478,7 @@ else
   say "  saved"
 fi
 
+save_channel "$channel"
 write_launcher
 
 # shellcheck disable=SC1090
@@ -401,6 +491,9 @@ say "  stop it:         $(relative_to_pwd "$STOPPER")"
 say "  open:            http://localhost:$port"
 say "  settings:        $(relative_to_pwd "$CONFIG_FILE")"
 say "  recordings:      $(relative_to_pwd "$DATA_DIR")"
+if [ "$channel" = beta ]; then
+  say "  releases:        beta; --stable returns to stable ones"
+fi
 say ""
 say "  To remove it completely, delete $(relative_to_pwd "$install_dir")."
 
