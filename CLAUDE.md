@@ -146,6 +146,12 @@ Org standards in the managed settings apply here (commit format, no em dash, bra
 semicolons and trailing commas in TS). Project specifics on top of those:
 
 - There is no Jira project, so commits use a sequential `OAR-N` ticket: `feat:[OAR-15] add opus encoding`.
+  Take the next number after the highest in `git log`. Beyond `feat` and `fix`, history also uses `docs`,
+  `test`, `refactor` and `chore` with the same bracket format. Bodies explain the reasoning and what was
+  verified, in prose.
+- Work happens on a branch cut from `master`, never on `master` itself. Name it
+  `<type>/OAR-N-short-summary`, where the type and ticket match the commit it will carry, in lowercase
+  kebab case after the ticket: `feat/OAR-62-auto-start-delay`, `fix/OAR-58-version-script-old-node`.
 - No `unwrap()` or `expect()` outside `main.rs`, tests, and mutex locks. Everything else returns
   `AppResult<T>`.
 - Doc comments explain **why**, not what. The existing code is dense with rationale; match that.
@@ -165,7 +171,7 @@ the playback cursor walking a real directory of real PCM across a recording gap.
 data directory plus an in memory SQLite, because the interaction between the two is the thing worth
 testing.
 
-Frontend tests cover only `lib/`. Components are not unit tested, because what would break in them is
+Frontend tests cover `lib/` and the Zustand slices in `store/`. Components are not unit tested, because what would break in them is
 canvas drawing and Web Audio scheduling and neither is meaningfully exercised in jsdom.
 
 Verify audio changes by running the service and listening. Browsers require a user gesture before audio
@@ -194,8 +200,23 @@ is missing and emits `cargo:rerun-if-changed` for it, because a proc macro canno
 At runtime `routes::static_files` prefers a `--static-dir` containing `index.html`, then the embedded
 copy, then the build instructions page. Debug builds read from disk either way.
 
+End users install with `scripts/install.sh` (macOS, Linux) or `scripts/install.ps1` (Windows), which
+download a release into a self contained folder and write `start` and `stop` scripts beside the binary.
+The stop scripts send TERM and wait, because shutdown closes and indexes the segment in progress.
+CI runs both installers on all three platforms, and `make install-preview` tries one locally under `/tmp`.
+`packaging/on-air-record.service` is the systemd unit.
+
+## Docs and the wiki
+
+`docs/SETUP.md` and `docs/USER_GUIDE.md` are also published to the GitHub wiki on every push to master
+(`scripts/build-wiki.mjs`, `.github/workflows/wiki.yml`). The script rewrites links between docs, so use
+plain relative links in those files, and keep images as absolute raw GitHub URLs, which it does not
+rewrite. `make wiki` builds a preview. When a user facing behaviour changes, update the matching section
+there as well as the `README.md` feature checklist.
+
 ## Further reading
 
 `docs/ARCHITECTURE.md` (layers and patterns), `docs/AUDIO_PIPELINE.md` (capture, framing, storage, DVR
 timing, latency budget), `docs/API.md` (REST and WebSocket contract), `docs/DEVELOPMENT.md` (setup and
-troubleshooting).
+troubleshooting), `docs/SETUP.md` (installing, ports, running as a service, stopping it),
+`docs/USER_GUIDE.md` (every UI feature, with screenshots).
