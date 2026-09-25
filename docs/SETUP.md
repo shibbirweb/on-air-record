@@ -654,7 +654,8 @@ Go to **Releases**, then **Draft a new release**.
 - **Choose a tag**: type `v` followed by the version, so `v0.2.0`, and pick **Create new tag on publish**.
 - **Target**: `master`.
 - **Title**: the version is fine.
-- **Notes**: write them, or press **Generate release notes** to have GitHub write them from the commits.
+- **Notes**: paste the version's section from [`CHANGELOG.md`](../CHANGELOG.md), after replacing
+  "Unreleased" in its heading with today's date and committing that.
 - Press **Publish release**.
 
 The tag is created for you. You never have to run `git tag`.

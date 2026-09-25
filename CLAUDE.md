@@ -152,6 +152,9 @@ semicolons and trailing commas in TS). Project specifics on top of those:
 - Work happens on a branch cut from `master`, never on `master` itself. Name it
   `<type>/OAR-N-short-summary`, where the type and ticket match the commit it will carry, in lowercase
   kebab case after the ticket: `feat/OAR-62-auto-start-delay`, `fix/OAR-58-version-script-old-node`.
+- A user visible change also gets an entry in `CHANGELOG.md`, under the unreleased version at the top
+  (start a `## [Unreleased]` section if the top one already has a date), written for someone running the app rather than for a developer, with its ticket in brackets. Fixes to
+  something that never shipped in a release do not belong there. That section becomes the release notes.
 - No `unwrap()` or `expect()` outside `main.rs`, tests, and mutex locks. Everything else returns
   `AppResult<T>`.
 - Doc comments explain **why**, not what. The existing code is dense with rationale; match that.
