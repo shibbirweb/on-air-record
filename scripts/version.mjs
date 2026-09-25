@@ -187,11 +187,38 @@ function lastTag() {
   return git('describe', '--tags', '--abbrev=0', '--match', 'v*');
 }
 
-/** Commit subjects since a tag, newest first. Everything when there is no tag yet. */
+/**
+ * Commit subjects since a tag, newest first. Everything when there is no tag yet.
+ *
+ * Merge commits are left out: with pull requests into develop every change arrives with one, and its
+ * subject ("Merge pull request #4 from ...") says nothing about what kind of change it carried.
+ */
 function commitsSince(tag) {
   const range = tag ? `${tag}..HEAD` : 'HEAD';
-  const out = git('log', range, '--format=%s');
+  const out = git('log', range, '--no-merges', '--format=%s');
   return out ? out.split('\n').filter(Boolean) : [];
+}
+
+/**
+ * The `[Unreleased]` section of the changelog, without its heading: what beta.yml uses as the release
+ * notes, and what a stable release's notes are pasted from by hand.
+ */
+function commandNotes() {
+  const text = read(join(ROOT, 'CHANGELOG.md'));
+  const start = text.indexOf('## [Unreleased]');
+  if (start === -1) {
+    console.error('CHANGELOG.md has no [Unreleased] section to take release notes from');
+    return 1;
+  }
+  const body = text.slice(text.indexOf('\n', start) + 1);
+  const end = body.search(/^## \[/m);
+  const notes = (end === -1 ? body : body.slice(0, end)).trim();
+  if (notes === '') {
+    console.error('the [Unreleased] section of CHANGELOG.md is empty');
+    return 1;
+  }
+  console.log(notes);
+  return 0;
 }
 
 /** The next OAR ticket, so the suggested commit line is ready to paste. */
@@ -436,6 +463,11 @@ if (action === 'show' && argument === undefined) {
   process.exit(await commandBump(argument));
 } else if (action === 'pending' && argument === undefined) {
   process.exit(commandPending());
+} else if (action === 'notes' && argument === undefined) {
+  process.exit(commandNotes());
+} else if (action === 'next-ticket' && argument === undefined) {
+  console.log(nextTicket());
+  process.exit(0);
 } else {
   console.error(
     [
@@ -448,6 +480,8 @@ if (action === 'show' && argument === undefined) {
       '  node scripts/version.mjs bump beta            start or continue a beta, like 0.4.0-beta.1',
       '  node scripts/version.mjs bump release         finish a beta: 0.4.0-beta.3 becomes 0.4.0',
       '  node scripts/version.mjs pending              report whether a release is due, never fails',
+      '  node scripts/version.mjs notes                print the [Unreleased] changelog section',
+      '  node scripts/version.mjs next-ticket          print the next free OAR ticket number',
     ].join('\n'),
   );
   process.exit(2);

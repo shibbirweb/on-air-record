@@ -188,6 +188,12 @@ semicolons and trailing commas in TS). Project specifics on top of those:
   `develop`, never on either of them directly, and goes back into `develop` by pull request. Name it
   `<type>/OAR-N-short-summary`, where the type and ticket match the commit it will carry, in lowercase
   kebab case after the ticket: `feat/OAR-62-auto-start-delay`, `fix/OAR-58-version-script-old-node`.
+- Betas are cut by the manual **Beta release** workflow (`beta.yml`): CI must have passed on develop's
+  head, then it bumps, commits, publishes the pre-release with `version.mjs notes` as the notes, and calls
+  `release.yml` through `workflow_call`. It calls rather than relying on the `published` event because
+  GitHub starts no workflow for anything done with the built in token. Anything that makes `release.yml`
+  check out code must keep passing `ref: ${{ inputs.tag }}`, or a called build compiles the commit from
+  before the bump.
 - Betas are released from `develop` as GitHub pre-releases with versions like `0.4.0-beta.1`
   (`version.mjs bump beta`). When a beta has held up, `develop` is merged into `master` by pull request and
   released as stable (`version.mjs bump release`). CI runs on pushes to both and on every pull request, on

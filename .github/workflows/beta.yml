@@ -1,0 +1,139 @@
+# Cuts the next beta from develop in one click: Actions, "Beta release", Run workflow, on develop.
+#
+# It does exactly what the manual steps in docs/SETUP.md do, in order: bump the version with
+# version.mjs, commit and push it to develop, publish a pre-release tagged with it using the [Unreleased]
+# changelog section as the notes, then build and attach the files and install them on all three platforms
+# by calling release.yml. Tick "dry run" to see the version, commit and notes it would use, with nothing
+# pushed or published.
+#
+# Stable releases stay manual, from master, because they also date the changelog and are the ones that
+# reach everybody.
+name: Beta release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run, only show what would happen and push or publish nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+
+# Two betas at once would race for the same version number.
+concurrency:
+  group: beta-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: bump and publish
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - name: Only from develop
+        if: github.ref != 'refs/heads/develop'
+        run: |
+          echo "::error::Betas are cut from develop, and this was started on ${GITHUB_REF#refs/heads/}. Choose develop under 'Use workflow from'."
+          exit 1
+
+      # Full history and tags: version.mjs reads the last release tag and the commits since it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # version.mjs refreshes Cargo.lock with an offline cargo update, which needs the dependencies in the
+      # local cache first. A fresh runner has none.
+      - name: Fetch the crate dependencies
+        working-directory: backend
+        run: cargo fetch --locked
+
+      # A beta is something people install, so it is only cut from a commit CI has passed on all three
+      # platforms, never from one it failed on or has not finished with.
+      - name: Check CI passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(git rev-parse HEAD)"
+          conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&per_page=1" \
+            --jq '.workflow_runs[0] | if . == null then "none" else (.conclusion // .status) end')"
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::CI on ${sha:0:7} is '$conclusion', not a pass. Wait for it to pass on develop, then run this again."
+            exit 1
+          fi
+          echo "CI passed on ${sha:0:7}"
+
+      - name: Bump to the next beta
+        id: bump
+        run: |
+          before="$(node scripts/version.mjs show)"
+          node scripts/version.mjs bump beta
+          version="$(node scripts/version.mjs show)"
+
+          # bump leaves the version alone when nothing has landed since the last release, and cutting the
+          # same version twice would fail at the tag anyway. Say so plainly instead.
+          if [ "$version" = "$before" ]; then
+            echo "::error::Nothing has landed on develop since $before was released, so there is nothing for a new beta to hold."
+            exit 1
+          fi
+          case "$version" in
+            *-beta.*) ;;
+            *) echo "::error::Expected a beta version, got $version."; exit 1 ;;
+          esac
+
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "ticket=$(node scripts/version.mjs next-ticket)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from the changelog
+        run: |
+          node scripts/version.mjs notes > "$RUNNER_TEMP/notes.md"
+          {
+            echo "### ${{ steps.bump.outputs.tag }}${{ inputs.dry_run && ' (dry run, nothing published)' || '' }}"
+            echo ''
+            echo "Commit: \`chore:[OAR-${{ steps.bump.outputs.ticket }}] release ${{ steps.bump.outputs.version }}\`"
+            echo ''
+            cat "$RUNNER_TEMP/notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # A push rejected because develop moved on while this ran stops here, before anything is published,
+      # which is the safe way round. Run it again to cut the beta from the newer develop.
+      - name: Commit and push to develop
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -am "chore:[OAR-${{ steps.bump.outputs.ticket }}] release ${{ steps.bump.outputs.version }}"
+          git push origin HEAD:develop
+
+      # A pre-release, so GitHub never counts it as the latest release and the installers only hand it to
+      # people who asked for --beta. release.yml checks this against the version too.
+      - name: Publish the pre-release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.bump.outputs.tag }}" \
+            --target "$(git rev-parse HEAD)" \
+            --prerelease \
+            --title "${{ steps.bump.outputs.tag }}" \
+            --notes-file "$RUNNER_TEMP/notes.md"
+
+  build:
+    name: build, attach and verify
+    needs: prepare
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
