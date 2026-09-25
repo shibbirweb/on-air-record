@@ -1,0 +1,88 @@
+# Publishes a beta once its release pull request is merged and CI has passed on the result.
+#
+# beta.yml opens a pull request that moves develop to a beta version. Merging it is the decision to
+# release; this does the rest. It runs whenever CI finishes on a push to develop, and acts only when CI
+# passed and develop is at a beta version with no tag yet: every other CI run on develop ends here with a
+# note. It then publishes the pre-release from the commit CI passed on, with the [Unreleased] changelog
+# section as its notes, and calls release.yml to build, attach and install it on all three platforms.
+#
+# Waiting for CI, rather than starting on the merge itself, means a beta is only ever published from a
+# commit that has passed on Linux, macOS and Windows. It runs on the CI run's own commit, so a later merge
+# landing meanwhile cannot slip untested code into the release.
+name: Publish beta
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [develop]
+
+permissions:
+  contents: write
+  actions: read
+
+# The same beta must not be published twice by two CI runs finishing close together.
+concurrency:
+  group: beta-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish the pre-release
+    runs-on: ubuntu-latest
+    # Only CI that passed, on a push to develop. A pull request's CI never publishes anything.
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - name: Is there a beta to publish?
+        id: check
+        run: |
+          version="$(node scripts/version.mjs show)"
+          case "$version" in
+            *-beta.*) ;;
+            *)
+              echo "develop is at $version, which is not a beta. Nothing to publish." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+          esac
+          if git rev-parse --verify --quiet "refs/tags/v$version" > /dev/null; then
+            echo "v$version is already published. Nothing to do." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the pre-release
+        if: steps.check.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.check.outputs.tag }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          node scripts/version.mjs notes > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$SHA" --prerelease \
+            --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          {
+            echo "### Published $TAG as a pre-release"
+            echo ''
+            cat "$RUNNER_TEMP/notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # GitHub starts no workflow for anything done with the built in token, including publishing a release,
+  # so release.yml's own "published" trigger will not fire for this one. It is called instead.
+  build:
+    name: build, attach and verify
+    needs: publish
+    if: needs.publish.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}
