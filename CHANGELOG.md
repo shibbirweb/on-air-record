@@ -26,6 +26,12 @@ Every release of On Air Record, newest first. The format follows
 - The installation guide has a new "Stopping it" section, and troubleshooting entries for a service left
   running after its terminal closed and for silent recordings after a reboot. (OAR-60, OAR-62)
 - Diagrams in the README, the installation guide and the developer docs. (OAR-61)
+- **Linux microphone access.** A new section of the installation guide explains why the app cannot record
+  from an account that is not in the `audio` group, which is usual for a login over SSH, and how to fix it.
+  It also explains why running it with `sudo` instead is a trap: files created as `root` later stop it
+  saving anything while it still shows Recording. It gives the steps to recover, including for the
+  systemd service, and how to run it under a separate account instead of your own or `root`. The README
+  and the troubleshooting list point to it. (OAR-66)
 
 ## [0.2.0] - 2026-09-05
 
