@@ -270,24 +270,38 @@ port_is_free() {
   fi
 }
 
+# True when there is somebody to ask: the same test ask() makes before it prompts.
+have_terminal() {
+  [ -t 0 ] || (exec < /dev/tty) 2>/dev/null
+}
+
 choose_port() {
   while :; do
     port="$(ask "Which port should the web interface use? [$DEFAULT_PORT] " "$DEFAULT_PORT")"
 
+    problem=""
     case "$port" in
-      ''|*[!0-9]*) say "  '$port' is not a number, try again." >&2; continue ;;
+      ''|*[!0-9]*) problem="'$port' is not a number" ;;
+      *)
+        if [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
+          problem="$port is not between 1024 and 65535"
+        elif ! port_is_free "$port"; then
+          problem="something is already listening on $port"
+        fi
+        ;;
     esac
-    if [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
-      say "  pick a number between 1024 and 65535." >&2
-      continue
-    fi
-    if ! port_is_free "$port"; then
-      say "  something is already listening on $port, pick another." >&2
-      continue
+
+    if [ -z "$problem" ]; then
+      printf '%s' "$port"
+      return 0
     fi
 
-    printf '%s' "$port"
-    return 0
+    # With nobody to ask, the same default would come back and fail the same way forever. Under CI that
+    # is a job hanging until its time limit instead of failing with a reason.
+    if ! have_terminal; then
+      die "$problem, and there is no terminal to ask for another. Run it again with --port <number>."
+    fi
+    say "  $problem, pick another." >&2
   done
 }
 
