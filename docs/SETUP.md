@@ -24,6 +24,7 @@ flowchart LR
 
 - [What you need](#what-you-need)
 - [The quick way](#the-quick-way)
+- [Linux: microphone access](#linux-microphone-access)
 - [Stopping it](#stopping-it)
 - [Step 1: download](#step-1-download)
 - [Step 2: run it](#step-2-run-it)
@@ -123,6 +124,158 @@ It will refuse to run on ARM Linux, such as a Raspberry Pi, because there is no 
 That needs [building from source](#building-from-source).
 
 The rest of this section is the same thing done by hand.
+
+**On Linux, read [Linux: microphone access](#linux-microphone-access) first.** On a server, or any machine
+you reach over SSH, your account usually cannot open the microphone until you add it to one group, and the
+tempting shortcut of running it with `sudo` causes a second, quieter problem.
+
+## Linux: microphone access
+
+Linux keeps the sound hardware behind device files in `/dev/snd`, and only `root` and members of the
+`audio` group may open them. When you sit at a desktop and log in there, you are given access
+automatically. When you log in over SSH, which is how most servers are run, you are not.
+
+### How you can tell
+
+The web interface loads, but recording will not start. The recorder panel shows an error, and the log says
+something like:
+
+```
+auto start failed ... device 'default' has no usable input config: ... 'snd_pcm_open' failed with error 'Permission denied (13)'
+```
+
+The giveaway is that **it works when started with `sudo`**. To confirm, as your normal user:
+
+```sh
+id -nG          # the groups you are in right now; is audio one of them?
+arecord -l      # does this list your microphone?
+sudo arecord -l # and does this?
+```
+
+If `arecord -l` lists nothing but `sudo arecord -l` shows your microphone, this is the problem. If neither
+lists it, Linux cannot see the microphone at all: check the cable, try another USB port, and look at
+`dmesg` for a driver message. That is outside the app.
+
+### Fixing it
+
+Add your account to the `audio` group, once:
+
+```sh
+sudo usermod -aG audio "$USER"
+```
+
+Then **log out and back in**. Over SSH, that means disconnecting and connecting again. A new group only
+applies to logins that start after it was added, so until then nothing changes. Check that it took:
+
+```sh
+id -nG          # audio should now be in the list
+arecord -l      # and your microphone should be listed without sudo
+```
+
+Now start it the normal way, without `sudo`:
+
+```sh
+./on-air-record/start.sh
+```
+
+### Do not run it with sudo
+
+It works, which is exactly why it is tempting. The trouble comes later. Everything the program creates while
+it runs as `root`, such as the day folders under `data/recordings`, belongs to `root`. The next time you
+start it as yourself, even with the group fixed, it can open the microphone but cannot write into those
+folders. The recorder panel still says **Recording**, and the live audio still plays, but **nothing is
+saved** and the timeline stays empty. The only sign is in the log:
+
+```
+could not open a segment file error=io error: Permission denied (os error 13)
+```
+
+### If you already ran it with sudo
+
+Stop the copy that runs as `root`, give the folder back to your account, and start it again as yourself:
+
+```sh
+sudo ./on-air-record/stop.sh               # needs sudo, because the running copy belongs to root
+sudo chown -R "$USER": ./on-air-record     # take back everything it created
+./on-air-record/start.sh                   # no sudo from now on
+```
+
+Without `sudo`, the stop script is not allowed to stop a process owned by `root`, so it waits and then
+suggests `kill -9`. Do not use that; run it again with `sudo` instead.
+
+Then check that recording really works. Leave it running for a minute and look at the timeline, not just
+the recorder panel. New audio appears once each block of recording (10 seconds by default) is finished and
+written, so an empty timeline after a minute means something is still wrong.
+
+### Running it as a different account
+
+You may not want it under your own login at all: a shared server, an admin account you would rather keep
+separate, or simply wanting the recordings to belong to something other than you. Give it an account of its
+own. It needs three things: to be in the `audio` group, to own the folder it is installed in, and to be the
+account that starts it. It never needs `root`.
+
+The examples call the account `onair`; any name works.
+
+**1. Create the account and let it use the microphone.**
+
+```sh
+sudo useradd --create-home --shell /bin/bash onair
+sudo usermod -aG audio onair
+```
+
+**2. Install it as that account**, so the account owns everything from the start. This puts it in the
+account's home folder, `/home/onair/on-air-record`:
+
+```sh
+sudo -u onair -H sh -c 'cd ~ && curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh -s -- --port 8080 --no-start'
+```
+
+If you would rather keep it outside a home folder, such as in `/opt`, move it there afterwards. Moving
+keeps the owner, so nothing else is needed:
+
+```sh
+sudo mv /home/onair/on-air-record /opt/on-air-record
+```
+
+If you already have an installation under your own account, hand that over instead of installing again.
+Stop it first:
+
+```sh
+./on-air-record/stop.sh
+sudo mv ./on-air-record /opt/on-air-record
+sudo chown -R onair: /opt/on-air-record
+```
+
+**3. Start and stop it as that account**, always through `sudo -u`, using wherever it now lives:
+
+```sh
+sudo -u onair /home/onair/on-air-record/start.sh    # or /opt/on-air-record/start.sh
+sudo -u onair /home/onair/on-air-record/stop.sh
+```
+
+This is not the same as `sudo ./on-air-record/start.sh`: `sudo -u onair` runs it as `onair`, not as
+`root`, so every file it creates belongs to `onair` and the ownership trap above cannot happen. It also
+picks up the `audio` group straight away, with no logging out, because `sudo` starts the program with the
+account's current groups. Plain `sudo`, without `-u`, is still the thing to avoid.
+
+Check it worked the same way as before: leave it running for a minute and look at the timeline.
+
+Starting it this way ties it to your terminal, like any other manual start. To have it run in the
+background and come back after a reboot, use the systemd unit below. It already follows this pattern, with
+an account of its own called `on-air-record`.
+
+### When it runs as a system service
+
+The systemd unit in [Keeping it running: Linux](#keeping-it-running-linux) runs as its own
+`on-air-record` account and already joins the `audio` group, so none of the above applies to it. The same
+ownership trap does apply if you ever start the program by hand with `sudo` against the service's data
+directory. Put it right with:
+
+```sh
+sudo systemctl stop on-air-record
+sudo chown -R on-air-record: /var/lib/on-air-record
+sudo systemctl start on-air-record
+```
 
 ## Stopping it
 
@@ -253,12 +406,8 @@ Check the machine can actually see a microphone with `arecord -l`. If that lists
 nothing either, and the problem is the operating system rather than the app.
 
 Your user account has to be in the `audio` group to reach the sound hardware. Desktop accounts usually are
-already. If not:
-
-```sh
-sudo usermod -aG audio "$USER"
-# log out and back in for the group to take effect
-```
+already; accounts you reach over SSH usually are not. [Linux: microphone access](#linux-microphone-access)
+covers how to check, how to fix it, and why running it with `sudo` instead makes things worse.
 
 ### Windows
 
@@ -482,7 +631,8 @@ sudo systemctl enable --now on-air-record
 
 **The `usermod -aG audio` line is the one people miss.** Without it the service starts, serves the web
 interface, and lists no microphones at all, which looks like a hardware fault rather than a permissions
-one.
+one. Do not work around it by starting the program by hand with `sudo`; see
+[When it runs as a system service](#when-it-runs-as-a-system-service) for why, and how to recover.
 
 To change the port or the data directory, edit the `Environment=` lines in the unit file:
 
@@ -725,8 +875,21 @@ here.
 **No microphones are listed.**
 - macOS: permission was refused. System Settings, Privacy and Security, Microphone. Run it in a terminal
   once, rather than as a background job, so the prompt can appear.
-- Linux: the account is not in the `audio` group, or `arecord -l` lists nothing.
+- Linux: the account is not in the `audio` group, or `arecord -l` lists nothing. See
+  [Linux: microphone access](#linux-microphone-access).
 - Windows: the service is running as `LocalSystem`. Set it to run as a real user account.
+
+**Linux: it only records when I start it with sudo.**
+Your account cannot open the sound devices. Add it to the `audio` group and log in again, rather than
+carrying on with `sudo`, which leaves files behind that break later runs. See
+[Linux: microphone access](#linux-microphone-access).
+
+**Linux: it says Recording, but nothing appears on the timeline.**
+Wait a minute first: new audio only appears once each block of recording (10 seconds by default) is
+written. If the timeline is still
+empty, it was probably started with `sudo` at some point, and folders it created then now belong to `root`.
+The log will show `could not open a segment file ... Permission denied`. See
+[If you already ran it with sudo](#if-you-already-ran-it-with-sudo).
 
 **It recorded nothing while I was away.**
 Check that **Record on start up** is switched on in the app's settings, and that the machine did not go to

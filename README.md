@@ -437,13 +437,18 @@ automatically on every push to `master`, so read them wherever suits you.
 
 ## Troubleshooting
 
-The two most common first run problems:
+The most common first run problems:
 
 - **The page says the web UI has not been built.** Only a source build can say this, and it means
   `frontend/dist` is empty. Run `npm install && npm run build` in `frontend/`. A release binary carries
   its own UI and cannot land here.
 - **No devices are listed on macOS.** The first run triggers a microphone permission prompt. If it was
   denied, enable it under System Settings, Privacy and Security, Microphone, then restart the service.
+- **On Linux it only records when started with `sudo`.** Your account is not in the `audio` group, which
+  is usual for a login over SSH. Add it and log in again rather than carrying on with `sudo`, which leaves
+  files behind that silently stop later runs from saving anything. The fix, and how to recover if you
+  already used `sudo`, are in
+  [Linux: microphone access](docs/SETUP.md#linux-microphone-access).
 
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the rest.
 
