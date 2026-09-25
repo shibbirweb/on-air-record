@@ -57,6 +57,8 @@ export type Settings = {
   /** `null` means recordings are kept forever. */
   retentionHours: number | null;
   autoStart: boolean;
+  /** Seconds auto start waits after the service boots, so a slow USB microphone can appear first. */
+  autoStartDelaySeconds: number;
   frameMs: number;
   /** `null` records at the capture device's own rate, which is the best quality it offers. */
   recordingSampleRate: number | null;

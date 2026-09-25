@@ -1,5 +1,5 @@
 /**
- * Audio tuning: input gain, segment length, and whether the recorder starts on its own.
+ * Audio tuning: input gain, segment length, and whether and when the recorder starts on its own.
  *
  * Every control here stages a change rather than applying one. Nothing reaches the server until the
  * action bar's Save is used, which is why the gain hint says "on save" rather than "immediately": the
@@ -74,6 +74,28 @@ export function SettingsPanel() {
           checked={pending.autoStart}
           onCheckedChange={(checked) => edit({ autoStart: checked })}
         />
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <Label htmlFor="auto-start-delay">Start up delay</Label>
+          <span className="text-muted-foreground text-xs tabular">
+            {pending.autoStartDelaySeconds === 0 ? 'None' : `${pending.autoStartDelaySeconds} s`}
+          </span>
+        </div>
+        <Slider
+          id="auto-start-delay"
+          value={[pending.autoStartDelaySeconds]}
+          min={0}
+          max={120}
+          step={5}
+          disabled={!pending.autoStart}
+          onValueChange={([next]) => edit({ autoStartDelaySeconds: next ?? 0 })}
+        />
+        <p className="text-muted-foreground text-xs">
+          Wait this long after the service starts before recording. Useful when it runs as a system
+          service and a USB microphone appears a few seconds after boot. Takes effect on the next start.
+        </p>
       </div>
     </div>
   );

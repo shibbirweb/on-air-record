@@ -36,11 +36,8 @@ async fn main() {
     // rather than a handle per task.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-    tokio::spawn(state.retention.clone().run(shutdown_rx));
-
-    if let Err(error) = state.capture.start_if_configured().await {
-        tracing::error!(%error, "auto start failed");
-    }
+    tokio::spawn(state.retention.clone().run(shutdown_rx.clone()));
+    tokio::spawn(state.capture.clone().start_if_configured(shutdown_rx));
 
     let address = config.socket_addr();
     let listener = match tokio::net::TcpListener::bind(address).await {

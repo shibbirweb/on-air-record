@@ -329,6 +329,7 @@ mod tests {
                 segment_seconds: 60,
                 retention_hours: Some(168),
                 auto_start: false,
+                auto_start_delay_seconds: 45,
                 frame_ms: 40,
                 recording_sample_rate: None,
                 recordings_dir: None,
@@ -341,6 +342,10 @@ mod tests {
         assert_eq!(reset.segment_seconds, Settings::default().segment_seconds);
         assert_eq!(reset.retention_hours, Settings::default().retention_hours);
         assert_eq!(reset.auto_start, Settings::default().auto_start);
+        assert_eq!(
+            reset.auto_start_delay_seconds,
+            Settings::default().auto_start_delay_seconds
+        );
         assert_eq!(reset.frame_ms, Settings::default().frame_ms);
         // The microphone is chosen elsewhere, so resetting the tuning must not move it.
         assert_eq!(reset.input_device_id, Some("Scarlett Solo USB".to_string()));

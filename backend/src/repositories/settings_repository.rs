@@ -106,6 +106,7 @@ mod tests {
             segment_seconds: 30,
             retention_hours: Some(12),
             auto_start: false,
+            auto_start_delay_seconds: 30,
             frame_ms: 60,
             recording_sample_rate: None,
             recordings_dir: None,

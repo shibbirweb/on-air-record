@@ -66,6 +66,7 @@ export function SettingsActionBar() {
         'segmentSeconds',
         'retentionHours',
         'autoStart',
+        'autoStartDelaySeconds',
         'recordingSampleRate',
         'recordingsDir',
       ] as const

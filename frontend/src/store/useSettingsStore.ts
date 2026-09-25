@@ -20,6 +20,7 @@ export const EDITABLE_FIELDS = [
   'segmentSeconds',
   'retentionHours',
   'autoStart',
+  'autoStartDelaySeconds',
   'recordingsDir',
 ] as const satisfies readonly (keyof SettingsPatch)[];
 
