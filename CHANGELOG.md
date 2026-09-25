@@ -5,6 +5,15 @@ Every release of On Air Record, newest first. The format follows
 [Semantic Versioning](https://semver.org/). Each release's section is also used as its notes on the
 [releases page](https://github.com/shibbirweb/on-air-record/releases).
 
+## [Unreleased]
+
+### Added
+
+- **Beta releases.** New features now reach a beta first, a pre-release like `0.4.0-beta.1`, before the
+  stable release. Install or switch to betas with the installer's `--beta` option (`-Beta` on Windows). The
+  choice is remembered, so later updates stay on betas; `--stable` goes back, and never to a version older
+  than the one installed. Anybody who does not ask for betas keeps getting stable releases only. (OAR-69)
+
 ## [0.3.0] - 2026-09-26
 
 ### Added
@@ -96,6 +105,7 @@ The first release.
 - There is no authentication, by design. Anyone who can reach the port can listen, so keep it on a network
   you trust.
 
+[Unreleased]: https://github.com/shibbirweb/on-air-record/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/shibbirweb/on-air-record/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shibbirweb/on-air-record/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shibbirweb/on-air-record/releases/tag/v0.1.0

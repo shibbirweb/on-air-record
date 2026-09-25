@@ -149,9 +149,15 @@ semicolons and trailing commas in TS). Project specifics on top of those:
   Take the next number after the highest in `git log`. Beyond `feat` and `fix`, history also uses `docs`,
   `test`, `refactor` and `chore` with the same bracket format. Bodies explain the reasoning and what was
   verified, in prose.
-- Work happens on a branch cut from `master`, never on `master` itself. Name it
+- **Two long lived branches: `master` is stable, `develop` is beta.** Work happens on a branch cut from
+  `develop`, never on either of them directly, and goes back into `develop` by pull request. Name it
   `<type>/OAR-N-short-summary`, where the type and ticket match the commit it will carry, in lowercase
   kebab case after the ticket: `feat/OAR-62-auto-start-delay`, `fix/OAR-58-version-script-old-node`.
+- Betas are released from `develop` as GitHub pre-releases with versions like `0.4.0-beta.1`
+  (`version.mjs bump beta`). When a beta has held up, `develop` is merged into `master` by pull request and
+  released as stable (`version.mjs bump release`). CI runs on pushes to both and on every pull request, on
+  Linux, macOS and Windows. `release.yml` refuses a beta version not marked as a pre-release and a stable
+  one that is, so a beta can never become the "latest" the installers hand to everybody.
 - A user visible change also gets an entry in `CHANGELOG.md`, under the unreleased version at the top
   (start a `## [Unreleased]` section if the top one already has a date), written for someone running the app rather than for a developer, with its ticket in brackets. Fixes to
   something that never shipped in a release do not belong there. That section becomes the release notes.
