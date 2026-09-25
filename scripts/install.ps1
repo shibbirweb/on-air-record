@@ -35,6 +35,12 @@ param(
     # Download the latest release even if a program is already installed
     [switch] $Update,
 
+    # Use beta releases: the newest release, beta or stable. Remembered for -Update
+    [switch] $Beta,
+
+    # Go back to stable releases only, once one is newer than what is installed
+    [switch] $Stable,
+
     # Install and configure, but do not start the service
     [switch] $NoStart
 )
@@ -108,6 +114,48 @@ function Get-LatestVersion {
     return $version
 }
 
+# The newest release of any kind, beta or stable, for the beta channel. /releases/latest never counts a
+# pre-release, so this one asks the API, which lists releases newest first. That costs one call against
+# the unauthenticated hourly limit, which only people on betas ever spend. A GITHUB_TOKEN in the environment
+# is used when present, which CI relies on: its runners share addresses and so share the limit.
+function Get-NewestRelease {
+    $headers = @{ Accept = 'application/vnd.github+json' }
+    if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
+    try {
+        $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repository/releases?per_page=1" `
+            -Headers $headers -UseBasicParsing
+    } catch {
+        Stop-WithError "could not reach GitHub to find the newest release: $($_.Exception.Message)"
+    }
+    $version = @($releases)[0].tag_name
+    if ($version -notmatch '^v\d') { Stop-WithError "could not work out the newest release from GitHub's answer" }
+    return $version
+}
+
+# True when version $A is older than $B. Both look like 0.4.0 or 0.4.0-beta.2, with or without the v, and a
+# beta comes before the release it leads up to: 0.4.0-beta.2 is older than 0.4.0.
+function Test-IsOlder {
+    param([string] $A, [string] $B)
+    # PowerShell names ignore case, so these must not be called $a and $b: those are the parameters.
+    $left = $A.TrimStart('v'); $right = $B.TrimStart('v')
+    $coreA = [version] ($left -split '-', 2)[0]
+    $coreB = [version] ($right -split '-', 2)[0]
+    if ($coreA -ne $coreB) { return $coreA -lt $coreB }
+    $betaA = if ($left -match '-beta\.(\d+)$') { [int] $Matches[1] } else { -1 }
+    $betaB = if ($right -match '-beta\.(\d+)$') { [int] $Matches[1] } else { -1 }
+    if ($betaA -eq $betaB -or $betaA -eq -1) { return $false }
+    if ($betaB -eq -1) { return $true }
+    return $betaA -lt $betaB
+}
+
+# Record the channel in the config, keeping every other setting as it was.
+function Save-Channel {
+    param([string] $Path, [string] $Channel)
+    if (-not (Test-Path $Path)) { return }
+    $lines = @(Get-Content -Path $Path | Where-Object { $_ -notmatch '^OAR_CHANNEL=' })
+    $lines + "OAR_CHANNEL=$Channel" | Set-Content -Path $Path -Encoding ASCII
+}
+
 function Install-Release {
     param([string] $Target, [string] $Version, [string] $InstallDir)
 
@@ -177,24 +225,29 @@ function Test-PortFree {
 }
 
 function Read-Port {
+    # With input redirected, or no user session at all, Read-Host keeps returning nothing, so the default
+    # would come back and fail the same way forever. Under CI that is a job hanging until its time limit.
+    $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+
     while ($true) {
         $answer = Read-Host "Which port should the web interface use? [$DefaultPort]"
         if ([string]::IsNullOrWhiteSpace($answer)) { $answer = "$DefaultPort" }
 
         $number = 0
+        $problem = $null
         if (-not [int]::TryParse($answer.Trim(), [ref] $number)) {
-            Write-Detail "'$answer' is not a number, try again."
-            continue
+            $problem = "'$answer' is not a number"
+        } elseif ($number -lt 1024 -or $number -gt 65535) {
+            $problem = "$number is not between 1024 and 65535"
+        } elseif (-not (Test-PortFree -Number $number)) {
+            $problem = "something is already listening on $number"
         }
-        if ($number -lt 1024 -or $number -gt 65535) {
-            Write-Detail 'pick a number between 1024 and 65535.'
-            continue
+
+        if (-not $problem) { return $number }
+        if (-not $interactive) {
+            Stop-WithError "$problem, and there is nobody to ask for another. Run it again with -Port <number>."
         }
-        if (-not (Test-PortFree -Number $number)) {
-            Write-Detail "something is already listening on $number, pick another."
-            continue
-        }
-        return $number
+        Write-Detail "$problem, pick another."
     }
 }
 
@@ -346,6 +399,15 @@ if (-not (Test-Path $parent)) { Stop-WithError "$parent does not exist" }
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 
+# Which releases this folder follows: a switch wins, then what it was installed with, then stable.
+if ($Beta -and $Stable) { Stop-WithError '-Beta and -Stable cannot be used together' }
+$savedChannel = (Read-Config -Path $configFile)['OAR_CHANNEL']
+$forcedChannel = if ($Beta) { 'beta' } elseif ($Stable) { 'stable' } else { $null }
+$channel = if ($forcedChannel) { $forcedChannel } elseif ($savedChannel) { $savedChannel } else { 'stable' }
+# Asking for the other channel is asking for its release, so it installs without needing -Update too.
+$previousChannel = if ($savedChannel) { $savedChannel } else { 'stable' }
+if ($forcedChannel -and $forcedChannel -ne $previousChannel) { $Update = $true }
+
 if ($Release) {
     # An explicit version is an instruction, not a preference, so it overwrites whatever is already here.
     if ($Release -notmatch '^v\d') { Stop-WithError "-Release wants a tag like v0.1.0, not $Release" }
@@ -361,12 +423,35 @@ if ($Release) {
         if ($reported) { $installed = ($reported -split '\s+')[-1] }
     } catch { }
     Write-Step "Already installed here: version $installed"
-    Write-Detail 'run with -Update to fetch the latest release'
+    if ($channel -eq 'beta') {
+        Write-Detail 'on beta releases; run with -Update to fetch the newest one'
+    } else {
+        Write-Detail 'run with -Update to fetch the latest release'
+    }
 } else {
-    $version = Get-LatestVersion
-    Write-Step "Installing $version"
-    Install-Release -Target $target -Version $version -InstallDir $installDir
-    Write-Detail 'installed'
+    $version = if ($channel -eq 'beta') { Get-NewestRelease } else { Get-LatestVersion }
+
+    $installed = $null
+    if (Test-Path $binary) {
+        try {
+            $reported = & $binary --version 2>$null
+            if ($reported) { $installed = ($reported -split '\s+')[-1] }
+        } catch { }
+    }
+
+    # Never step backwards on the way to a channel. Going from a beta back to an older stable version can
+    # drop features the data now relies on; stable 0.3.0, for one, has no logins at all, so a recorder that
+    # had accounts would quietly open up. The switch is remembered and happens once stable catches up.
+    if ($installed -and $installed -match '^\d' -and (Test-IsOlder -A $version -B $installed)) {
+        Write-Step "Keeping version $installed"
+        Write-Detail "the newest $channel release, $version, is older than what is installed here."
+        Write-Detail "Going back could lose features this version's data relies on, so it stays until a newer"
+        Write-Detail "$channel release is out, which -Update will then install."
+    } else {
+        Write-Step "Installing $version"
+        Install-Release -Target $target -Version $version -InstallDir $installDir
+        Write-Detail 'installed'
+    }
 }
 
 if ($PSBoundParameters.ContainsKey('Port')) {
@@ -387,6 +472,7 @@ if ($PSBoundParameters.ContainsKey('Port')) {
     Write-Detail 'saved'
 }
 
+Save-Channel -Path $configFile -Channel $channel
 Write-Launcher -InstallDir $installDir
 
 $settings = Read-Config -Path $configFile
@@ -398,6 +484,9 @@ Write-Detail "stop it:         $(Get-RelativePath $stopper)"
 Write-Detail "open:            http://localhost:$chosenPort"
 Write-Detail "settings:        $(Get-RelativePath $configFile)"
 Write-Detail "recordings:      $(Get-RelativePath $dataDir)"
+if ($channel -eq 'beta') {
+    Write-Detail 'releases:        beta; -Stable returns to stable ones'
+}
 Write-Host ''
 Write-Detail "To remove it completely, delete $(Get-RelativePath $installDir)."
 Write-Host ''

@@ -38,6 +38,7 @@ flowchart LR
 - [Keeping it running: Windows](#keeping-it-running-windows)
 - [Letting other machines reach it](#letting-other-machines-reach-it)
 - [Upgrading](#upgrading)
+- [Trying a beta](#trying-a-beta)
 - [Uninstalling](#uninstalling)
 - [Building from source](#building-from-source)
 - [Publishing a release](#publishing-a-release)
@@ -102,6 +103,8 @@ That reads `config`, so the port is only chosen once. Useful options:
 | `--release v0.1.0` | `-Release v0.1.0` | Install that exact version instead of the newest |
 | `--reconfigure` | `-Reconfigure` | Ask for the port again |
 | `--update` | `-Update` | Fetch a newer release over the top |
+| `--beta` | `-Beta` | Follow beta releases, see [Trying a beta](#trying-a-beta) |
+| `--stable` | `-Stable` | Go back to stable releases |
 | `--no-start` | `-NoStart` | Install and configure, but do not start |
 | `--dir <path>` | `-Dir <path>` | Install somewhere other than the current folder |
 
@@ -837,6 +840,34 @@ it yourself straight after upgrading, so that you are the one who answers. See
 
 Nothing else is written anywhere on the machine, so there is no cache or configuration file to clear.
 
+## Trying a beta
+
+New features are released as a **beta** first, with a version like `0.4.0-beta.1`, for people willing to
+try them before everybody else gets them. Betas are tested on all three platforms like any release, but
+they are new, so expect the occasional rough edge, and please
+[report what you find](#reporting-a-problem).
+
+Install or switch to betas with the installer's `--beta` option:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh -s -- --beta
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1))) -Beta
+```
+
+That installs the newest release of any kind, beta or stable, and the folder remembers the choice, so a
+later `--update` fetches the newest beta without needing `--beta` again. When a beta becomes the stable
+release, you get that too.
+
+To go back to stable releases, run the installer with `--stable` (or `-Stable`). It does not step
+backwards: if the beta you have is newer than the latest stable release, it keeps the beta, because an
+older version may not understand the newer one's data, and switches over as soon as a newer stable
+release is out. To pin one exact version instead, use `--release v0.4.0-beta.1`.
+
+A beta's data carries over into the stable release it leads up to, so there is nothing to migrate by hand.
+
 ## Uninstalling
 
 1. Stop the service, and remove it: `sudo systemctl disable --now on-air-record` on Linux,
@@ -883,6 +914,24 @@ changing the code.
 
 For maintainers. Releases are made from the GitHub web interface, and the binaries build themselves.
 
+There are two channels, one per branch:
+
+```mermaid
+flowchart LR
+    feature["feature branches"] -- "pull request" --> develop["develop<br/>beta"]
+    develop -- "pull request, when a beta has held up" --> master["master<br/>stable"]
+    develop -. "v0.4.0-beta.1, pre-release" .-> betas["beta testers<br/>install --beta"]
+    master -. "v0.4.0, release" .-> everyone["everybody else<br/>the default"]
+```
+
+- **Beta**, from `develop`: a version like `0.4.0-beta.1`, published as a GitHub **pre-release**. GitHub
+  never counts a pre-release as the latest release, so the installers do not offer it to anybody who has
+  not asked for betas.
+- **Stable**, from `master`, once `develop` has been merged into it: a version like `0.4.0`, published as a
+  normal release.
+
+The steps are the same for both; where they differ it says so below.
+
 ### 1. Decide the version
 
 The version lives in `backend/Cargo.toml` and nowhere else that matters. It is what the program reports
@@ -895,12 +944,22 @@ make release          # or: node scripts/version.mjs bump
 
 That lists everything that has landed since the last release, suggests whether it is a patch, a minor or
 a major from the commit types, and moves all four files once you choose. It prints the commit line to
-paste afterwards. Nothing is committed, tagged or pushed for you:
+paste afterwards, with the branch to push. Nothing is committed, tagged or pushed for you:
 
 ```sh
 git commit -am "chore:[OAR-56] release 0.2.0"
 git push origin master
 ```
+
+For a beta, on `develop`, choose **beta**, or skip the question:
+
+```sh
+node scripts/version.mjs bump beta       # 0.3.0 -> 0.4.0-beta.1, then 0.4.0-beta.1 -> 0.4.0-beta.2
+node scripts/version.mjs bump release    # on master, after merging develop: 0.4.0-beta.2 -> 0.4.0
+```
+
+From a stable version, the first beta previews whichever release the commits call for, so feature work
+gives `0.4.0-beta.1` rather than `0.3.1-beta.1`.
 
 You never have to work out whether a release is due: every CI run says so in its summary, and
 `make pending` answers the same question locally.
@@ -912,10 +971,14 @@ To release the version the manifest already carries, there is nothing to do here
 Go to **Releases**, then **Draft a new release**.
 
 - **Choose a tag**: type `v` followed by the version, so `v0.2.0`, and pick **Create new tag on publish**.
-- **Target**: `master`.
+- **Target**: `master` for a stable release, `develop` for a beta.
 - **Title**: the version is fine.
-- **Notes**: paste the version's section from [`CHANGELOG.md`](../CHANGELOG.md), after replacing
-  "Unreleased" in its heading with today's date and committing that.
+- **Notes**: for a stable release, paste the version's section from [`CHANGELOG.md`](../CHANGELOG.md), after
+  replacing "Unreleased" in its heading with today's date and committing that. For a beta, paste the
+  `[Unreleased]` section as it stands, and leave the file alone until the stable release.
+- **Set as a pre-release**: ticked for a beta, unticked for a stable release. The workflow checks this
+  against the version and refuses to build if they disagree, because a beta published as a normal release
+  would be handed to everybody.
 - Press **Publish release**.
 
 The tag is created for you. You never have to run `git tag`.

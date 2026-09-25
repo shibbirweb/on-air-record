@@ -23,6 +23,16 @@ Every release of On Air Record, newest first. The format follows
   Switch it on under Account settings by scanning a QR code. Ten one time recovery codes cover a lost phone;
   failing that, an admin can remove it from Settings, Access, and `on-air-record auth reset-2fa <email>`
   removes it on the host. (OAR-68)
+- **Beta releases.** New features now reach a beta first, a pre-release like `0.4.0-beta.1`, before the
+  stable release. Install or switch to betas with the installer's `--beta` option (`-Beta` on Windows). The
+  choice is remembered, so later updates stay on betas; `--stable` goes back, and never to a version older
+  than the one installed. Anybody who does not ask for betas keeps getting stable releases only. (OAR-69)
+
+### Fixed
+
+- The installers no longer hang when run with no terminal to answer, such as from a script, while the
+  default port 8080 is already in use. They stop at once and say to pass `--port` (`-Port` on Windows).
+  (OAR-70)
 
 ### Security
 
