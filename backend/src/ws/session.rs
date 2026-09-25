@@ -49,6 +49,14 @@ pub const PLAYBACK_SPEEDS: [f32; 6] = [0.25, 0.5, 1.0, 1.5, 2.0, 4.0];
 /// Never tick faster than this, whatever the speed and frame size work out to.
 const MIN_TICK: std::time::Duration = std::time::Duration::from_millis(5);
 
+/// How often an open stream checks that its listener is still allowed to hear it.
+///
+/// HTTP requests are checked one by one, but a socket is checked only at the handshake, so without this
+/// a removed account, a signed out session, or a page that connected before accounts were switched on
+/// would keep hearing the microphone for as long as the tab stayed open. Fifteen seconds bounds that
+/// without adding a database lookup per frame.
+const ACCESS_RECHECK: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Snap a requested speed onto the nearest offered one.
 fn clamp_speed(value: f32) -> f32 {
     if !value.is_finite() {
@@ -92,17 +100,24 @@ enum PlaybackStep {
 
 pub struct StreamSession {
     state: Arc<AppState>,
+    /// The session cookie the socket was opened with, re-checked every [`ACCESS_RECHECK`].
+    token: Option<String>,
 }
 
 impl StreamSession {
-    pub fn new(state: Arc<AppState>) -> Self {
-        Self { state }
+    pub fn new(state: Arc<AppState>, token: Option<String>) -> Self {
+        Self { state, token }
     }
 
-    /// Drive the connection until the client disconnects.
+    /// Drive the connection until the client disconnects or loses access.
     pub async fn run(self, socket: WebSocket) {
         let state = self.state;
+        let token = self.token;
         let (mut sink, mut source) = socket.split();
+
+        let mut access_check = tokio::time::interval(ACCESS_RECHECK);
+        // The first tick of an interval fires at once; the handshake has only just been checked.
+        access_check.tick().await;
 
         let mut mode = StreamMode::Live;
         // Where a resume should return to. A listener who paused during playback wants their position
@@ -132,9 +147,17 @@ impl StreamSession {
                 incoming = source.next() => Event::Incoming(incoming),
                 frame = receive_live(&mut live_rx), if mode == StreamMode::Live => Event::Live(frame),
                 _ = ticker.tick(), if mode == StreamMode::Playback => Event::Tick,
+                _ = access_check.tick() => Event::AccessCheck,
             };
 
             match event {
+                Event::AccessCheck => {
+                    if !still_allowed(&state, token.as_deref()) {
+                        tracing::debug!("closing a stream whose listener is no longer signed in");
+                        let _ = sink.send(Message::Close(None)).await;
+                        break;
+                    }
+                }
                 Event::Incoming(None) => break,
                 Event::Incoming(Some(Err(error))) => {
                     tracing::debug!(%error, "stream session read failed");
@@ -280,6 +303,22 @@ enum Event {
     Incoming(Option<Result<Message, axum::Error>>),
     Live(Option<Result<AudioFrame, RecvError>>),
     Tick,
+    AccessCheck,
+}
+
+/// Whether the listener behind a socket may still hear it: always without accounts, and with accounts
+/// only while their session is valid. A database hiccup keeps the stream up rather than cutting off a
+/// listener over something that is not their fault.
+fn still_allowed(state: &AppState, token: Option<&str>) -> bool {
+    let needed = crate::models::Access::Listen;
+    match state.auth.mode() {
+        Ok(mode) if mode.requires_login() => match state.auth.resolve(token) {
+            Ok(user) => crate::models::authorize(mode, user.as_ref(), needed).is_ok(),
+            Err(_) => true,
+        },
+        Ok(_) => true,
+        Err(_) => true,
+    }
 }
 
 /// Apply one client command. Returns false when the socket should be closed.
@@ -526,6 +565,97 @@ fn effective_frame_ms(state: &Arc<AppState>) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::AppConfig;
+    use crate::models::Role;
+
+    /// A full application on a throwaway data directory, removed when the guard drops.
+    struct TempState {
+        /// An `Option` only so `drop` can close the database before deleting its folder, which Windows
+        /// insists on: it will not delete a file that is still open.
+        state: Option<Arc<AppState>>,
+        data_dir: std::path::PathBuf,
+    }
+
+    impl TempState {
+        fn state(&self) -> &AppState {
+            self.state.as_deref().expect("state lives until drop")
+        }
+    }
+
+    impl Drop for TempState {
+        fn drop(&mut self) {
+            drop(self.state.take());
+            let _ = std::fs::remove_dir_all(&self.data_dir);
+        }
+    }
+
+    fn temp_state(name: &str) -> TempState {
+        let data_dir =
+            std::env::temp_dir().join(format!("oar-session-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        let config = AppConfig {
+            data_dir: data_dir.clone(),
+            static_dir: data_dir.join("no-ui"),
+            ..AppConfig::default()
+        };
+        TempState {
+            state: Some(AppState::bootstrap(config).expect("bootstrap")),
+            data_dir,
+        }
+    }
+
+    #[test]
+    fn an_open_or_undecided_stream_is_always_allowed() {
+        let temp = temp_state("open");
+        assert!(still_allowed(temp.state(), None));
+
+        temp.state().auth.choose_open().expect("open");
+        assert!(still_allowed(temp.state(), None));
+    }
+
+    #[test]
+    fn a_stream_opened_before_accounts_were_switched_on_is_cut_off() {
+        let temp = temp_state("switched-on");
+        assert!(still_allowed(temp.state(), None));
+
+        temp.state()
+            .auth
+            .set_up("owner@example.com", "a long password")
+            .expect("setup");
+        assert!(!still_allowed(temp.state(), None));
+    }
+
+    #[test]
+    fn a_stream_lasts_exactly_as_long_as_its_session() {
+        let temp = temp_state("session");
+        let auth = &temp.state().auth;
+        auth.set_up("owner@example.com", "a long password")
+            .expect("setup");
+        let listener = auth
+            .create_user("kitchen@example.com", "listen only", Role::Listener)
+            .expect("listener");
+        let client = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+
+        let signed_in = auth
+            .log_in(client, "kitchen@example.com", "listen only")
+            .expect("login")
+            .signed_in()
+            .expect("no second factor on this account");
+        assert!(still_allowed(temp.state(), Some(&signed_in.token)));
+
+        auth.log_out(&signed_in.token).expect("logout");
+        assert!(!still_allowed(temp.state(), Some(&signed_in.token)));
+
+        let again = auth
+            .log_in(client, "kitchen@example.com", "listen only")
+            .expect("second login")
+            .signed_in()
+            .expect("no second factor on this account");
+        assert!(still_allowed(temp.state(), Some(&again.token)));
+
+        auth.delete_user(listener.id).expect("remove");
+        assert!(!still_allowed(temp.state(), Some(&again.token)));
+    }
 
     #[test]
     fn speeds_snap_to_the_offered_ladder() {

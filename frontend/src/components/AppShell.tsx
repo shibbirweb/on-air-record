@@ -13,11 +13,13 @@ import { AppFooter } from '@/components/AppFooter';
 import { OnAirSign } from '@/components/OnAirSign';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { UserMenu } from '@/features/auth/UserMenu';
 import { usePolling } from '@/hooks/usePolling';
 import { useStreamEngine } from '@/hooks/useStreamEngine';
 import { useTheme } from '@/hooks/useTheme';
 import type { AudioEngine } from '@/lib/audio/audioEngine';
 import { cn } from '@/lib/utils';
+import { useCanAdminister } from '@/store/useAuthStore';
 import { useConnectionStore } from '@/store/useConnectionStore';
 import { useStatusStore } from '@/store/useStatusStore';
 import { useTransportStore } from '@/store/useTransportStore';
@@ -55,6 +57,8 @@ export function AppShell() {
   const mode = useTransportStore((state) => state.mode);
 
   const onAir = capturing && playing && mode === 'live';
+  // Listeners have nothing to change on the settings page, so it is not offered to them at all.
+  const mayAdminister = useCanAdminister();
 
   return (
     <div className="bg-background flex min-h-screen flex-col">
@@ -71,7 +75,7 @@ export function AppShell() {
           </div>
 
           <nav className="bg-muted ml-2 flex items-center gap-1 rounded-lg p-1">
-            {NAV.map((item) => (
+            {NAV.filter((item) => item.to !== '/settings' || mayAdminister).map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -109,6 +113,7 @@ export function AppShell() {
             >
               {theme === 'dark' ? <Sun /> : <Moon />}
             </Button>
+            <UserMenu />
           </div>
         </div>
       </header>

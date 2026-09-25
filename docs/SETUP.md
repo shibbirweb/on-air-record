@@ -29,6 +29,7 @@ flowchart LR
 - [Step 1: download](#step-1-download)
 - [Step 2: run it](#step-2-run-it)
 - [Step 3: open it](#step-3-open-it)
+- [Logins and accounts](#logins-and-accounts)
 - [Choosing a port](#choosing-a-port)
 - [All the settings you can pass at start up](#all-the-settings-you-can-pass-at-start-up)
 - [Where the recordings are written](#where-the-recordings-are-written)
@@ -462,6 +463,110 @@ ipconfig
 Then open `http://<that-address>:8080` from the phone, tablet or laptop. Give that address to anyone who
 needs to listen.
 
+**The first time anyone opens the page, it asks whether to protect the recorder with a login.** Be the
+first to open it, so that you are the one who answers. [Logins and accounts](#logins-and-accounts) explains
+the choice.
+
+## Logins and accounts
+
+A recorder is a microphone that is always on, so decide who can reach it. The first person to open the page
+is asked once:
+
+- **Set up accounts.** They create the admin account on the spot, and from then on everybody signs in.
+- **Keep it open.** No login, as in earlier versions. Anyone who can reach the page can listen, go back
+  through the recordings, download them, and change the settings.
+
+Keeping it open is reasonable on a network where you trust every person and every device. On a shared
+network, an office, or anywhere reachable from outside, set up accounts. Either way, pages served by other
+websites are refused, so opening some other site cannot make a browser listen in or press buttons here.
+
+The question is asked by whoever arrives first. On a network with other people on it, open the page
+yourself as soon as it starts, so that nobody answers it before you do. An existing installation that is
+upgraded asks the question too, on its next visit.
+
+### Who can do what
+
+| | Admin | Listener |
+| --- | --- | --- |
+| Listen live, scrub back, change day, play faster or slower | Yes | Yes |
+| Export audio as WAV | Yes | Yes |
+| See bookmarks and jump to them | Yes | Yes |
+| Start and stop recording, choose the microphone | Yes | No |
+| Add and remove bookmarks | Yes | No |
+| Settings, including retention and where recordings go | Yes | No |
+| Add, change and remove accounts | Yes | No |
+
+Admins add accounts under **Settings, Access**, and give each person their email and a first password;
+there is no mail server, so nobody is emailed anything. Everyone can change their own password under
+**Account settings**, in the account menu at the top right. There is always at least one admin: the last
+one cannot be removed or made a listener.
+
+### Switching accounts on later
+
+If you kept it open and change your mind, go to **Settings, Access, Set up accounts**. Anyone already
+listening is asked to sign in within a few seconds.
+
+### Two factor sign in
+
+Anyone with an account, admin or listener, can add a second step to signing in: a 6 digit code from an
+authenticator app on their phone, such as Google Authenticator, Microsoft Authenticator, Authy or
+1Password. Someone who learns the password still cannot sign in without the phone. It is recommended for
+admins, whose accounts can change everything.
+
+Each person switches it on for themselves, under **Account settings** in the account menu at the top right:
+scan the QR code with the app, type the code it then shows, and save the ten **recovery codes** it hands
+out. Each recovery code signs in once in place of a code from the phone. They are shown only at that
+moment, so download or copy them and keep them away from the phone. On a plain `http://` address the
+browser does not allow copying, so use **Download**.
+
+Codes change every 30 seconds and depend on the clock, so the host and the phone need roughly the right
+time. About 30 seconds either way is forgiven. If codes are refused that the phone is showing, check the
+host's clock first; `timedatectl` on Linux shows whether it is kept in sync.
+
+**Admins can see who has it**, as a **2FA** badge next to each account under **Settings, Access**.
+
+### A lost phone
+
+- **With a recovery code:** sign in with it in place of the code. Then set up the new phone under **Account
+  settings**, **Two factor sign in**: turn it off with your password and set it up again. **New recovery
+  codes** there replaces a set that is running low.
+- **Without recovery codes, when an admin can help:** the admin presses the shield button next to the
+  account under **Settings, Access**. The person then signs in with their password alone.
+- **The only admin, without recovery codes:** remove it on the host, like a password reset:
+
+  ```sh
+  ./on-air-record/on-air-record --data-dir ./on-air-record/data auth reset-2fa you@example.com
+  ```
+
+### Forgotten passwords
+
+- **A listener, or an admin when another admin can help:** an admin opens **Settings, Access**, and sets a
+  new password with the key button next to the account.
+- **The only admin:** reset it on the host, with the program itself, against the same data folder. It
+  prints a new password and works whether or not the service is running:
+
+  ```sh
+  ./on-air-record/on-air-record --data-dir ./on-air-record/data auth reset-password you@example.com
+  ```
+
+  For the systemd service, run it as the service account, so the database keeps its owner:
+  `sudo -u on-air-record on-air-record --data-dir /var/lib/on-air-record auth reset-password you@example.com`.
+
+- **Turn logins off completely**, deleting every account, with `auth disable` in place of
+  `auth reset-password you@example.com`. The page then works without a login, and accounts can be set up
+  again from the settings.
+
+After five wrong passwords or codes from one device, that device has to wait 15 minutes. Restarting the
+service clears the wait, which is worth knowing if it was you.
+
+### Behind a reverse proxy with HTTPS
+
+Logins work over plain HTTP on your network. If you put the recorder behind a reverse proxy that serves it
+over HTTPS, have the proxy send `X-Forwarded-Proto: https` and pass the original `Host` header through
+unchanged. The first marks the login cookie secure. The second matters because the recorder refuses
+changes from any page whose address does not match the one it was reached on, and a proxy that rewrites
+`Host` makes every request look like it came from somewhere else.
+
 ## Choosing a port
 
 8080 is only the default. Change it with `--port` on the command line:
@@ -715,9 +820,10 @@ incoming connections for `on-air-record`.
 Also check that `--host` has not been set to `127.0.0.1`, which restricts it to the machine itself on
 purpose.
 
-**Do not forward this port through your router to the internet.** There is no login of any kind. Anyone who
-can reach the address can listen to the microphone and change the settings. It is built for a network you
-trust. If you need access from elsewhere, use a VPN into that network.
+**Do not forward this port through your router to the internet**, even with accounts switched on. Without
+them, anyone who can reach the address can listen to the microphone and change the settings. With them, a
+password is all that stands between the internet and the microphone, and the service has not been built or
+tested to face the open internet. If you need access from elsewhere, use a VPN into that network.
 
 ## Upgrading
 
@@ -727,6 +833,10 @@ trust. If you need access from elsewhere, use a VPN into that network.
 
 Leave the data directory alone. Recordings, settings and bookmarks all live there and carry over. The
 database upgrades itself on first start if the new version needs it.
+
+Upgrading from a version without logins: the next visit to the page asks whether to set up accounts. Open
+it yourself straight after upgrading, so that you are the one who answers. See
+[Logins and accounts](#logins-and-accounts).
 
 Nothing else is written anywhere on the machine, so there is no cache or configuration file to clear.
 

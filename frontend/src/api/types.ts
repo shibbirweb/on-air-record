@@ -214,3 +214,39 @@ export type DirectoryTest = {
   writable: boolean;
   message: string;
 };
+
+/** Whether the install asks for a login. `undecided` behaves like `open` until the first visitor chooses. */
+export type AuthMode = 'undecided' | 'open' | 'accounts';
+
+/** Admins control everything; listeners listen, scrub and export. */
+export type Role = 'admin' | 'listener';
+
+export type User = {
+  id: number;
+  email: string;
+  role: Role;
+  createdAtMs: number;
+  /** Whether signing in also needs a code from an authenticator app. */
+  twoFactorEnabled: boolean;
+};
+
+export type AuthState = {
+  mode: AuthMode;
+  /** The signed in account. Always `null` without accounts. */
+  user: User | null;
+  /** True between a right password and the code, on an account with two factor sign in. */
+  pendingTwoFactor: boolean;
+};
+
+export type TwoFactorStatus = {
+  enabled: boolean;
+  recoveryCodesLeft: number;
+};
+
+export type TwoFactorSetup = {
+  /** The secret in base32, grouped in fours, for typing into an app that cannot scan. */
+  secretKey: string;
+  otpauthUri: string;
+  /** An SVG document. Shown as an image, never inserted as markup. */
+  qrSvg: string;
+};

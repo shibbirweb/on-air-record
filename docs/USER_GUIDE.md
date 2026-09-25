@@ -30,6 +30,7 @@ running it on macOS, Linux and Windows.
 ## Contents
 
 - [Opening it](#opening-it)
+- [Signing in](#signing-in)
 - [The screen at a glance](#the-screen-at-a-glance)
 - [The top bar](#the-top-bar)
 - [Listening to what is happening now](#listening-to-what-is-happening-now)
@@ -76,8 +77,38 @@ another number, in which case your address ends in that number instead. Either w
 included, because a browser assumes a different one if you leave it out. Changing it is covered in the
 [installation guide](SETUP.md#choosing-a-port).
 
-Anyone who can open that address can listen and can change the settings. There is no login. This is
-intended for a network you trust, such as an office or a home, and not for the open internet.
+## Signing in
+
+Whoever set the recorder up chose whether it needs a login.
+
+**If it asks you to sign in,** use the email and password the admin gave you. There are two kinds of
+account:
+
+- **Listener**: you can listen live, go back through the recordings, change day, play faster or slower,
+  jump to bookmarks, and save audio as a file. The buttons for things you cannot change, such as Record and
+  Stop, the microphone choice, adding bookmarks and the Settings page, are simply not shown to you.
+- **Admin**: everything, including the settings and the list of accounts.
+
+Your account is the person icon at the top right. It shows your email and role, and has **Account settings**
+and **Sign out**. Account settings is where you change your password and set up two factor sign in, and
+every account can open it, listeners included. Changing your password signs you out on every other device
+you use. If you forget it, ask an admin to set a new one.
+
+**Two factor sign in** adds a second step after your password: a 6 digit code from an authenticator app on
+your phone, such as Google Authenticator, Microsoft Authenticator, Authy or 1Password. To switch it on,
+open **Account settings**, press **Set up** under **Two factor sign in**, scan the QR code with the app,
+and type the code the app then shows. You are given ten recovery codes: save them somewhere safe, away from
+your phone. Each one signs you in once if your phone is lost. From then on, signing in asks for the code
+after your password. If you lose your phone and your recovery codes, an admin can switch it off for you.
+
+**If it does not ask you to sign in,** it was left open: anyone who can open the address can listen and
+change the settings. That is intended for a network you trust, such as a home, and not for the open
+internet.
+
+**If you are the first person ever to open it,** it asks you to choose. **Set up accounts** makes you the
+admin; **Keep it open** leaves it without a login. The installation guide explains the choice under
+[Logins and accounts](SETUP.md#logins-and-accounts). An open recorder can still be switched to accounts
+later from Settings.
 
 ## The screen at a glance
 
@@ -450,12 +481,27 @@ Either shorten the retention window or choose a lower bit rate. Both are in Sett
 you what each choice costs per hour.
 
 **Somebody else changed a setting.**
-There is no login, so everyone who can open the page has the same powers. Settings changes affect the
-recording for everybody.
+Settings changes affect the recording for everybody. On a recorder left open, everyone who can open the
+page has the same powers. With accounts, only admins can change settings; if that is too many people, an
+admin can make some of them listeners under Settings, Access.
+
+**I was signed out.**
+Sessions last 30 days. You are also signed out when you change your password on another device, when an
+admin sets a new password for you or removes your account, and when a recorder that was open is switched
+to accounts. Sign in again; if your password no longer works, ask an admin.
+
+**It says too many failed logins.**
+After five wrong passwords or codes, that device has to wait 15 minutes before trying again. Other devices
+are not affected.
+
+**The code from my authenticator app is refused.**
+Type the code that is showing now, not one that is about to change. If fresh codes are still refused, the
+clock on your phone or on the host computer is probably wrong; codes depend on both showing the right time.
+A recovery code works in place of the app's code.
 
 **Can I listen from outside the building?**
-Not as it stands. The service is designed for a local network and has no authentication, so it should not
-be exposed to the internet directly. Ask whoever administers it about a VPN.
+Not directly. Even with accounts, the service is designed for a local network and should not be exposed to
+the internet as it is. Ask whoever administers it about a VPN.
 
 ## Reporting a problem
 

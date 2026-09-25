@@ -7,27 +7,70 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axum::http::StatusCode;
+use axum::middleware::from_fn_with_state;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::Router;
 use tower_http::compression::CompressionLayer;
-use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
 mod embedded_ui;
+pub mod guard;
+#[cfg(test)]
+mod tests;
 
 use crate::app::AppState;
 use crate::controllers::{
-    bookmark_controller, capture_controller, device_controller, export_controller,
+    auth_controller, bookmark_controller, capture_controller, device_controller, export_controller,
     session_controller, settings_controller, status_controller, stream_controller,
-    timeline_controller,
+    timeline_controller, user_controller,
 };
 
 /// Build the complete application router.
+///
+/// Who may call each route is decided by [`guard::required_access`], not here, so this file stays a plain
+/// map of URLs onto handlers.
 pub fn build(state: Arc<AppState>) -> Router {
     let api = Router::new()
         .route("/health", get(status_controller::health))
+        .route("/auth/state", get(auth_controller::state))
+        .route("/auth/open", post(auth_controller::choose_open))
+        .route("/auth/setup", post(auth_controller::set_up))
+        .route("/auth/login", post(auth_controller::log_in))
+        .route("/auth/login/verify", post(auth_controller::verify_login))
+        .route("/auth/logout", post(auth_controller::log_out))
+        .route("/auth/password", post(auth_controller::change_password))
+        .route("/auth/two-factor", get(auth_controller::two_factor_status))
+        .route(
+            "/auth/two-factor/setup",
+            post(auth_controller::two_factor_setup),
+        )
+        .route(
+            "/auth/two-factor/enable",
+            post(auth_controller::two_factor_enable),
+        )
+        .route(
+            "/auth/two-factor/disable",
+            post(auth_controller::two_factor_disable),
+        )
+        .route(
+            "/auth/two-factor/recovery-codes",
+            post(auth_controller::recovery_codes),
+        )
+        .route(
+            "/users",
+            get(user_controller::list).post(user_controller::create),
+        )
+        .route(
+            "/users/{id}",
+            axum::routing::patch(user_controller::update).delete(user_controller::remove),
+        )
+        .route("/users/{id}/password", post(user_controller::set_password))
+        .route(
+            "/users/{id}/two-factor",
+            axum::routing::delete(user_controller::reset_two_factor),
+        )
         .route("/status", get(status_controller::status))
         .route("/capture/start", post(capture_controller::start))
         .route("/capture/stop", post(capture_controller::stop))
@@ -59,15 +102,16 @@ pub fn build(state: Arc<AppState>) -> Router {
         .route("/export", get(export_controller::download))
         .route("/export/plan", get(export_controller::plan))
         .route("/ws/stream", get(stream_controller::stream))
+        .route_layer(from_fn_with_state(state.clone(), guard::guard))
         .with_state(state.clone());
 
+    // No CORS layer, on purpose. The UI is served from this same origin and the Vite dev server proxies
+    // rather than calling across origins, so nothing legitimate needs it. A permissive policy would let
+    // any website a listener opens read recordings and change settings through their browser, which is
+    // exactly the network position a LAN only service must not lend out.
     Router::new()
         .nest("/api", api)
         .fallback_service(static_files(&state.config.static_dir))
-        // The UI is served from the same origin, so CORS is only needed for the Vite dev server and for
-        // anyone scripting the API from another page on the LAN. There is no authentication and no cookie
-        // to protect, so a permissive policy costs nothing here.
-        .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
 }
 
