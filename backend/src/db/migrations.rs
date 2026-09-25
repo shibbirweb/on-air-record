@@ -126,6 +126,31 @@ const MIGRATIONS: &[Migration] = &[
         CREATE INDEX idx_auth_sessions_user ON auth_sessions (user_id);
     "#,
     },
+    Migration {
+        version: 5,
+        name: "two factor sign in",
+        // The authenticator secret has to be readable, because the server recomputes the code to check
+        // it, so it is stored as is, like every authenticator app stores it. A pending secret waits here
+        // between showing the QR code and the first code that proves it was scanned. The last accepted
+        // time step is what stops a code being replayed while it is still on the screen.
+        //
+        // Recovery codes are one time and high entropy, so a SHA-256 of each is enough, and a used code
+        // is kept with its time rather than deleted, so "how many are left" is a count, not a guess.
+        sql: r#"
+        ALTER TABLE users ADD COLUMN totp_secret BLOB;
+        ALTER TABLE users ADD COLUMN totp_pending_secret BLOB;
+        ALTER TABLE users ADD COLUMN totp_last_step INTEGER;
+
+        CREATE TABLE recovery_codes (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+            code_hash  BLOB NOT NULL,
+            used_at_ms INTEGER
+        );
+
+        CREATE INDEX idx_recovery_codes_user ON recovery_codes (user_id);
+    "#,
+    },
 ];
 
 /// Apply every migration newer than the database's recorded version.

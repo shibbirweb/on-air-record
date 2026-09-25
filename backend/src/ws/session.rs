@@ -570,12 +570,21 @@ mod tests {
 
     /// A full application on a throwaway data directory, removed when the guard drops.
     struct TempState {
-        state: Arc<AppState>,
+        /// An `Option` only so `drop` can close the database before deleting its folder, which Windows
+        /// insists on: it will not delete a file that is still open.
+        state: Option<Arc<AppState>>,
         data_dir: std::path::PathBuf,
+    }
+
+    impl TempState {
+        fn state(&self) -> &AppState {
+            self.state.as_deref().expect("state lives until drop")
+        }
     }
 
     impl Drop for TempState {
         fn drop(&mut self) {
+            drop(self.state.take());
             let _ = std::fs::remove_dir_all(&self.data_dir);
         }
     }
@@ -590,7 +599,7 @@ mod tests {
             ..AppConfig::default()
         };
         TempState {
-            state: AppState::bootstrap(config).expect("bootstrap"),
+            state: Some(AppState::bootstrap(config).expect("bootstrap")),
             data_dir,
         }
     }
@@ -598,28 +607,28 @@ mod tests {
     #[test]
     fn an_open_or_undecided_stream_is_always_allowed() {
         let temp = temp_state("open");
-        assert!(still_allowed(&temp.state, None));
+        assert!(still_allowed(temp.state(), None));
 
-        temp.state.auth.choose_open().expect("open");
-        assert!(still_allowed(&temp.state, None));
+        temp.state().auth.choose_open().expect("open");
+        assert!(still_allowed(temp.state(), None));
     }
 
     #[test]
     fn a_stream_opened_before_accounts_were_switched_on_is_cut_off() {
         let temp = temp_state("switched-on");
-        assert!(still_allowed(&temp.state, None));
+        assert!(still_allowed(temp.state(), None));
 
-        temp.state
+        temp.state()
             .auth
             .set_up("owner@example.com", "a long password")
             .expect("setup");
-        assert!(!still_allowed(&temp.state, None));
+        assert!(!still_allowed(temp.state(), None));
     }
 
     #[test]
     fn a_stream_lasts_exactly_as_long_as_its_session() {
         let temp = temp_state("session");
-        let auth = &temp.state.auth;
+        let auth = &temp.state().auth;
         auth.set_up("owner@example.com", "a long password")
             .expect("setup");
         let listener = auth
@@ -629,19 +638,23 @@ mod tests {
 
         let signed_in = auth
             .log_in(client, "kitchen@example.com", "listen only")
-            .expect("login");
-        assert!(still_allowed(&temp.state, Some(&signed_in.token)));
+            .expect("login")
+            .signed_in()
+            .expect("no second factor on this account");
+        assert!(still_allowed(temp.state(), Some(&signed_in.token)));
 
         auth.log_out(&signed_in.token).expect("logout");
-        assert!(!still_allowed(&temp.state, Some(&signed_in.token)));
+        assert!(!still_allowed(temp.state(), Some(&signed_in.token)));
 
         let again = auth
             .log_in(client, "kitchen@example.com", "listen only")
-            .expect("second login");
-        assert!(still_allowed(&temp.state, Some(&again.token)));
+            .expect("second login")
+            .signed_in()
+            .expect("no second factor on this account");
+        assert!(still_allowed(temp.state(), Some(&again.token)));
 
         auth.delete_user(listener.id).expect("remove");
-        assert!(!still_allowed(&temp.state, Some(&again.token)));
+        assert!(!still_allowed(temp.state(), Some(&again.token)));
     }
 
     #[test]

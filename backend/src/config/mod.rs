@@ -63,6 +63,12 @@ pub enum AuthCommand {
         /// The email address the account signs in with
         email: String,
     },
+    /// Remove an account's two factor sign in, for a lost phone with no recovery codes left
+    #[command(name = "reset-2fa")]
+    ResetTwoFactor {
+        /// The email address the account signs in with
+        email: String,
+    },
     /// Switch accounts off and delete every account, returning to no login
     Disable,
 }

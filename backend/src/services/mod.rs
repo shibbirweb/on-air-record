@@ -15,8 +15,9 @@ pub mod recorder_service;
 pub mod retention_service;
 pub mod settings_service;
 pub mod timeline_service;
+pub mod totp;
 
-pub use auth_service::{AuthService, SignedIn};
+pub use auth_service::{AuthService, LoginOutcome, SignedIn, TwoFactorSetup};
 pub use bookmark_service::BookmarkService;
 pub use broadcast_hub::BroadcastHub;
 pub use capture_service::CaptureService;

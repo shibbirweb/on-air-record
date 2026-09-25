@@ -17,11 +17,14 @@ clap = { version = "4.5.61", features = ["derive"] }
 cpal = "0.16.0"
 crossbeam-channel = "0.5.16"
 futures-util = "0.3.34"
+hmac = "0.12.1"
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rust-embed = { version = "8.12.0", features = ["mime-guess"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+sha1 = "0.10.6"
 sha2 = "0.10.9"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["full"] }

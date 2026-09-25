@@ -19,7 +19,7 @@ listener calling an admin route gets `403 forbidden`; a request with no valid se
 in front of the whole API (`backend/src/routes/guard.rs`), so it also covers any route added later.
 
 Public in every mode: `GET /api/health`, `GET /api/auth/state`, `POST /api/auth/open`,
-`POST /api/auth/setup`, `POST /api/auth/login`, `POST /api/auth/logout`.
+`POST /api/auth/setup`, `POST /api/auth/login`, `POST /api/auth/login/verify`, `POST /api/auth/logout`.
 
 **Sessions** are an `oar_session` cookie: `HttpOnly`, `SameSite=Strict`, 30 days. It is marked `Secure`
 when a reverse proxy sends `X-Forwarded-Proto: https`. The token is never in a response body, and only its
@@ -76,7 +76,7 @@ What the page needs to decide between the first run question, the login page and
 signed in account, and always `null` without accounts.
 
 ```json
-{ "mode": "accounts", "user": { "id": 1, "email": "owner@example.com", "role": "admin", "createdAtMs": 1790000000000 } }
+{ "mode": "accounts", "user": { "id": 1, "email": "owner@example.com", "role": "admin", "createdAtMs": 1790000000000, "twoFactorEnabled": true }, "pendingTwoFactor": false }
 ```
 
 ### `POST /api/auth/open`
@@ -101,6 +101,39 @@ anything; it is unique regardless of case.
 Same body as setup. Returns the state and sets the cookie. A wrong email and a wrong password fail
 identically, with `401`, and take the same time. `409` without accounts.
 
+For an account with two factor sign in, a right password does **not** create a session. The answer is the
+state with `"pendingTwoFactor": true` and `user` still `null`, plus an `oar_challenge` cookie (`HttpOnly`,
+`SameSite=Strict`, `Path=/api/auth`, 5 minutes). `GET /api/auth/state` keeps answering
+`pendingTwoFactor: true` while that cookie is valid, so a reload stays on the code step.
+
+### `POST /api/auth/login/verify`
+
+The second step, with the challenge cookie. `{ "code": "123456" }` takes the 6 digit code from the
+authenticator app or, in its place, one of the recovery codes (case, spaces and the dash do not matter).
+Returns the state, sets the session cookie and clears the challenge cookie.
+
+A wrong code is `401` and counts towards the same per address lockout as a wrong password. After 5 wrong
+codes against one challenge, or once it expires, the answer is `401` asking for the password again. A code
+that already signed somebody in is refused for the rest of its 30 seconds. Codes one step either side of
+now are accepted, to forgive a phone clock that has drifted slightly.
+
+### Two factor sign in (any signed in account, for itself)
+
+Codes are RFC 6238 TOTP: HMAC-SHA1, 6 digits, 30 second steps, the only settings every authenticator app
+supports.
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `GET /api/auth/two-factor` | | `{ "enabled": true, "recoveryCodesLeft": 9 }` |
+| `POST /api/auth/two-factor/setup` | | `{ "secretKey": "GXAS 3KKW ...", "otpauthUri": "otpauth://totp/...", "qrSvg": "<svg ...>" }`. Nothing changes until `enable`. `409` if already on. |
+| `POST /api/auth/two-factor/enable` | `{ "code": "123456" }` from the app | `{ "recoveryCodes": ["abcde-fghjk", ...] }`, ten of them, sent only this once. `400` for a wrong code. |
+| `POST /api/auth/two-factor/disable` | `{ "password": "..." }` | `204`. `400` for a wrong password. |
+| `POST /api/auth/two-factor/recovery-codes` | `{ "password": "..." }` | Ten new codes; the old ones stop working. |
+
+The QR code is an SVG document meant to be shown as an image (`<img src="data:image/svg+xml,...">`), not
+inserted as markup. The secret is stored readable, because the server has to recompute codes to check
+them, as every authenticator app does; recovery codes are stored as SHA-256 hashes.
+
 ### `POST /api/auth/logout`
 
 Ends the session, if there is one, and always clears the cookie.
@@ -116,7 +149,7 @@ Change your own password. Signs the account out everywhere except this session. 
 ### `GET /api/users` (admin)
 
 ```json
-{ "users": [ { "id": 1, "email": "owner@example.com", "role": "admin", "createdAtMs": 1790000000000 } ] }
+{ "users": [ { "id": 1, "email": "owner@example.com", "role": "admin", "createdAtMs": 1790000000000, "twoFactorEnabled": false } ] }
 ```
 
 ### `POST /api/users` (admin)
@@ -136,6 +169,11 @@ with `201`. `409` if the email is taken or accounts are off.
 
 Removes the account and ends its sessions and streams. `409` for the only admin. `204`.
 
+### `DELETE /api/users/{id}/two-factor` (admin)
+
+Switches off somebody's two factor sign in and deletes their recovery codes, for a lost phone with no
+codes left. They sign in with their password alone afterwards and can set up a new app. `204`.
+
 ### Recovery on the host
 
 Somebody locked out of the web interface uses the program itself, against the same data directory, whether
@@ -143,6 +181,7 @@ or not the service is running:
 
 ```sh
 on-air-record auth reset-password owner@example.com   # prints a generated password
+on-air-record auth reset-2fa owner@example.com         # two factor sign in off for that account
 on-air-record auth disable                            # accounts off, every account deleted
 ```
 

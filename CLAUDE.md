@@ -34,7 +34,7 @@ The underlying commands:
 ```sh
 # Backend, from backend/
 cargo run                                    # API on :8080, reads ../frontend/dist
-cargo test                                   # ~257 unit and router tests
+cargo test                                   # ~282 unit and router tests
 cargo test day_bounds                        # single test by name substring
 cargo test --lib services::playback_service  # one module
 cargo clippy --all-targets -- -D warnings    # must be clean
@@ -43,7 +43,7 @@ cargo fmt
 # Frontend, from frontend/
 npm run dev      # Vite on :5173, proxies /api and the WebSocket to :8080
 npm run build    # tsc -b then vite build, writes dist/, which a release backend embeds
-npm test         # Vitest, ~99 tests
+npm test         # Vitest, ~101 tests
 npm run lint     # oxlint
 ```
 
@@ -141,8 +141,14 @@ HTTP so it is tested exhaustively.
 - **Argon2 runs off the runtime.** Hashing takes tens of milliseconds by design; controllers call it
   through `auth_controller::blocking`. Debug builds optimise `argon2` and `blake2` via `[profile.dev]` so
   tests and `cargo run` logins stay fast.
-- **Recovery is on the host**: `on-air-record auth reset-password <email>` and `auth disable`, in
-  `cli.rs`. There is no mail server; shell access is what proves ownership.
+- **Two factor sign in is TOTP** (RFC 6238, HMAC-SHA1, 6 digits, 30 s), written out in
+  `services/totp.rs` and tested against the RFC's own vectors. A right password on such an account
+  creates no session: `log_in` returns `LoginOutcome::SecondFactorRequired` and an in memory challenge in
+  the `oar_challenge` cookie, and `verify_second_factor` turns it into a session. Keep it that way; a
+  session must never exist before the code is checked. `totp_last_step` blocks replays, and wrong codes
+  feed the same throttle as wrong passwords.
+- **Recovery is on the host**: `on-air-record auth reset-password <email>`, `auth reset-2fa <email>` and
+  `auth disable`, in `cli.rs`. There is no mail server; shell access is what proves ownership.
 
 The frontend's `AuthGate` renders before `AppShell`, so with accounts on no audio engine or socket exists
 until somebody is signed in. Any `401` calls the handler registered with `setUnauthorizedHandler`, which

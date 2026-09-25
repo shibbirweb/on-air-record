@@ -494,14 +494,46 @@ upgraded asks the question too, on its next visit.
 | Add, change and remove accounts | Yes | No |
 
 Admins add accounts under **Settings, Access**, and give each person their email and a first password;
-there is no mail server, so nobody is emailed anything. Everyone can change their own password from the
-account menu at the top right. There is always at least one admin: the last one cannot be removed or made a
-listener.
+there is no mail server, so nobody is emailed anything. Everyone can change their own password under
+**Account settings**, in the account menu at the top right. There is always at least one admin: the last
+one cannot be removed or made a listener.
 
 ### Switching accounts on later
 
 If you kept it open and change your mind, go to **Settings, Access, Set up accounts**. Anyone already
 listening is asked to sign in within a few seconds.
+
+### Two factor sign in
+
+Anyone with an account, admin or listener, can add a second step to signing in: a 6 digit code from an
+authenticator app on their phone, such as Google Authenticator, Microsoft Authenticator, Authy or
+1Password. Someone who learns the password still cannot sign in without the phone. It is recommended for
+admins, whose accounts can change everything.
+
+Each person switches it on for themselves, under **Account settings** in the account menu at the top right:
+scan the QR code with the app, type the code it then shows, and save the ten **recovery codes** it hands
+out. Each recovery code signs in once in place of a code from the phone. They are shown only at that
+moment, so download or copy them and keep them away from the phone. On a plain `http://` address the
+browser does not allow copying, so use **Download**.
+
+Codes change every 30 seconds and depend on the clock, so the host and the phone need roughly the right
+time. About 30 seconds either way is forgiven. If codes are refused that the phone is showing, check the
+host's clock first; `timedatectl` on Linux shows whether it is kept in sync.
+
+**Admins can see who has it**, as a **2FA** badge next to each account under **Settings, Access**.
+
+### A lost phone
+
+- **With a recovery code:** sign in with it in place of the code. Then set up the new phone under **Account
+  settings**, **Two factor sign in**: turn it off with your password and set it up again. **New recovery
+  codes** there replaces a set that is running low.
+- **Without recovery codes, when an admin can help:** the admin presses the shield button next to the
+  account under **Settings, Access**. The person then signs in with their password alone.
+- **The only admin, without recovery codes:** remove it on the host, like a password reset:
+
+  ```sh
+  ./on-air-record/on-air-record --data-dir ./on-air-record/data auth reset-2fa you@example.com
+  ```
 
 ### Forgotten passwords
 
@@ -521,8 +553,8 @@ listening is asked to sign in within a few seconds.
   `auth reset-password you@example.com`. The page then works without a login, and accounts can be set up
   again from the settings.
 
-After five wrong passwords from one device, that device has to wait 15 minutes. Restarting the service
-clears the wait, which is worth knowing if it was you.
+After five wrong passwords or codes from one device, that device has to wait 15 minutes. Restarting the
+service clears the wait, which is worth knowing if it was you.
 
 ### Behind a reverse proxy with HTTPS
 

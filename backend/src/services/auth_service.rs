@@ -14,12 +14,15 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
+use qrcode::render::svg;
+use qrcode::QrCode;
 use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{AuthMode, Role, User};
 use crate::repositories::AuthRepository;
+use crate::services::totp;
 use crate::util::time::now_ms;
 
 /// How long a login lasts. Long, because the typical client is a kitchen tablet left on the control room.
@@ -37,15 +40,65 @@ pub const PASSWORD_LENGTH: (usize, usize) = (8, 128);
 const MAX_FAILURES: u32 = 5;
 const FAILURE_WINDOW_MS: i64 = 15 * 60 * 1000;
 
+/// How long somebody has, after a right password, to type the code from their authenticator app.
+const CHALLENGE_TTL_MS: i64 = 5 * 60 * 1000;
+
+/// Wrong codes allowed against one pending sign in before the password has to be typed again.
+const MAX_CODE_ATTEMPTS: u32 = 5;
+
+/// Recovery codes handed out when two factor sign in is switched on, each usable once.
+pub const RECOVERY_CODE_COUNT: usize = 10;
+
+/// The name an authenticator app lists the account under.
+const ISSUER: &str = "On Air Record";
+
 /// What the controllers need after a successful login: who it is, and the cookie value to hand back.
 pub struct SignedIn {
     pub user: User,
     pub token: String,
 }
 
+/// What a right password leads to.
+pub enum LoginOutcome {
+    /// No second factor on the account, so a session exists already.
+    SignedIn(SignedIn),
+    /// The account has two factor sign in. No session exists yet; the challenge token, kept in its own
+    /// short lived cookie, is what the code is checked against.
+    SecondFactorRequired { challenge: String },
+}
+
+impl LoginOutcome {
+    /// The session, when the password alone was enough.
+    pub fn signed_in(self) -> Option<SignedIn> {
+        match self {
+            Self::SignedIn(signed_in) => Some(signed_in),
+            Self::SecondFactorRequired { .. } => None,
+        }
+    }
+}
+
+/// What the page shows while somebody sets up their authenticator app.
+pub struct TwoFactorSetup {
+    /// The secret in base32, in groups of four, for typing in when the QR code cannot be scanned.
+    pub secret_key: String,
+    pub otpauth_uri: String,
+    /// The `otpauth` URI as a QR code, an SVG document.
+    pub qr_svg: String,
+}
+
+/// A sign in that got the password right and is waiting for the code.
+///
+/// In memory, like the throttle: a restart only means typing the password again.
+struct Challenge {
+    user_id: i64,
+    expires_at_ms: i64,
+    attempts: u32,
+}
+
 pub struct AuthService {
     repository: Arc<AuthRepository>,
     throttle: LoginThrottle,
+    challenges: Mutex<HashMap<Vec<u8>, Challenge>>,
 }
 
 impl AuthService {
@@ -53,6 +106,7 @@ impl AuthService {
         Self {
             repository,
             throttle: LoginThrottle::default(),
+            challenges: Mutex::new(HashMap::new()),
         }
     }
 
@@ -104,7 +158,9 @@ impl AuthService {
         Ok(SignedIn { user, token })
     }
 
-    pub fn log_in(&self, client: IpAddr, email: &str, password: &str) -> AppResult<SignedIn> {
+    /// Check an email and password. With two factor sign in on the account, the right password only
+    /// earns a challenge, and [`Self::verify_second_factor`] turns it into a session.
+    pub fn log_in(&self, client: IpAddr, email: &str, password: &str) -> AppResult<LoginOutcome> {
         if self.mode()? != AuthMode::Accounts {
             return Err(AppError::conflict(
                 "this install has no accounts, so there is nothing to log in to",
@@ -134,6 +190,14 @@ impl AuthService {
             }
         };
 
+        if user.two_factor {
+            // The password was right, but the throttle keeps counting until the code is too, so the
+            // password cannot be used to reset the count for somebody guessing codes.
+            let challenge = self.start_challenge(user.id, now);
+            tracing::info!(email = %user.email, "password accepted, waiting for the code");
+            return Ok(LoginOutcome::SecondFactorRequired { challenge });
+        }
+
         self.throttle.record_success(client);
         if let Err(error) = self.repository.delete_expired_sessions(now) {
             tracing::warn!(%error, "could not prune expired sessions");
@@ -141,7 +205,271 @@ impl AuthService {
 
         let token = self.start_session(user.id)?;
         tracing::info!(email = %user.email, "logged in");
+        Ok(LoginOutcome::SignedIn(SignedIn { user, token }))
+    }
+
+    /// Whether a challenge cookie still has a sign in waiting on it, so a reload keeps showing the code
+    /// step rather than dropping back to the password.
+    pub fn has_pending_challenge(&self, challenge: Option<&str>) -> bool {
+        let Some(challenge) = challenge else {
+            return false;
+        };
+        let Ok(challenges) = self.challenges.lock() else {
+            return false;
+        };
+        challenges
+            .get(&hash_token(challenge))
+            .is_some_and(|pending| pending.expires_at_ms > now_ms())
+    }
+
+    /// Finish a sign in with a code from the authenticator app, or with a recovery code.
+    pub fn verify_second_factor(
+        &self,
+        client: IpAddr,
+        challenge: &str,
+        code: &str,
+    ) -> AppResult<SignedIn> {
+        let now = now_ms();
+        self.throttle.check(client, now)?;
+
+        let challenge_hash = hash_token(challenge);
+        let user_id = {
+            let mut challenges = self
+                .challenges
+                .lock()
+                .map_err(|_| AppError::internal("the sign in list lock was poisoned"))?;
+            match challenges.get(&challenge_hash) {
+                Some(pending) if pending.expires_at_ms > now => pending.user_id,
+                _ => {
+                    challenges.remove(&challenge_hash);
+                    return Err(AppError::unauthorized(
+                        "that sign in has expired; enter your password again",
+                    ));
+                }
+            }
+        };
+
+        if !self.check_second_factor(user_id, code, now)? {
+            self.throttle.record_failure(client, now);
+            let exhausted = self.count_code_attempt(&challenge_hash);
+            tracing::info!(%client, user_id, "wrong sign in code");
+            return Err(AppError::unauthorized(if exhausted {
+                "too many wrong codes; enter your password again"
+            } else {
+                "that code is not right"
+            }));
+        }
+
+        if let Ok(mut challenges) = self.challenges.lock() {
+            challenges.remove(&challenge_hash);
+        }
+        self.throttle.record_success(client);
+
+        let user = self
+            .repository
+            .find_user(user_id)?
+            .ok_or_else(|| AppError::unauthorized("enter your password again"))?;
+        let token = self.start_session(user.id)?;
+        tracing::info!(email = %user.email, "logged in with a second factor");
         Ok(SignedIn { user, token })
+    }
+
+    /// Forget a pending sign in, when somebody goes back from the code step.
+    pub fn abandon_challenge(&self, challenge: &str) {
+        if let Ok(mut challenges) = self.challenges.lock() {
+            challenges.remove(&hash_token(challenge));
+        }
+    }
+
+    /// Whether the account has two factor sign in, and how many recovery codes are still unused.
+    pub fn two_factor_status(&self, user_id: i64) -> AppResult<(bool, i64)> {
+        let enabled = self.repository.find_totp(user_id)?.secret.is_some();
+        let left = if enabled {
+            self.repository.recovery_codes_left(user_id)?
+        } else {
+            0
+        };
+        Ok((enabled, left))
+    }
+
+    /// Start setting up an authenticator app: make a secret, keep it pending, and describe it for the QR
+    /// code. Nothing changes for signing in until [`Self::enable_two_factor`] sees a code from it.
+    pub fn begin_two_factor_setup(&self, user: &User) -> AppResult<TwoFactorSetup> {
+        if self.repository.find_totp(user.id)?.secret.is_some() {
+            return Err(AppError::conflict(
+                "two factor sign in is already on; turn it off first to move it to a new app",
+            ));
+        }
+
+        let secret = totp::generate_secret();
+        self.repository.set_pending_totp(user.id, &secret)?;
+
+        let otpauth_uri = totp::otpauth_uri(ISSUER, &user.email, &secret);
+        let qr_svg = QrCode::new(otpauth_uri.as_bytes())
+            .map_err(|error| AppError::internal(format!("could not draw the QR code: {error}")))?
+            .render::<svg::Color>()
+            .min_dimensions(200, 200)
+            .quiet_zone(true)
+            .build();
+
+        Ok(TwoFactorSetup {
+            secret_key: totp::grouped(&totp::base32_encode(&secret)),
+            otpauth_uri,
+            qr_svg,
+        })
+    }
+
+    /// Confirm the app was set up by checking one code from it, then switch two factor sign in on and
+    /// return the recovery codes. They are shown once; only their hashes are kept.
+    pub fn enable_two_factor(&self, user_id: i64, code: &str) -> AppResult<Vec<String>> {
+        let record = self.repository.find_totp(user_id)?;
+        if record.secret.is_some() {
+            return Err(AppError::conflict("two factor sign in is already on"));
+        }
+        let Some(pending) = record.pending_secret else {
+            return Err(AppError::conflict(
+                "start the setup again; there is no QR code waiting to be confirmed",
+            ));
+        };
+
+        let Some(step) = totp::verify(&pending, code, now_ms(), None) else {
+            return Err(AppError::bad_request(
+                "that code is not right; check the app shows On Air Record and try the current code",
+            ));
+        };
+
+        let codes = generate_recovery_codes();
+        let hashes: Vec<Vec<u8>> = codes.iter().map(|code| hash_recovery_code(code)).collect();
+        self.repository
+            .enable_totp(user_id, &pending, step, &hashes)?;
+        tracing::info!(user_id, "two factor sign in switched on");
+        Ok(codes)
+    }
+
+    /// Switch your own two factor sign in off. Needs the password, so a browser left signed in cannot be
+    /// used to remove the second factor.
+    pub fn disable_two_factor(&self, user_id: i64, password: &str) -> AppResult<()> {
+        self.confirm_password(user_id, password)?;
+        self.repository.disable_totp(user_id)?;
+        tracing::info!(user_id, "two factor sign in switched off");
+        Ok(())
+    }
+
+    /// Replace your recovery codes, for when they are used up or may have been seen.
+    pub fn regenerate_recovery_codes(
+        &self,
+        user_id: i64,
+        password: &str,
+    ) -> AppResult<Vec<String>> {
+        self.confirm_password(user_id, password)?;
+        if self.repository.find_totp(user_id)?.secret.is_none() {
+            return Err(AppError::conflict(
+                "two factor sign in is off, so there are no recovery codes",
+            ));
+        }
+
+        let codes = generate_recovery_codes();
+        let hashes: Vec<Vec<u8>> = codes.iter().map(|code| hash_recovery_code(code)).collect();
+        self.repository.replace_recovery_codes(user_id, &hashes)?;
+        Ok(codes)
+    }
+
+    /// An admin removing somebody else's second factor, because they lost their phone and their codes.
+    pub fn reset_two_factor(&self, user_id: i64) -> AppResult<()> {
+        if self.repository.find_user(user_id)?.is_none() {
+            return Err(AppError::not_found(format!("no account with id {user_id}")));
+        }
+        self.repository.disable_totp(user_id)?;
+        tracing::info!(user_id, "two factor sign in removed by an admin");
+        Ok(())
+    }
+
+    /// Remove an account's second factor from the host. For the recovery command.
+    pub fn reset_two_factor_by_email(&self, email: &str) -> AppResult<()> {
+        let credentials = self
+            .repository
+            .find_credentials(email)?
+            .ok_or_else(|| AppError::not_found(format!("no account uses {}", email.trim())))?;
+        if !credentials.user.two_factor {
+            return Err(AppError::conflict(format!(
+                "{} does not have two factor sign in",
+                credentials.user.email
+            )));
+        }
+        self.repository.disable_totp(credentials.user.id)
+    }
+
+    fn confirm_password(&self, user_id: i64, password: &str) -> AppResult<()> {
+        let credentials = self
+            .repository
+            .find_credentials_by_id(user_id)?
+            .ok_or_else(|| AppError::unauthorized("sign in again"))?;
+        if !verify_password(&credentials.password_hash, password) {
+            return Err(AppError::bad_request("the password is not right"));
+        }
+        Ok(())
+    }
+
+    /// Check a code from the app, or failing that a recovery code. A six digit entry is only ever an app
+    /// code; anything else is only ever a recovery code, so one cannot be mistaken for the other.
+    fn check_second_factor(&self, user_id: i64, code: &str, now: i64) -> AppResult<bool> {
+        let compact: String = code.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+
+        if compact.len() == 6 && compact.chars().all(|c| c.is_ascii_digit()) {
+            let record = self.repository.find_totp(user_id)?;
+            let Some(secret) = record.secret else {
+                return Ok(false);
+            };
+            return match totp::verify(&secret, &compact, now, record.last_step) {
+                Some(step) => {
+                    self.repository.record_totp_step(user_id, step)?;
+                    Ok(true)
+                }
+                None => Ok(false),
+            };
+        }
+
+        let used = self
+            .repository
+            .use_recovery_code(user_id, &hash_recovery_code(code))?;
+        if used {
+            tracing::info!(user_id, "signed in with a recovery code");
+        }
+        Ok(used)
+    }
+
+    fn start_challenge(&self, user_id: i64, now: i64) -> String {
+        let token = generate_token();
+        if let Ok(mut challenges) = self.challenges.lock() {
+            challenges.retain(|_, pending| pending.expires_at_ms > now);
+            challenges.insert(
+                hash_token(&token),
+                Challenge {
+                    user_id,
+                    expires_at_ms: now + CHALLENGE_TTL_MS,
+                    attempts: 0,
+                },
+            );
+        }
+        token
+    }
+
+    /// Count a wrong code against a challenge. True when that used up its attempts and it was dropped.
+    fn count_code_attempt(&self, challenge_hash: &[u8]) -> bool {
+        let Ok(mut challenges) = self.challenges.lock() else {
+            return true;
+        };
+        let exhausted = match challenges.get_mut(challenge_hash) {
+            Some(pending) => {
+                pending.attempts += 1;
+                pending.attempts >= MAX_CODE_ATTEMPTS
+            }
+            None => true,
+        };
+        if exhausted {
+            challenges.remove(challenge_hash);
+        }
+        exhausted
     }
 
     pub fn log_out(&self, token: &str) -> AppResult<()> {
@@ -378,6 +706,35 @@ pub fn hash_token(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
 }
 
+/// Recovery codes, as `xxxxx-xxxxx` from an alphabet with no look alike characters. Ten characters from
+/// 31 is about 49 bits each, far past guessing within the login throttle, so a plain SHA-256 of each is a
+/// safe way to store them.
+fn generate_recovery_codes() -> Vec<String> {
+    const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
+    (0..RECOVERY_CODE_COUNT)
+        .map(|_| {
+            let mut bytes = [0u8; 10];
+            OsRng.fill_bytes(&mut bytes);
+            let chars: String = bytes
+                .iter()
+                .map(|byte| ALPHABET[*byte as usize % ALPHABET.len()] as char)
+                .collect();
+            format!("{}-{}", &chars[..5], &chars[5..])
+        })
+        .collect()
+}
+
+/// Hash a recovery code as typed: case, spaces and the dash do not matter, so a code read off paper is
+/// accepted however it was copied.
+fn hash_recovery_code(typed: &str) -> Vec<u8> {
+    let normalised: String = typed
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    Sha256::digest(normalised.as_bytes()).to_vec()
+}
+
 /// A password for the recovery command to print: readable aloud, no characters that are easy to confuse.
 fn generate_password() -> String {
     const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -452,7 +809,9 @@ mod tests {
 
         let again = service
             .log_in(CLIENT, "OWNER@example.com", "a long password")
-            .expect("login");
+            .expect("login")
+            .signed_in()
+            .expect("no second factor on this account");
         assert_ne!(again.token, signed_in.token);
     }
 
@@ -512,7 +871,9 @@ mod tests {
             .expect("setup");
         let elsewhere = service
             .log_in(CLIENT, "owner@example.com", "a long password")
-            .expect("second login");
+            .expect("second login")
+            .signed_in()
+            .expect("no second factor on this account");
 
         assert!(service
             .change_own_password(here.user.id, "wrong", "a new password", &here.token)
@@ -572,5 +933,293 @@ mod tests {
         assert_eq!(first.len(), 64);
         assert!(first.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(first, second);
+    }
+
+    /// An account with an authenticator app set up, as a phone would have it: the service, the signed
+    /// in session, the secret the phone holds, and the recovery codes shown at setup.
+    struct TwoFactorAccount {
+        service: AuthService,
+        user: User,
+        secret: Vec<u8>,
+        recovery_codes: Vec<String>,
+    }
+
+    fn with_two_factor() -> TwoFactorAccount {
+        let service = service();
+        let signed_in = service
+            .set_up("owner@example.com", "a long password")
+            .expect("setup");
+        let setup = service
+            .begin_two_factor_setup(&signed_in.user)
+            .expect("begin");
+        let secret = totp::base32_decode(&setup.secret_key);
+        let code = format!("{:06}", totp::code_at(&secret, totp::step_at(now_ms())));
+        let recovery_codes = service
+            .enable_two_factor(signed_in.user.id, &code)
+            .expect("enable");
+        TwoFactorAccount {
+            service,
+            user: signed_in.user,
+            secret,
+            recovery_codes,
+        }
+    }
+
+    /// The code a phone shows one step from now: inside the accepted window, and newer than the code
+    /// that confirmed setup, so it is not refused as a replay.
+    fn next_code(secret: &[u8]) -> String {
+        format!("{:06}", totp::code_at(secret, totp::step_at(now_ms()) + 1))
+    }
+
+    fn challenge_for(account: &TwoFactorAccount) -> String {
+        match account
+            .service
+            .log_in(CLIENT, "owner@example.com", "a long password")
+            .expect("password")
+        {
+            LoginOutcome::SecondFactorRequired { challenge } => challenge,
+            LoginOutcome::SignedIn(_) => panic!("the password alone should not be enough"),
+        }
+    }
+
+    #[test]
+    fn setup_shows_a_scannable_secret_and_changes_nothing_until_confirmed() {
+        let service = service();
+        let signed_in = service
+            .set_up("owner@example.com", "a long password")
+            .expect("setup");
+        let setup = service
+            .begin_two_factor_setup(&signed_in.user)
+            .expect("begin");
+
+        assert!(setup
+            .otpauth_uri
+            .starts_with("otpauth://totp/On%20Air%20Record:owner@example.com?secret="));
+        assert!(setup.qr_svg.contains("<svg"));
+        assert_eq!(
+            service
+                .two_factor_status(signed_in.user.id)
+                .expect("status"),
+            (false, 0)
+        );
+
+        // Not confirmed yet, so the password alone still signs in.
+        let outcome = service
+            .log_in(CLIENT, "owner@example.com", "a long password")
+            .expect("login");
+        assert!(outcome.signed_in().is_some());
+
+        assert!(service
+            .enable_two_factor(signed_in.user.id, "000000")
+            .is_err());
+    }
+
+    #[test]
+    fn once_on_the_password_alone_is_not_enough() {
+        let account = with_two_factor();
+        assert_eq!(account.recovery_codes.len(), RECOVERY_CODE_COUNT);
+        assert_eq!(
+            account
+                .service
+                .two_factor_status(account.user.id)
+                .expect("status"),
+            (true, RECOVERY_CODE_COUNT as i64)
+        );
+
+        let challenge = challenge_for(&account);
+        assert!(account.service.has_pending_challenge(Some(&challenge)));
+
+        let signed_in = account
+            .service
+            .verify_second_factor(CLIENT, &challenge, &next_code(&account.secret))
+            .expect("code");
+        assert_eq!(signed_in.user.id, account.user.id);
+        assert!(signed_in.user.two_factor);
+        assert!(!account.service.has_pending_challenge(Some(&challenge)));
+    }
+
+    #[test]
+    fn a_code_that_signed_somebody_in_cannot_sign_in_again() {
+        let account = with_two_factor();
+        let code = next_code(&account.secret);
+
+        let first = challenge_for(&account);
+        account
+            .service
+            .verify_second_factor(CLIENT, &first, &code)
+            .expect("first use");
+
+        let second = challenge_for(&account);
+        assert!(account
+            .service
+            .verify_second_factor(CLIENT, &second, &code)
+            .is_err());
+    }
+
+    #[test]
+    fn a_recovery_code_works_once_however_it_is_typed() {
+        let account = with_two_factor();
+        let code = account.recovery_codes[0].to_uppercase().replace('-', " ");
+
+        let challenge = challenge_for(&account);
+        account
+            .service
+            .verify_second_factor(CLIENT, &challenge, &code)
+            .expect("recovery code");
+        assert_eq!(
+            account
+                .service
+                .two_factor_status(account.user.id)
+                .expect("status")
+                .1,
+            RECOVERY_CODE_COUNT as i64 - 1
+        );
+
+        let again = challenge_for(&account);
+        assert!(account
+            .service
+            .verify_second_factor(CLIENT, &again, &account.recovery_codes[0])
+            .is_err());
+    }
+
+    #[test]
+    fn five_wrong_codes_end_the_pending_sign_in() {
+        let account = with_two_factor();
+        let challenge = challenge_for(&account);
+
+        for _ in 0..MAX_CODE_ATTEMPTS {
+            assert!(account
+                .service
+                .verify_second_factor(CLIENT, &challenge, "000000")
+                .is_err());
+        }
+        // Even the right code is too late now; the password has to be typed again.
+        let late =
+            account
+                .service
+                .verify_second_factor(CLIENT, &challenge, &next_code(&account.secret));
+        assert!(late.is_err());
+        assert!(!account.service.has_pending_challenge(Some(&challenge)));
+    }
+
+    #[test]
+    fn wrong_codes_count_towards_the_address_lockout() {
+        let account = with_two_factor();
+        // The failed attempts are spread over fresh challenges, so it is the address, not the challenge,
+        // that runs out.
+        for _ in 0..MAX_FAILURES {
+            let challenge = challenge_for(&account);
+            let _ = account
+                .service
+                .verify_second_factor(CLIENT, &challenge, "000000");
+        }
+        assert!(matches!(
+            account
+                .service
+                .log_in(CLIENT, "owner@example.com", "a long password"),
+            Err(AppError::TooManyRequests(_))
+        ));
+    }
+
+    #[test]
+    fn an_unknown_or_abandoned_challenge_is_refused() {
+        let account = with_two_factor();
+        assert!(account
+            .service
+            .verify_second_factor(CLIENT, "made-up", &next_code(&account.secret))
+            .is_err());
+
+        let challenge = challenge_for(&account);
+        account.service.abandon_challenge(&challenge);
+        assert!(account
+            .service
+            .verify_second_factor(CLIENT, &challenge, &next_code(&account.secret))
+            .is_err());
+    }
+
+    #[test]
+    fn turning_it_off_needs_the_password() {
+        let account = with_two_factor();
+        assert!(account
+            .service
+            .disable_two_factor(account.user.id, "wrong password")
+            .is_err());
+
+        account
+            .service
+            .disable_two_factor(account.user.id, "a long password")
+            .expect("disable");
+        assert_eq!(
+            account
+                .service
+                .two_factor_status(account.user.id)
+                .expect("status"),
+            (false, 0)
+        );
+        assert!(account
+            .service
+            .log_in(CLIENT, "owner@example.com", "a long password")
+            .expect("login")
+            .signed_in()
+            .is_some());
+    }
+
+    #[test]
+    fn new_recovery_codes_replace_the_old_ones() {
+        let account = with_two_factor();
+        assert!(account
+            .service
+            .regenerate_recovery_codes(account.user.id, "wrong password")
+            .is_err());
+
+        let fresh = account
+            .service
+            .regenerate_recovery_codes(account.user.id, "a long password")
+            .expect("regenerate");
+        assert_eq!(fresh.len(), RECOVERY_CODE_COUNT);
+
+        let challenge = challenge_for(&account);
+        assert!(account
+            .service
+            .verify_second_factor(CLIENT, &challenge, &account.recovery_codes[1])
+            .is_err());
+        let challenge = challenge_for(&account);
+        assert!(account
+            .service
+            .verify_second_factor(CLIENT, &challenge, &fresh[0])
+            .is_ok());
+    }
+
+    #[test]
+    fn a_second_setup_is_refused_while_it_is_on() {
+        let account = with_two_factor();
+        assert!(matches!(
+            account.service.begin_two_factor_setup(&account.user),
+            Err(AppError::Conflict(_))
+        ));
+    }
+
+    #[test]
+    fn an_admin_or_the_host_can_remove_a_lost_second_factor() {
+        let account = with_two_factor();
+        account
+            .service
+            .reset_two_factor(account.user.id)
+            .expect("admin reset");
+        assert!(
+            !account
+                .service
+                .two_factor_status(account.user.id)
+                .expect("status")
+                .0
+        );
+
+        assert!(matches!(
+            account
+                .service
+                .reset_two_factor_by_email("owner@example.com"),
+            Err(AppError::Conflict(_))
+        ));
+        assert!(account.service.reset_two_factor(9_999).is_err());
     }
 }

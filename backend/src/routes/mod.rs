@@ -38,8 +38,26 @@ pub fn build(state: Arc<AppState>) -> Router {
         .route("/auth/open", post(auth_controller::choose_open))
         .route("/auth/setup", post(auth_controller::set_up))
         .route("/auth/login", post(auth_controller::log_in))
+        .route("/auth/login/verify", post(auth_controller::verify_login))
         .route("/auth/logout", post(auth_controller::log_out))
         .route("/auth/password", post(auth_controller::change_password))
+        .route("/auth/two-factor", get(auth_controller::two_factor_status))
+        .route(
+            "/auth/two-factor/setup",
+            post(auth_controller::two_factor_setup),
+        )
+        .route(
+            "/auth/two-factor/enable",
+            post(auth_controller::two_factor_enable),
+        )
+        .route(
+            "/auth/two-factor/disable",
+            post(auth_controller::two_factor_disable),
+        )
+        .route(
+            "/auth/two-factor/recovery-codes",
+            post(auth_controller::recovery_codes),
+        )
         .route(
             "/users",
             get(user_controller::list).post(user_controller::create),
@@ -49,6 +67,10 @@ pub fn build(state: Arc<AppState>) -> Router {
             axum::routing::patch(user_controller::update).delete(user_controller::remove),
         )
         .route("/users/{id}/password", post(user_controller::set_password))
+        .route(
+            "/users/{id}/two-factor",
+            axum::routing::delete(user_controller::reset_two_factor),
+        )
         .route("/status", get(status_controller::status))
         .route("/capture/start", post(capture_controller::start))
         .route("/capture/stop", post(capture_controller::stop))

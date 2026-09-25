@@ -25,6 +25,9 @@ struct TestApp {
 
 impl Drop for TestApp {
     fn drop(&mut self) {
+        // Close the database before deleting its folder. Windows will not delete a file that is still
+        // open, so the router, which owns the application and its connection, has to go first.
+        drop(std::mem::replace(&mut self.router, Router::new()));
         let _ = std::fs::remove_dir_all(&self.data_dir);
     }
 }
@@ -46,7 +49,10 @@ fn app(name: &str) -> TestApp {
 
 struct Reply {
     status: StatusCode,
+    /// A session cookie the response set.
     cookie: Option<String>,
+    /// A two factor challenge cookie the response set.
+    challenge: Option<String>,
     body: Value,
 }
 
@@ -68,12 +74,30 @@ async fn call_from(
     body: Option<Value>,
     origin: Option<&str>,
 ) -> Reply {
+    let cookie_header = cookie.map(|token| format!("oar_session={token}"));
+    send(app, method, path, cookie_header, body, origin).await
+}
+
+/// Call with the two factor challenge cookie, for the code step of a sign in.
+async fn call_with_challenge(app: &TestApp, path: &str, challenge: &str, body: Value) -> Reply {
+    let cookie_header = Some(format!("oar_challenge={challenge}"));
+    send(app, Method::POST, path, cookie_header, Some(body), None).await
+}
+
+async fn send(
+    app: &TestApp,
+    method: Method,
+    path: &str,
+    cookie_header: Option<String>,
+    body: Option<Value>,
+    origin: Option<&str>,
+) -> Reply {
     let mut request = Request::builder()
         .method(method)
         .uri(path)
         .header(HOST, HOST_NAME);
-    if let Some(cookie) = cookie {
-        request = request.header(COOKIE, format!("oar_session={cookie}"));
+    if let Some(cookie_header) = cookie_header {
+        request = request.header(COOKIE, cookie_header);
     }
     if let Some(origin) = origin {
         request = request.header(ORIGIN, origin);
@@ -88,14 +112,19 @@ async fn call_from(
 
     let response = app.router.clone().oneshot(request).await.expect("response");
     let status = response.status();
-    let cookie = response
-        .headers()
-        .get(SET_COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("oar_session="))
-        .and_then(|value| value.split(';').next())
-        .map(str::to_string)
-        .filter(|value| !value.is_empty());
+    let set_cookie = |name: &str| {
+        response
+            .headers()
+            .get_all(SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .filter_map(|value| value.strip_prefix(&format!("{name}=")))
+            .filter_map(|value| value.split(';').next())
+            .find(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let cookie = set_cookie("oar_session");
+    let challenge = set_cookie("oar_challenge");
     let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("body");
@@ -104,6 +133,7 @@ async fn call_from(
     Reply {
         status,
         cookie,
+        challenge,
         body,
     }
 }
@@ -553,4 +583,239 @@ async fn accounts_cannot_be_added_to_an_install_that_stayed_open() {
     )
     .await;
     assert_eq!(reply.status, StatusCode::CONFLICT);
+}
+
+/// Switch on two factor sign in for the signed in account over HTTP, the way the page does, and
+/// return the secret the phone would hold plus the recovery codes shown at the end.
+async fn enable_two_factor(app: &TestApp, session: &str) -> (Vec<u8>, Vec<String>) {
+    let setup = call(
+        app,
+        Method::POST,
+        "/api/auth/two-factor/setup",
+        Some(session),
+        None,
+    )
+    .await;
+    assert_eq!(setup.status, StatusCode::OK, "{}", setup.body);
+    assert!(setup.body["qrSvg"]
+        .as_str()
+        .is_some_and(|svg| svg.contains("<svg")));
+    let secret =
+        crate::services::totp::base32_decode(setup.body["secretKey"].as_str().expect("key"));
+
+    let enabled = call(
+        app,
+        Method::POST,
+        "/api/auth/two-factor/enable",
+        Some(session),
+        Some(json!({ "code": code_for(&secret, 0) })),
+    )
+    .await;
+    assert_eq!(enabled.status, StatusCode::OK, "{}", enabled.body);
+    let codes = enabled.body["recoveryCodes"]
+        .as_array()
+        .expect("codes")
+        .iter()
+        .filter_map(|code| code.as_str().map(str::to_string))
+        .collect();
+    (secret, codes)
+}
+
+/// What the phone shows `steps_ahead` steps from now.
+fn code_for(secret: &[u8], steps_ahead: i64) -> String {
+    use crate::services::totp::{code_at, step_at};
+    let now = crate::util::time::now_ms();
+    format!("{:06}", code_at(secret, step_at(now) + steps_ahead))
+}
+
+#[tokio::test]
+async fn with_two_factor_on_a_password_only_earns_the_code_step() {
+    let app = app("two-factor-login");
+    let admin = set_up_admin(&app).await;
+    let (secret, _) = enable_two_factor(&app, &admin).await;
+
+    let password = log_in(&app, "owner@example.com", "a long password").await;
+    assert_eq!(password.status, StatusCode::OK);
+    assert_eq!(password.body["pendingTwoFactor"], true);
+    assert_eq!(password.body["user"], Value::Null);
+    assert_eq!(password.cookie, None, "no session before the code");
+    let challenge = password.challenge.expect("challenge cookie");
+
+    // A reload during the code step still shows the code step.
+    let state = send(
+        &app,
+        Method::GET,
+        "/api/auth/state",
+        Some(format!("oar_challenge={challenge}")),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(state.body["pendingTwoFactor"], true);
+
+    let wrong = call_with_challenge(
+        &app,
+        "/api/auth/login/verify",
+        &challenge,
+        json!({ "code": "000000" }),
+    )
+    .await;
+    assert_eq!(wrong.status, StatusCode::UNAUTHORIZED);
+
+    let verified = call_with_challenge(
+        &app,
+        "/api/auth/login/verify",
+        &challenge,
+        json!({ "code": code_for(&secret, 1) }),
+    )
+    .await;
+    assert_eq!(verified.status, StatusCode::OK, "{}", verified.body);
+    assert_eq!(verified.body["user"]["twoFactorEnabled"], true);
+    let session = verified.cookie.expect("session after the code");
+
+    let status = call(&app, Method::GET, "/api/status", Some(&session), None).await;
+    assert_eq!(status.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_code_step_cannot_be_skipped_or_reached_without_a_password() {
+    let app = app("two-factor-skip");
+    let admin = set_up_admin(&app).await;
+    let (secret, _) = enable_two_factor(&app, &admin).await;
+
+    // No challenge cookie at all.
+    let without = call(
+        &app,
+        Method::POST,
+        "/api/auth/login/verify",
+        None,
+        Some(json!({ "code": code_for(&secret, 1) })),
+    )
+    .await;
+    assert_eq!(without.status, StatusCode::UNAUTHORIZED);
+
+    // A challenge cookie is not a session.
+    let password = log_in(&app, "owner@example.com", "a long password").await;
+    let challenge = password.challenge.expect("challenge");
+    let as_session = call(&app, Method::GET, "/api/status", Some(&challenge), None).await;
+    assert_eq!(as_session.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_recovery_code_signs_in_when_the_phone_is_gone() {
+    let app = app("two-factor-recovery");
+    let admin = set_up_admin(&app).await;
+    let (_, recovery_codes) = enable_two_factor(&app, &admin).await;
+    assert_eq!(recovery_codes.len(), 10);
+
+    let challenge = log_in(&app, "owner@example.com", "a long password")
+        .await
+        .challenge
+        .expect("challenge");
+    let verified = call_with_challenge(
+        &app,
+        "/api/auth/login/verify",
+        &challenge,
+        json!({ "code": recovery_codes[3] }),
+    )
+    .await;
+    assert_eq!(verified.status, StatusCode::OK);
+    let session = verified.cookie.expect("session");
+
+    let status = call(
+        &app,
+        Method::GET,
+        "/api/auth/two-factor",
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(status.body["enabled"], true);
+    assert_eq!(status.body["recoveryCodesLeft"], 9);
+}
+
+#[tokio::test]
+async fn a_listener_manages_their_own_second_factor_and_an_admin_can_remove_it() {
+    let app = app("two-factor-listener");
+    let admin = set_up_admin(&app).await;
+    let listener_id = add_account(
+        &app,
+        &admin,
+        "kitchen@example.com",
+        "listen only",
+        "listener",
+    )
+    .await;
+    let listener = log_in(&app, "kitchen@example.com", "listen only")
+        .await
+        .cookie
+        .expect("cookie");
+
+    enable_two_factor(&app, &listener).await;
+
+    let wrong_password = call(
+        &app,
+        Method::POST,
+        "/api/auth/two-factor/disable",
+        Some(&listener),
+        Some(json!({ "password": "not it" })),
+    )
+    .await;
+    assert_eq!(wrong_password.status, StatusCode::BAD_REQUEST);
+
+    // A listener cannot remove anybody's second factor, their own included, through the admin route.
+    let not_theirs = call(
+        &app,
+        Method::DELETE,
+        &format!("/api/users/{listener_id}/two-factor"),
+        Some(&listener),
+        None,
+    )
+    .await;
+    assert_eq!(not_theirs.status, StatusCode::FORBIDDEN);
+
+    let listed = call(&app, Method::GET, "/api/users", Some(&admin), None).await;
+    let entry = listed.body["users"]
+        .as_array()
+        .and_then(|users| users.iter().find(|user| user["id"] == listener_id))
+        .cloned()
+        .expect("listed");
+    assert_eq!(entry["twoFactorEnabled"], true);
+
+    let removed = call(
+        &app,
+        Method::DELETE,
+        &format!("/api/users/{listener_id}/two-factor"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(removed.status, StatusCode::NO_CONTENT);
+
+    let login = log_in(&app, "kitchen@example.com", "listen only").await;
+    assert!(login.cookie.is_some(), "password alone works again");
+    assert_eq!(login.body["pendingTwoFactor"], false);
+}
+
+#[tokio::test]
+async fn logging_out_from_the_code_step_forgets_it() {
+    let app = app("two-factor-back");
+    let admin = set_up_admin(&app).await;
+    let (secret, _) = enable_two_factor(&app, &admin).await;
+
+    let challenge = log_in(&app, "owner@example.com", "a long password")
+        .await
+        .challenge
+        .expect("challenge");
+    let back = call_with_challenge(&app, "/api/auth/logout", &challenge, json!({})).await;
+    assert_eq!(back.status, StatusCode::OK);
+
+    let after = call_with_challenge(
+        &app,
+        "/api/auth/login/verify",
+        &challenge,
+        json!({ "code": code_for(&secret, 1) }),
+    )
+    .await;
+    assert_eq!(after.status, StatusCode::UNAUTHORIZED);
 }

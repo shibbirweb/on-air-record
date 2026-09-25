@@ -89,9 +89,17 @@ account:
   Stop, the microphone choice, adding bookmarks and the Settings page, are simply not shown to you.
 - **Admin**: everything, including the settings and the list of accounts.
 
-Your account is the person icon at the top right. It shows your email and role, and has **Change password**
-and **Sign out**. Changing your password signs you out on every other device you use. If you forget it, ask
-an admin to set a new one.
+Your account is the person icon at the top right. It shows your email and role, and has **Account settings**
+and **Sign out**. Account settings is where you change your password and set up two factor sign in, and
+every account can open it, listeners included. Changing your password signs you out on every other device
+you use. If you forget it, ask an admin to set a new one.
+
+**Two factor sign in** adds a second step after your password: a 6 digit code from an authenticator app on
+your phone, such as Google Authenticator, Microsoft Authenticator, Authy or 1Password. To switch it on,
+open **Account settings**, press **Set up** under **Two factor sign in**, scan the QR code with the app,
+and type the code the app then shows. You are given ten recovery codes: save them somewhere safe, away from
+your phone. Each one signs you in once if your phone is lost. From then on, signing in asks for the code
+after your password. If you lose your phone and your recovery codes, an admin can switch it off for you.
 
 **If it does not ask you to sign in,** it was left open: anyone who can open the address can listen and
 change the settings. That is intended for a network you trust, such as a home, and not for the open
@@ -483,8 +491,13 @@ admin sets a new password for you or removes your account, and when a recorder t
 to accounts. Sign in again; if your password no longer works, ask an admin.
 
 **It says too many failed logins.**
-After five wrong passwords, that device has to wait 15 minutes before trying again. Other devices are not
-affected.
+After five wrong passwords or codes, that device has to wait 15 minutes before trying again. Other devices
+are not affected.
+
+**The code from my authenticator app is refused.**
+Type the code that is showing now, not one that is about to change. If fresh codes are still refused, the
+clock on your phone or on the host computer is probably wrong; codes depend on both showing the right time.
+A recovery code works in place of the app's code.
 
 **Can I listen from outside the building?**
 Not directly. Even with accounts, the service is designed for a local network and should not be exposed to

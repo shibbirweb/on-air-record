@@ -27,19 +27,25 @@ use crate::models::{authorize, Access, Denied};
 fn is_public(path: &str) -> bool {
     matches!(
         path,
-        "/health" | "/auth/state" | "/auth/open" | "/auth/setup" | "/auth/login" | "/auth/logout"
+        "/health"
+            | "/auth/state"
+            | "/auth/open"
+            | "/auth/setup"
+            | "/auth/login"
+            | "/auth/login/verify"
+            | "/auth/logout"
     )
 }
 
 /// What a route needs, given how it is called.
 ///
 /// Reading is listening and changing is administering, with named exceptions: a listener may change
-/// their own password, and only an admin may see the list of accounts.
+/// their own password and their own second factor, and only an admin may see the list of accounts.
 pub fn required_access(method: &Method, path: &str) -> Option<Access> {
     if is_public(path) {
         return None;
     }
-    if path == "/auth/password" {
+    if path == "/auth/password" || path.starts_with("/auth/two-factor") {
         return Some(Access::Listen);
     }
     if path == "/users" || path.starts_with("/users/") {
@@ -139,6 +145,15 @@ mod tests {
 
     #[test]
     fn the_named_exceptions_hold() {
+        assert_eq!(required_access(&Method::POST, "/auth/login/verify"), None);
+        assert_eq!(
+            required_access(&Method::POST, "/auth/two-factor/enable"),
+            Some(Access::Listen)
+        );
+        assert_eq!(
+            required_access(&Method::DELETE, "/users/2/two-factor"),
+            Some(Access::Administer)
+        );
         assert_eq!(
             required_access(&Method::POST, "/auth/password"),
             Some(Access::Listen)

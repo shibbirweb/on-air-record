@@ -74,6 +74,8 @@ pub struct User {
     pub email: String,
     pub role: Role,
     pub created_at_ms: i64,
+    /// Whether signing in also needs a code from an authenticator app.
+    pub two_factor: bool,
 }
 
 /// What a route needs from whoever is calling it.
@@ -124,6 +126,7 @@ mod tests {
             email: "someone@example.com".to_string(),
             role,
             created_at_ms: 0,
+            two_factor: false,
         }
     }
 

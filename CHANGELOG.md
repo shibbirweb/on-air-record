@@ -13,11 +13,16 @@ Every release of On Air Record, newest first. The format follows
   the recorder open. With accounts, everybody signs in with an email and password. Admins control
   everything; listeners can listen, scrub back, change day and export, and the controls they cannot use
   are not shown to them. Admins add, change and remove accounts under Settings, Access, and everyone can
-  change their own password from the account menu. An existing installation asks the question on its next
-  visit, so open the page yourself straight after upgrading. (OAR-67)
+  change their own password under Account settings, in the account menu. An existing installation asks
+  the question on its next visit, so open the page yourself straight after upgrading. (OAR-67)
 - **Recovery from the host.** `on-air-record auth reset-password <email>` prints a new password for an
   account, and `on-air-record auth disable` switches logins off. Both work while the service is running.
   (OAR-67)
+- **Two factor sign in.** Anyone with an account can add a 6 digit code from an authenticator app, such as
+  Google Authenticator, Microsoft Authenticator, Authy or 1Password, as a second step after their password.
+  Switch it on under Account settings by scanning a QR code. Ten one time recovery codes cover a lost phone;
+  failing that, an admin can remove it from Settings, Access, and `on-air-record auth reset-2fa <email>`
+  removes it on the host. (OAR-68)
 
 ### Security
 
@@ -27,7 +32,8 @@ Every release of On Air Record, newest first. The format follows
   (OAR-67)
 - Removing an account, changing a password or signing out now ends that person's live stream within 15
   seconds, not only their next page load. (OAR-67)
-- After five wrong passwords, a device must wait 15 minutes before trying again. (OAR-67)
+- After five wrong passwords, a device must wait 15 minutes before trying again. (OAR-67) Wrong two factor
+  codes count towards the same limit, and a code cannot be used twice. (OAR-68)
 
 ## [0.3.0] - 2026-09-26
 

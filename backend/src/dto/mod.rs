@@ -13,8 +13,9 @@ pub mod status_dto;
 pub mod timeline_dto;
 
 pub use auth_dto::{
-    AuthStateResponse, ChangePasswordRequest, CreateUserRequest, CredentialsRequest,
-    SetPasswordRequest, UpdateUserRequest, UserDto, UserListResponse,
+    AuthStateResponse, ChangePasswordRequest, CodeRequest, ConfirmPasswordRequest,
+    CreateUserRequest, CredentialsRequest, RecoveryCodesResponse, SetPasswordRequest,
+    TwoFactorSetupResponse, TwoFactorStatusResponse, UpdateUserRequest, UserDto, UserListResponse,
 };
 pub use bookmark_dto::{
     BookmarkDto, BookmarkListResponse, CreateBookmarkRequest, UpdateBookmarkRequest,

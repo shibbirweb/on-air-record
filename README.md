@@ -157,8 +157,9 @@ through every part of the interface with screenshots.
 - **Bounded disk use.** A retention window is enforced by a janitor that prunes expired audio, its index
   rows, and the directories they leave behind, so an always on recorder cannot quietly fill the disk.
 - **Optional logins.** The first visit asks whether to set up accounts or keep it open. With accounts,
-  admins control the recorder and listeners can only listen, scrub and export. Either way, pages served by
-  other websites cannot listen in or press buttons. Still built for a local network, not the open internet.
+  admins control the recorder and listeners can only listen, scrub and export, and anyone can add two
+  factor sign in with an authenticator app. Either way, pages served by other websites cannot listen in or
+  press buttons. Still built for a local network, not the open internet.
 
 ## How it works
 
@@ -411,12 +412,12 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Other websites refused for state changes and the stream, in every mode
 - [x] Failed login throttling per client address
 - [x] Account management page, self service password change, and host side recovery commands
-- [ ] Two factor sign in with an authenticator app
+- [x] Two factor sign in with an authenticator app, recovery codes, and admin and host side reset
 
 ## Testing
 
 ```bash
-cd backend  && cargo test                              # 257 unit and router tests
+cd backend  && cargo test                              # 282 unit and router tests
 cd backend  && cargo clippy --all-targets -- -D warnings
 cd frontend && npm test                                # Vitest, framework free logic
 cd frontend && npm run lint

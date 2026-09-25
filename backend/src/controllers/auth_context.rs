@@ -31,7 +31,7 @@ impl Caller {
         match (&self.user, &self.token) {
             (Some(user), Some(token)) => Ok((user, token)),
             _ => Err(AppError::conflict(
-                "this install has no accounts, so there is no password to change",
+                "this install has no accounts, so there is no account to change",
             )),
         }
     }
@@ -39,13 +39,44 @@ impl Caller {
 
 /// Read our session cookie out of the `Cookie` header.
 pub fn session_token(headers: &HeaderMap) -> Option<String> {
+    read_cookie(headers, SESSION_COOKIE)
+}
+
+/// The pending two factor sign in, between a right password and the code.
+pub const CHALLENGE_COOKIE: &str = "oar_challenge";
+
+pub fn challenge_token(headers: &HeaderMap) -> Option<String> {
+    read_cookie(headers, CHALLENGE_COOKIE)
+}
+
+/// The `Set-Cookie` value for a pending two factor sign in.
+///
+/// Same protections as the session cookie, but it lasts only as long as the code may be typed, and is
+/// only sent to the login routes, because nothing else has any use for it.
+pub fn challenge_cookie(token: &str, headers: &HeaderMap) -> HeaderValue {
+    let secure = if behind_https(headers) {
+        "; Secure"
+    } else {
+        ""
+    };
+    let value = format!(
+        "{CHALLENGE_COOKIE}={token}; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=300{secure}"
+    );
+    HeaderValue::from_str(&value).unwrap_or_else(|_| clear_challenge_cookie())
+}
+
+pub fn clear_challenge_cookie() -> HeaderValue {
+    HeaderValue::from_static("oar_challenge=; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=0")
+}
+
+fn read_cookie(headers: &HeaderMap, wanted: &str) -> Option<String> {
     headers
         .get_all(COOKIE)
         .iter()
         .filter_map(|value| value.to_str().ok())
         .flat_map(|value| value.split(';'))
         .filter_map(|pair| pair.trim().split_once('='))
-        .find(|(name, _)| *name == SESSION_COOKIE)
+        .find(|(name, _)| *name == wanted)
         .map(|(_, value)| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }

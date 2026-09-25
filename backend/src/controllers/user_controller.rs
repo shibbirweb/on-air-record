@@ -66,3 +66,15 @@ pub async fn remove(
     state.auth.delete_user(user_id)?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// `DELETE /api/users/:id/two-factor`
+///
+/// For somebody who lost both their phone and their recovery codes. They sign in with just their
+/// password afterwards and can set up a new app.
+pub async fn reset_two_factor(
+    State(state): State<Arc<AppState>>,
+    Path(user_id): Path<i64>,
+) -> AppResult<StatusCode> {
+    state.auth.reset_two_factor(user_id)?;
+    Ok(StatusCode::NO_CONTENT)
+}

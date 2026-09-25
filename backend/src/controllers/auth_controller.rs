@@ -1,4 +1,4 @@
-//! First run choice, setup, login and logout.
+//! First run choice, setup, login, the second factor, and logout.
 
 use std::sync::Arc;
 
@@ -9,11 +9,15 @@ use axum::{Extension, Json};
 
 use crate::app::AppState;
 use crate::controllers::auth_context::{
-    clear_session_cookie, session_cookie, session_token, Caller, ClientAddr,
+    challenge_cookie, challenge_token, clear_challenge_cookie, clear_session_cookie,
+    session_cookie, session_token, Caller, ClientAddr,
 };
-use crate::dto::{AuthStateResponse, ChangePasswordRequest, CredentialsRequest};
+use crate::dto::{
+    AuthStateResponse, ChangePasswordRequest, CodeRequest, ConfirmPasswordRequest,
+    CredentialsRequest, RecoveryCodesResponse, TwoFactorSetupResponse, TwoFactorStatusResponse,
+};
 use crate::error::{AppError, AppResult};
-use crate::services::SignedIn;
+use crate::services::{LoginOutcome, SignedIn};
 
 /// `GET /api/auth/state`
 pub async fn state(
@@ -23,6 +27,7 @@ pub async fn state(
     Ok(Json(current_state(
         &state,
         session_token(&headers).as_deref(),
+        challenge_token(&headers).as_deref(),
     )?))
 }
 
@@ -31,7 +36,7 @@ pub async fn state(
 /// Answers the first run question with "keep it open". Refused once the question has been answered.
 pub async fn choose_open(State(state): State<Arc<AppState>>) -> AppResult<Json<AuthStateResponse>> {
     state.auth.choose_open()?;
-    Ok(Json(current_state(&state, None)?))
+    Ok(Json(current_state(&state, None, None)?))
 }
 
 /// `POST /api/auth/setup`
@@ -49,6 +54,9 @@ pub async fn set_up(
 }
 
 /// `POST /api/auth/login`
+///
+/// With two factor sign in on the account, a right password answers `pendingTwoFactor: true` and sets
+/// only the short lived challenge cookie; `POST /api/auth/login/verify` finishes the sign in.
 pub async fn log_in(
     State(state): State<Arc<AppState>>,
     ClientAddr(client): ClientAddr,
@@ -56,15 +64,44 @@ pub async fn log_in(
     Json(request): Json<CredentialsRequest>,
 ) -> AppResult<(HeaderMap, Json<AuthStateResponse>)> {
     let auth = state.auth.clone();
-    let signed_in =
-        blocking(move || auth.log_in(client, &request.email, &request.password)).await?;
+    let outcome = blocking(move || auth.log_in(client, &request.email, &request.password)).await?;
+
+    match outcome {
+        LoginOutcome::SignedIn(signed_in) => signed_in_response(&state, &headers, signed_in),
+        LoginOutcome::SecondFactorRequired { challenge } => {
+            let mut response_headers = HeaderMap::new();
+            response_headers.insert(SET_COOKIE, challenge_cookie(&challenge, &headers));
+            Ok((
+                response_headers,
+                Json(current_state(&state, None, Some(&challenge))?),
+            ))
+        }
+    }
+}
+
+/// `POST /api/auth/login/verify`
+///
+/// The second step: a code from the authenticator app, or a recovery code, against the pending sign in
+/// in the challenge cookie.
+pub async fn verify_login(
+    State(state): State<Arc<AppState>>,
+    ClientAddr(client): ClientAddr,
+    headers: HeaderMap,
+    Json(request): Json<CodeRequest>,
+) -> AppResult<(HeaderMap, Json<AuthStateResponse>)> {
+    let challenge = challenge_token(&headers).ok_or_else(|| {
+        AppError::unauthorized("that sign in has expired; enter your password again")
+    })?;
+    let signed_in = state
+        .auth
+        .verify_second_factor(client, &challenge, &request.code)?;
     signed_in_response(&state, &headers, signed_in)
 }
 
 /// `POST /api/auth/logout`
 ///
-/// Always succeeds and always clears the cookie, so a client can use it to recover from any confused
-/// state without first working out whether it is signed in.
+/// Always succeeds and always clears both cookies, so a client can use it to recover from any confused
+/// state, including backing out of the code step, without first working out where it is.
 pub async fn log_out(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -72,10 +109,14 @@ pub async fn log_out(
     if let Some(token) = session_token(&headers) {
         state.auth.log_out(&token)?;
     }
+    if let Some(challenge) = challenge_token(&headers) {
+        state.auth.abandon_challenge(&challenge);
+    }
 
     let mut response_headers = HeaderMap::new();
-    response_headers.insert(SET_COOKIE, clear_session_cookie());
-    Ok((response_headers, Json(current_state(&state, None)?)))
+    response_headers.append(SET_COOKIE, clear_session_cookie());
+    response_headers.append(SET_COOKIE, clear_challenge_cookie());
+    Ok((response_headers, Json(current_state(&state, None, None)?)))
 }
 
 /// `POST /api/auth/password`
@@ -101,30 +142,111 @@ pub async fn change_password(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn current_state(state: &AppState, token: Option<&str>) -> AppResult<AuthStateResponse> {
+/// `GET /api/auth/two-factor`
+pub async fn two_factor_status(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+) -> AppResult<Json<TwoFactorStatusResponse>> {
+    let (user, _) = caller.signed_in()?;
+    let (enabled, recovery_codes_left) = state.auth.two_factor_status(user.id)?;
+    Ok(Json(TwoFactorStatusResponse {
+        enabled,
+        recovery_codes_left,
+    }))
+}
+
+/// `POST /api/auth/two-factor/setup`
+///
+/// A new secret, as a QR code and as a key to type. Nothing changes for signing in until
+/// `POST /api/auth/two-factor/enable` sees a code from the app.
+pub async fn two_factor_setup(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+) -> AppResult<Json<TwoFactorSetupResponse>> {
+    let (user, _) = caller.signed_in()?;
+    let setup = state.auth.begin_two_factor_setup(user)?;
+    Ok(Json(TwoFactorSetupResponse {
+        secret_key: setup.secret_key,
+        otpauth_uri: setup.otpauth_uri,
+        qr_svg: setup.qr_svg,
+    }))
+}
+
+/// `POST /api/auth/two-factor/enable`
+pub async fn two_factor_enable(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<CodeRequest>,
+) -> AppResult<Json<RecoveryCodesResponse>> {
+    let (user, _) = caller.signed_in()?;
+    let recovery_codes = state.auth.enable_two_factor(user.id, &request.code)?;
+    Ok(Json(RecoveryCodesResponse { recovery_codes }))
+}
+
+/// `POST /api/auth/two-factor/disable`
+pub async fn two_factor_disable(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<ConfirmPasswordRequest>,
+) -> AppResult<StatusCode> {
+    let (user, _) = caller.signed_in()?;
+    let user_id = user.id;
+    let auth = state.auth.clone();
+    blocking(move || auth.disable_two_factor(user_id, &request.password)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /api/auth/two-factor/recovery-codes`
+pub async fn recovery_codes(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Json(request): Json<ConfirmPasswordRequest>,
+) -> AppResult<Json<RecoveryCodesResponse>> {
+    let (user, _) = caller.signed_in()?;
+    let user_id = user.id;
+    let auth = state.auth.clone();
+    let recovery_codes =
+        blocking(move || auth.regenerate_recovery_codes(user_id, &request.password)).await?;
+    Ok(Json(RecoveryCodesResponse { recovery_codes }))
+}
+
+fn current_state(
+    state: &AppState,
+    token: Option<&str>,
+    challenge: Option<&str>,
+) -> AppResult<AuthStateResponse> {
     let mode = state.auth.mode()?;
     let user = if mode.requires_login() {
         state.auth.resolve(token)?
     } else {
         None
     };
+    let pending_two_factor =
+        mode.requires_login() && user.is_none() && state.auth.has_pending_challenge(challenge);
+
     Ok(AuthStateResponse {
         mode,
         user: user.map(Into::into),
+        pending_two_factor,
     })
 }
 
+/// Set the session cookie, and clear any challenge cookie, since the sign in it was waiting on is done.
 fn signed_in_response(
     state: &AppState,
     request_headers: &HeaderMap,
     signed_in: SignedIn,
 ) -> AppResult<(HeaderMap, Json<AuthStateResponse>)> {
     let mut headers = HeaderMap::new();
-    headers.insert(
+    headers.append(
         SET_COOKIE,
         session_cookie(&signed_in.token, request_headers),
     );
-    Ok((headers, Json(current_state(state, Some(&signed_in.token))?)))
+    headers.append(SET_COOKIE, clear_challenge_cookie());
+    Ok((
+        headers,
+        Json(current_state(state, Some(&signed_in.token), None)?),
+    ))
 }
 
 /// Run password hashing off the async runtime.

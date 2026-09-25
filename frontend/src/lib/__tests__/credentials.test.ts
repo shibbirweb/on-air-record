@@ -34,7 +34,13 @@ describe('passwordProblem', () => {
 });
 
 describe('canAdminister', () => {
-  const user = (role: User['role']): User => ({ id: 1, email: 'a@b.c', role, createdAtMs: 0 });
+  const user = (role: User['role']): User => ({
+    id: 1,
+    email: 'a@b.c',
+    role,
+    createdAtMs: 0,
+    twoFactorEnabled: false,
+  });
 
   it('lets anyone change things without accounts', () => {
     expect(canAdminister('open', null)).toBe(true);

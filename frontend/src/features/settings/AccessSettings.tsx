@@ -6,7 +6,7 @@
  * anybody wants to review.
  */
 
-import { KeyRound, Loader2, Trash2, UserPlus } from 'lucide-react';
+import { KeyRound, Loader2, ShieldCheck, ShieldOff, Trash2, UserPlus } from 'lucide-react';
 import { useEffect, useId, useState, type FormEvent } from 'react';
 
 import { ApiError } from '@/api/client';
@@ -151,7 +151,9 @@ function AccountsManager() {
 function AccountRow({ user, isMe }: { user: User; isMe: boolean }) {
   const updateRole = useAccountsStore((state) => state.updateRole);
   const remove = useAccountsStore((state) => state.remove);
+  const resetTwoFactor = useAccountsStore((state) => state.resetTwoFactor);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const [settingPassword, setSettingPassword] = useState(false);
 
   return (
@@ -162,6 +164,12 @@ function AccountRow({ user, isMe }: { user: User; isMe: boolean }) {
           {isMe && (
             <Badge variant="outline" className="ml-2 font-normal">
               you
+            </Badge>
+          )}
+          {user.twoFactorEnabled && (
+            <Badge variant="secondary" className="ml-2 gap-1 font-normal" title="Signs in with a code from an authenticator app">
+              <ShieldCheck className="size-3" />
+              2FA
             </Badge>
           )}
         </p>
@@ -186,6 +194,36 @@ function AccountRow({ user, isMe }: { user: User; isMe: boolean }) {
           >
             <KeyRound />
           </Button>
+          {/* For a lost phone with no recovery codes left. They sign in with their password alone and
+              set up a new app. */}
+          {user.twoFactorEnabled &&
+            (confirmingReset ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    setConfirmingReset(false);
+                    void resetTwoFactor(user.id);
+                  }}
+                >
+                  Remove 2FA
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setConfirmingReset(false)}>
+                  Keep
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Remove two factor sign in for ${user.email}`}
+                title="Remove two factor sign in, for a lost phone"
+                onClick={() => setConfirmingReset(true)}
+              >
+                <ShieldOff />
+              </Button>
+            ))}
           {confirmingRemove ? (
             <>
               <Button size="sm" variant="destructive" onClick={() => void remove(user.id)}>

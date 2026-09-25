@@ -22,6 +22,8 @@ type AccountsState = {
   /** Throws, so the password dialog can show the problem next to its field. */
   setPassword: (userId: number, password: string) => Promise<void>;
   remove: (userId: number) => Promise<void>;
+  /** Remove somebody's second factor, for a lost phone with no recovery codes left. */
+  resetTwoFactor: (userId: number) => Promise<void>;
 };
 
 const describe = (cause: unknown) =>
@@ -65,6 +67,16 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
   remove: async (userId) => {
     try {
       await api.deleteUser(userId);
+      set({ error: null });
+    } catch (cause) {
+      set({ error: describe(cause) });
+    }
+    await get().refresh();
+  },
+
+  resetTwoFactor: async (userId) => {
+    try {
+      await api.resetUserTwoFactor(userId);
       set({ error: null });
     } catch (cause) {
       set({ error: describe(cause) });

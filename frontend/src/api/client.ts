@@ -22,6 +22,8 @@ import type {
   Role,
   Storage,
   TimelineRange,
+  TwoFactorSetup,
+  TwoFactorStatus,
   User,
 } from './types';
 
@@ -90,8 +92,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // The body was not the documented envelope. The status line is still worth reporting.
     }
 
-    // A failed login is also a 401, but it is the answer to the form, not news that a session ended.
-    if (response.status === 401 && !path.startsWith('/auth/')) {
+    // A failed login or code is also a 401, but it is the answer to the form, not news that a session
+    // ended. Every other 401, the account's own two factor routes included, means the session is gone.
+    if (response.status === 401 && !path.startsWith('/auth/login') && path !== '/auth/setup') {
       onUnauthorized?.();
     }
 
@@ -124,7 +127,39 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
 
+  /** The second step of a sign in: a code from the authenticator app, or a recovery code. */
+  verifyLogin: (code: string) =>
+    request<AuthState>('/auth/login/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
   logOut: () => request<AuthState>('/auth/logout', { method: 'POST' }),
+
+  twoFactorStatus: () => request<TwoFactorStatus>('/auth/two-factor'),
+
+  beginTwoFactorSetup: () => request<TwoFactorSetup>('/auth/two-factor/setup', { method: 'POST' }),
+
+  enableTwoFactor: (code: string) =>
+    request<{ recoveryCodes: string[] }>('/auth/two-factor/enable', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }).then((body) => body.recoveryCodes),
+
+  disableTwoFactor: (password: string) =>
+    request<void>('/auth/two-factor/disable', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+
+  regenerateRecoveryCodes: (password: string) =>
+    request<{ recoveryCodes: string[] }>('/auth/two-factor/recovery-codes', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }).then((body) => body.recoveryCodes),
+
+  resetUserTwoFactor: (userId: number) =>
+    request<void>(`/users/${userId}/two-factor`, { method: 'DELETE' }),
 
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>('/auth/password', {

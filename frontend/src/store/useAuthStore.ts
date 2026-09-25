@@ -9,11 +9,13 @@
 import { create } from 'zustand';
 
 import { api, ApiError } from '@/api/client';
-import type { AuthMode, User } from '@/api/types';
+import type { AuthMode, AuthState, User } from '@/api/types';
 
 type AuthStoreState = {
   mode: AuthMode | null;
   user: User | null;
+  /** True after a right password on an account with two factor sign in, until the code is accepted. */
+  pendingTwoFactor: boolean;
   /** False until the first answer arrives, so the page can wait rather than flash the wrong screen. */
   loaded: boolean;
   /** Set when the service cannot be reached at all, which is different from being signed out. */
@@ -22,20 +24,32 @@ type AuthStoreState = {
   chooseOpen: () => Promise<void>;
   setUp: (email: string, password: string) => Promise<void>;
   logIn: (email: string, password: string) => Promise<void>;
+  /** The second step of a sign in. Throws, so the code form can show what went wrong. */
+  verifyCode: (code: string) => Promise<void>;
+  /** Leave the code step and start again from the password. */
+  backToPassword: () => Promise<void>;
   logOut: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 };
 
+/** The part of every auth answer the page acts on. */
+const fromState = (state: AuthState) => ({
+  mode: state.mode,
+  user: state.user,
+  pendingTwoFactor: state.pendingTwoFactor,
+});
+
 export const useAuthStore = create<AuthStoreState>((set) => ({
   mode: null,
   user: null,
+  pendingTwoFactor: false,
   loaded: false,
   error: null,
 
   refresh: async () => {
     try {
       const state = await api.authState();
-      set({ mode: state.mode, user: state.user, loaded: true, error: null });
+      set({ ...fromState(state), loaded: true, error: null });
     } catch (cause) {
       set({
         loaded: true,
@@ -46,17 +60,28 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
 
   chooseOpen: async () => {
     const state = await api.chooseOpen();
-    set({ mode: state.mode, user: state.user });
+    set(fromState(state));
   },
 
   setUp: async (email, password) => {
     const state = await api.setUp(email, password);
-    set({ mode: state.mode, user: state.user });
+    set(fromState(state));
   },
 
   logIn: async (email, password) => {
     const state = await api.logIn(email, password);
-    set({ mode: state.mode, user: state.user });
+    set(fromState(state));
+  },
+
+  verifyCode: async (code) => {
+    const state = await api.verifyLogin(code);
+    set(fromState(state));
+  },
+
+  backToPassword: async () => {
+    // Logging out also forgets the pending sign in, and needs no reload: nothing was loaded yet.
+    const state = await api.logOut();
+    set(fromState(state));
   },
 
   logOut: async () => {

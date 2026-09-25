@@ -13,7 +13,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::{AuthMode, Role, User};
 use crate::util::time::now_ms;
 
-const USER_COLUMNS: &str = "id, email, role, created_at_ms";
+const USER_COLUMNS: &str = "id, email, role, created_at_ms, totp_secret IS NOT NULL";
 
 /// An account together with what is needed to check its password. Only the auth service sees this.
 pub struct Credentials {
@@ -25,6 +25,17 @@ pub struct Credentials {
 pub struct SessionRecord {
     pub user: User,
     pub last_seen_at_ms: i64,
+}
+
+/// An account's authenticator state. Only the auth service sees this.
+#[derive(Debug, Default)]
+pub struct TotpRecord {
+    /// The confirmed secret, present once two factor sign in is on.
+    pub secret: Option<Vec<u8>>,
+    /// A secret shown as a QR code but not yet confirmed with a code.
+    pub pending_secret: Option<Vec<u8>>,
+    /// The newest time step a code was accepted for, so it cannot be used again.
+    pub last_step: Option<i64>,
 }
 
 pub struct AuthRepository {
@@ -108,7 +119,7 @@ impl AuthRepository {
                 |row| {
                     Ok(Credentials {
                         user: map_user(row)?,
-                        password_hash: row.get(4)?,
+                        password_hash: row.get(5)?,
                     })
                 },
             )
@@ -125,7 +136,7 @@ impl AuthRepository {
                 |row| {
                     Ok(Credentials {
                         user: map_user(row)?,
-                        password_hash: row.get(4)?,
+                        password_hash: row.get(5)?,
                     })
                 },
             )
@@ -239,14 +250,14 @@ impl AuthRepository {
     pub fn find_session(&self, token_hash: &[u8], now: i64) -> AppResult<Option<SessionRecord>> {
         self.database.with_connection(|conn| {
             conn.query_row(
-                "SELECT users.id, users.email, users.role, users.created_at_ms, auth_sessions.last_seen_at_ms
+                "SELECT users.id, users.email, users.role, users.created_at_ms, users.totp_secret IS NOT NULL, auth_sessions.last_seen_at_ms
                  FROM auth_sessions JOIN users ON users.id = auth_sessions.user_id
                  WHERE auth_sessions.token_hash = ?1 AND auth_sessions.expires_at_ms > ?2",
                 rusqlite::params![token_hash, now],
                 |row| {
                     Ok(SessionRecord {
                         user: map_user(row)?,
-                        last_seen_at_ms: row.get(4)?,
+                        last_seen_at_ms: row.get(5)?,
                     })
                 },
             )
@@ -300,6 +311,134 @@ impl AuthRepository {
             )?)
         })
     }
+
+    pub fn find_totp(&self, user_id: i64) -> AppResult<TotpRecord> {
+        self.database.with_connection(|conn| {
+            conn.query_row(
+                "SELECT totp_secret, totp_pending_secret, totp_last_step FROM users WHERE id = ?1",
+                rusqlite::params![user_id],
+                |row| {
+                    Ok(TotpRecord {
+                        secret: row.get(0)?,
+                        pending_secret: row.get(1)?,
+                        last_step: row.get(2)?,
+                    })
+                },
+            )
+            .optional()?
+            .ok_or_else(|| AppError::not_found(format!("no account with id {user_id}")))
+        })
+    }
+
+    /// Remember a secret that has been shown but not yet confirmed. Replaces any earlier one, so starting
+    /// setup again simply shows a new QR code.
+    pub fn set_pending_totp(&self, user_id: i64, secret: &[u8]) -> AppResult<()> {
+        self.database.with_connection(|conn| {
+            conn.execute(
+                "UPDATE users SET totp_pending_secret = ?1 WHERE id = ?2",
+                rusqlite::params![secret, user_id],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Switch two factor sign in on with a confirmed secret and a fresh set of recovery codes, in one
+    /// transaction, so there is never a moment with the secret but without the codes to get back in.
+    pub fn enable_totp(
+        &self,
+        user_id: i64,
+        secret: &[u8],
+        confirmed_step: i64,
+        recovery_code_hashes: &[Vec<u8>],
+    ) -> AppResult<()> {
+        self.database.with_connection(|conn| {
+            let transaction = conn.unchecked_transaction()?;
+            transaction.execute(
+                "UPDATE users
+                 SET totp_secret = ?1, totp_pending_secret = NULL, totp_last_step = ?2
+                 WHERE id = ?3",
+                rusqlite::params![secret, confirmed_step, user_id],
+            )?;
+            write_recovery_codes(&transaction, user_id, recovery_code_hashes)?;
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn record_totp_step(&self, user_id: i64, step: i64) -> AppResult<()> {
+        self.database.with_connection(|conn| {
+            conn.execute(
+                "UPDATE users SET totp_last_step = ?1 WHERE id = ?2",
+                rusqlite::params![step, user_id],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Switch two factor sign in off and forget the secret and every recovery code.
+    pub fn disable_totp(&self, user_id: i64) -> AppResult<()> {
+        self.database.with_connection(|conn| {
+            let transaction = conn.unchecked_transaction()?;
+            transaction.execute(
+                "UPDATE users
+                 SET totp_secret = NULL, totp_pending_secret = NULL, totp_last_step = NULL
+                 WHERE id = ?1",
+                rusqlite::params![user_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM recovery_codes WHERE user_id = ?1",
+                rusqlite::params![user_id],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn replace_recovery_codes(&self, user_id: i64, code_hashes: &[Vec<u8>]) -> AppResult<()> {
+        self.database.with_connection(|conn| {
+            let transaction = conn.unchecked_transaction()?;
+            write_recovery_codes(&transaction, user_id, code_hashes)?;
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Spend a recovery code. True only the first time a given code is used.
+    pub fn use_recovery_code(&self, user_id: i64, code_hash: &[u8]) -> AppResult<bool> {
+        self.database.with_connection(|conn| {
+            let changed = conn.execute(
+                "UPDATE recovery_codes SET used_at_ms = ?1
+                 WHERE user_id = ?2 AND code_hash = ?3 AND used_at_ms IS NULL",
+                rusqlite::params![now_ms(), user_id, code_hash],
+            )?;
+            Ok(changed == 1)
+        })
+    }
+
+    pub fn recovery_codes_left(&self, user_id: i64) -> AppResult<i64> {
+        self.database.with_connection(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM recovery_codes WHERE user_id = ?1 AND used_at_ms IS NULL",
+                rusqlite::params![user_id],
+                |row| row.get(0),
+            )?)
+        })
+    }
+}
+
+/// Replace an account's recovery codes with new ones. Old codes stop working, used or not.
+fn write_recovery_codes(conn: &Connection, user_id: i64, code_hashes: &[Vec<u8>]) -> AppResult<()> {
+    conn.execute(
+        "DELETE FROM recovery_codes WHERE user_id = ?1",
+        rusqlite::params![user_id],
+    )?;
+    for code_hash in code_hashes {
+        conn.execute(
+            "INSERT INTO recovery_codes (user_id, code_hash) VALUES (?1, ?2)",
+            rusqlite::params![user_id, code_hash],
+        )?;
+    }
+    Ok(())
 }
 
 fn read_mode(conn: &Connection) -> AppResult<AuthMode> {
@@ -328,6 +467,7 @@ fn insert_user(conn: &Connection, email: &str, password_hash: &str, role: Role) 
             email: email.to_string(),
             role,
             created_at_ms: now,
+            two_factor: false,
         }),
         Err(rusqlite::Error::SqliteFailure(failure, _))
             if failure.code == ErrorCode::ConstraintViolation =>
@@ -371,6 +511,7 @@ fn map_user(row: &Row<'_>) -> rusqlite::Result<User> {
         // A role the code does not know gets the least privilege rather than failing the whole query.
         role: Role::parse(&role).unwrap_or(Role::Listener),
         created_at_ms: row.get(3)?,
+        two_factor: row.get(4)?,
     })
 }
 

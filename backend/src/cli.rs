@@ -22,7 +22,12 @@ pub fn run(config: &AppConfig, command: Command) -> AppResult<()> {
             let password = auth.reset_password_by_email(&email)?;
             println!("New password for {}: {password}", email.trim());
             println!("Every session of that account has been signed out.");
-            println!("Sign in with it, then change it under your account menu.");
+            println!("Sign in with it, then change it under Account settings.");
+        }
+        Command::Auth(AuthCommand::ResetTwoFactor { email }) => {
+            auth.reset_two_factor_by_email(&email)?;
+            println!("Two factor sign in is off for {}.", email.trim());
+            println!("They sign in with their password alone, and can set up a new app under Account settings.");
         }
         Command::Auth(AuthCommand::Disable) => {
             auth.disable_accounts()?;
@@ -109,5 +114,44 @@ mod tests {
         run(&temp.config, Command::Auth(AuthCommand::Disable)).expect("disable");
         assert_eq!(running.mode().expect("mode"), AuthMode::Open);
         assert!(running.list_users().expect("users").is_empty());
+    }
+
+    #[test]
+    fn reset_2fa_lets_the_account_back_in_with_its_password() {
+        use crate::services::totp;
+        use crate::util::time::now_ms;
+
+        let temp = temp_data("reset-2fa");
+        let running = service(&temp.config);
+        let signed_in = running
+            .set_up("owner@example.com", "a long password")
+            .expect("setup");
+
+        let command = || {
+            Command::Auth(AuthCommand::ResetTwoFactor {
+                email: "owner@example.com".to_string(),
+            })
+        };
+        assert!(
+            run(&temp.config, command()).is_err(),
+            "nothing to reset yet"
+        );
+
+        let setup = running
+            .begin_two_factor_setup(&signed_in.user)
+            .expect("begin");
+        let secret = totp::base32_decode(&setup.secret_key);
+        let code = format!("{:06}", totp::code_at(&secret, totp::step_at(now_ms())));
+        running
+            .enable_two_factor(signed_in.user.id, &code)
+            .expect("enable");
+
+        run(&temp.config, command()).expect("reset");
+        assert_eq!(
+            running
+                .two_factor_status(signed_in.user.id)
+                .expect("status"),
+            (false, 0)
+        );
     }
 }
