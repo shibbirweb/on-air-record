@@ -5,7 +5,7 @@ Every release of On Air Record, newest first. The format follows
 [Semantic Versioning](https://semver.org/). Each release's section is also used as its notes on the
 [releases page](https://github.com/shibbirweb/on-air-record/releases).
 
-## [Unreleased]
+## [0.4.0] - 2026-09-26
 
 ### Added
 
@@ -136,7 +136,7 @@ The first release.
 - There is no authentication, by design. Anyone who can reach the port can listen, so keep it on a network
   you trust.
 
-[Unreleased]: https://github.com/shibbirweb/on-air-record/compare/v0.3.0...HEAD
+[0.4.0]: https://github.com/shibbirweb/on-air-record/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/shibbirweb/on-air-record/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shibbirweb/on-air-record/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shibbirweb/on-air-record/releases/tag/v0.1.0

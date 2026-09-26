@@ -472,6 +472,8 @@ the choice.
 A recorder is a microphone that is always on, so decide who can reach it. The first person to open the page
 is asked once:
 
+![The first visit: a question over the control room asking whether to set up accounts or keep the recorder open](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/first-run.png)
+
 - **Set up accounts.** They create the admin account on the spot, and from then on everybody signs in.
 - **Keep it open.** No login, as in earlier versions. Anyone who can reach the page can listen, go back
   through the recordings, download them, and change the settings.
@@ -483,6 +485,9 @@ websites are refused, so opening some other site cannot make a browser listen in
 The question is asked by whoever arrives first. On a network with other people on it, open the page
 yourself as soon as it starts, so that nobody answers it before you do. An existing installation that is
 upgraded asks the question too, on its next visit.
+
+The [user guide](USER_GUIDE.md#signing-in) walks through every screen of this with pictures: the first
+visit, signing in, account settings, two factor sign in, and managing accounts.
 
 ### Who can do what
 
@@ -927,8 +932,9 @@ flowchart LR
 - **Beta**, from `develop`: a version like `0.4.0-beta.1`, published as a GitHub **pre-release**. GitHub
   never counts a pre-release as the latest release, so the installers do not offer it to anybody who has
   not asked for betas.
-- **Stable**, from `master`, once `develop` has been merged into it: a version like `0.4.0`, published as a
-  normal release.
+- **Stable**: the finished version, like `0.4.0`, is merged into `develop` like any other change, then
+  `develop` is merged into `master`, and it is published from `master` as a normal release. Every change,
+  releases included, enters through `develop`, so after a stable release the two branches are the same.
 
 The steps are the same for both; where they differ it says so below.
 
@@ -970,19 +976,22 @@ make release          # or: node scripts/version.mjs bump
 ```
 
 That lists everything that has landed since the last release, suggests whether it is a patch, a minor or
-a major from the commit types, and moves all four files once you choose. It prints the commit line to
-paste afterwards, with the branch to push. Nothing is committed, tagged or pushed for you:
+a major from the commit types, and moves all four files once you choose. Run it on a branch cut from
+`develop`. It prints the commit line to paste afterwards and where to merge it. Nothing is committed,
+tagged or pushed for you:
 
 ```sh
-git commit -am "chore:[OAR-56] release 0.2.0"
-git push origin master
+git switch -c chore/OAR-N-release-0.4.0 develop
+node scripts/version.mjs bump release
+git commit -am "chore:[OAR-N] release 0.4.0"
+# pull request into develop, then a pull request from develop into master
 ```
 
-For a beta, on `develop`, choose **beta**, or skip the question:
+Or skip the question:
 
 ```sh
 node scripts/version.mjs bump beta       # 0.3.0 -> 0.4.0-beta.1, then 0.4.0-beta.1 -> 0.4.0-beta.2
-node scripts/version.mjs bump release    # on master, after merging develop: 0.4.0-beta.2 -> 0.4.0
+node scripts/version.mjs bump release    # 0.4.0-beta.2 -> 0.4.0, then into develop and develop into master
 ```
 
 From a stable version, the first beta previews whichever release the commits call for, so feature work

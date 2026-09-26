@@ -19,6 +19,17 @@ function preferredTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
+/**
+ * Put the stored or system theme on the page. Called once in main.tsx before the first render, because
+ * the sign in page and the first run question render outside the app shell, where useTheme lives; without
+ * this they kept index.html's dark default whatever the person had chosen.
+ */
+export function applyPreferredTheme(): void {
+  const theme = preferredTheme();
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+  document.documentElement.style.colorScheme = theme;
+}
+
 export function useTheme(): { theme: Theme; toggleTheme: () => void } {
   const [theme, setTheme] = useState<Theme>(preferredTheme);
 

@@ -93,7 +93,7 @@ function AccountsManager() {
     <div className="space-y-4">
       <p className="text-muted-foreground text-sm">
         Admins control everything, including this list. Listeners can listen, scrub back and export, and
-        change nothing. Changes here apply straight away.
+        change nothing.
       </p>
 
       {error && (
