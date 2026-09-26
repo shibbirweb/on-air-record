@@ -356,6 +356,13 @@ async function commandBump(requested) {
 
   const subjects = commitsSince(tag);
   if (subjects.length === 0) {
+    // Finishing a beta usually has nothing new in it: the beta held up, so it ships as it is. That is the
+    // one step that makes sense with no new commits, so it is allowed and offered; anything else is not.
+    if (betaNumber(current) !== null && (requested === undefined || requested === 'release')) {
+      const target = nextVersions(current).release;
+      console.log(`\nNothing has landed since ${tag}, so the one step is to finish it as ${target}.`);
+      return finishBump(current, 'release', target);
+    }
     console.log('\nNothing has landed since that release, so there is nothing to put in a new one.');
     return 0;
   }
@@ -422,7 +429,11 @@ async function commandBump(requested) {
     level = chosen;
   }
 
-  const target = next[level];
+  return finishBump(current, level, next[level]);
+}
+
+/** Move the manifests to `target` and say what finishing the release takes from here. */
+function finishBump(current, level, target) {
   console.log(`\n${level}: ${current} -> ${target}\n`);
 
   const result = commandSet(target);
@@ -430,22 +441,24 @@ async function commandBump(requested) {
     return result;
   }
 
-  // A beta is cut from develop and published as a pre-release; a stable version from master as a normal
-  // release. The release workflow refuses the wrong combination, so say which it is up front.
+  // A beta goes to develop and is published as a pre-release; a stable version to master as a normal
+  // release. Both branches take changes only by pull request. The release workflow refuses the wrong
+  // pre-release setting, so say which it is up front.
   const isBeta = betaNumber(target) !== null;
   const branch = isBeta ? 'develop' : 'master';
-  console.log(`\nNothing is released yet. To finish, on ${branch}:\n`);
+  console.log(`\nNothing is released yet. Commit this on a branch and merge it into ${branch} by pull request:\n`);
   console.log(`  git commit -am "chore:[OAR-${nextTicket()}] release ${target}"`);
-  console.log(`  git push origin ${branch}`);
   console.log('');
   console.log(
-    `Then on GitHub: Releases, Draft a new release, create the tag v${target} on ${branch},` +
+    `Once it is on ${branch}, on GitHub: Releases, Draft a new release, create the tag v${target} on` +
+      ` ${branch},` +
       (isBeta ? ' tick "Set as a pre-release",' : ' leave "Set as a pre-release" unticked,') +
       ' Publish.',
   );
   console.log('The workflow refuses any other tag, builds all four platforms, attaches them, and then');
   console.log('installs the result on macOS, Linux and Windows to prove it works.');
   if (isBeta) {
+    console.log('The Beta release workflow does all of this for you; see "A beta in two clicks".');
     console.log('Testers install it with the installer\'s --beta option; stable users are not offered it.');
   }
   return 0;
