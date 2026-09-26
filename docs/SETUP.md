@@ -937,7 +937,8 @@ changing the code.
 
 ## Publishing a release
 
-For maintainers. Releases are made from the GitHub web interface, and the binaries build themselves.
+For maintainers. Releases are started from the **Actions** tab and published by workflows once their pull
+requests are merged, and the binaries build themselves. Doing it by hand is described after that.
 
 There are two channels, one per branch:
 
@@ -982,8 +983,31 @@ GitHub Actions to create and approve pull requests**. Without it the first step 
 If publishing fails after the merge, open **Actions**, **Publish beta**, and re-run it; it picks up where
 it left off, and a new beta cannot be started until this one is out.
 
-Stable releases are still made by hand, with the steps below, because they also date the changelog and are
-the ones that reach everybody.
+### A stable release in two merges
+
+When a beta has held up, making it the stable release takes one click and two merges:
+
+1. On GitHub, open **Actions**, choose **Stable release**, press **Run workflow**, leave **Use workflow
+   from** on `develop`, and run it. It refuses unless CI has passed on the newest `develop` commit,
+   `develop` is at a beta that has been published, and nothing that changes the program has landed since
+   that beta (documentation, tests and tooling are fine). Then it finishes the version, `0.4.0-beta.2`
+   becomes `0.4.0`, dates the `[Unreleased]` section of `CHANGELOG.md`, and opens a pull request
+   `chore:[OAR-N] release 0.4.0` into `develop` with the release notes in its description.
+2. **Merge that pull request.** Once CI passes on `develop`, the **Promote stable** workflow opens a pull
+   request from `develop` into `master`, titled `release v0.4.0`.
+3. **Merge that one too.** Once CI passes on `master`, the **Publish stable** workflow publishes `v0.4.0`
+   from `master` as the latest release, with its changelog section as the notes, then builds every
+   platform, attaches the files and installs them on macOS, Linux and Windows.
+
+Nothing is published until both pull requests are merged; close either to stop. The `develop` to `master`
+pull request follows `develop`, so merge it before merging other work, or that work goes out with the
+release. Promote stable refuses to open it if something untried has landed in between. Tick **Dry run** in
+step 1 to see the version, commit and notes without anything being pushed or opened.
+
+It needs the same setting as betas. If publishing fails after the second merge, re-run **Publish stable**
+from **Actions**. Do not also publish the release by hand: it would race the workflow for the tag.
+
+The steps below are what the workflows do, for doing it by hand when you need to.
 
 ### 1. Decide the version
 
@@ -1006,6 +1030,9 @@ node scripts/version.mjs bump release
 git commit -am "chore:[OAR-N] release 0.4.0"
 # pull request into develop, then a pull request from develop into master
 ```
+
+Bumping to a stable version also dates the changelog: `## [Unreleased]` becomes `## [0.4.0]` with today's
+date, and the compare link at the bottom moves with it. A beta leaves the changelog alone.
 
 Or skip the question:
 

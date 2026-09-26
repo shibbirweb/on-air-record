@@ -407,6 +407,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Embed the compiled UI into the binary for a single file distribution
 - [x] Continuous integration building and testing on macOS, Linux, and Windows
 - [x] Release workflow producing macOS, Linux, and Windows artifacts
+- [x] Betas and stable releases started from Actions and published by workflows after their pull requests merge
 - [x] systemd unit template, with the Windows service wrapper documented
 
 ### Milestone 7: access control
