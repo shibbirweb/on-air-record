@@ -390,6 +390,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
       touching the disk
 - [x] Settings panel for gain, segment length, and automatic start
 - [x] Explicit save: edits are staged, counted, and committed in one request, with Discard to abandon them
+- [x] Role changes staged with the other settings and applied on Save, promotions first so the admin role can be handed over in one save
 - [x] Restore defaults stages the defaults for review rather than applying them straight away
 - [x] Saving asks first when it would shorten retention and delete audio
 - [x] Light and dark themes with a toggle, remembered per browser

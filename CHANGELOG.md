@@ -18,6 +18,10 @@ Every release of On Air Record, newest first. The format follows
 
 ### Changed
 
+- **Changing someone's role on the settings page now waits for Save changes,** like every other setting
+  there, instead of applying the moment it was picked from the menu. The account is marked Unsaved until you
+  save, and Discard puts it back. Adding and removing accounts and setting passwords still happen as soon
+  as you confirm them. (OAR-81)
 - **The listener count includes people listening back through history,** not only those on the live feed,
   as the user guide always said it did. (OAR-80)
 

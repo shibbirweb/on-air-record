@@ -583,14 +583,26 @@ listening is asked to sign in within a few seconds.
 With accounts on, it lists everyone who can sign in. Your own account is marked **you**, and **2FA** marks
 anyone who uses [two factor sign in](#two-factor-sign-in). For each of the others:
 
-- **The role menu** makes them an admin or a listener. The recorder applies it at once, without them signing
-  in again; their page shows the buttons for the new role the next time it loads.
+- **The role menu** makes them an admin or a listener. Like everything else on the settings page, the change
+  waits for **Save changes**; see below. Once saved it applies without them signing in again, and their page
+  shows the buttons for the new role the next time it loads.
 - **The key button** sets a new password for them, for when they have forgotten theirs. They are signed out
   everywhere and sign in again with the new one.
 - **The shield button**, shown only for someone using two factor sign in, removes it, for when they have
   lost both their phone and their recovery codes. They then sign in with just their password.
 - **The bin button** removes the account, after asking you to confirm. They are signed out at once, and
   anything they were listening to stops within 15 seconds.
+
+![A role changed but not yet saved: the kitchen account's menu says Admin, marked Unsaved, and the bar at the bottom says 1 unsaved change](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/settings-access-unsaved.png)
+
+Choosing a new role marks the account **Unsaved** and adds it to the count in the bar at the bottom of the
+page, together with any other settings you have changed. Nothing changes for the person until you press
+**Save changes**. **Discard** puts every menu back, and choosing the old role again takes the account out of
+the count. You can hand the admin role from one person to another in a single save: make the new admin,
+make the old one a listener, then save. If a change is refused, for example because it would leave nobody
+as admin, the bar says why and that account stays marked **Unsaved**.
+
+The other buttons do not wait for Save, because each already asks you to confirm or fill in a form first.
 
 There is always at least one admin: the last one cannot be made a listener or removed. You cannot change
 your own role or remove yourself here either; another admin does that, so nobody locks themselves out by
