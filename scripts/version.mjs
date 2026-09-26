@@ -183,19 +183,36 @@ function git(...args) {
   }
 }
 
+/**
+ * The most recently made release tag, for saying what the last release was.
+ *
+ * By date rather than by `git describe`, which only sees tags reachable from HEAD. A stable release is
+ * tagged on master's merge commit, which develop never contains, so describe on develop would name the
+ * beta before it.
+ */
 function lastTag() {
-  return git('describe', '--tags', '--abbrev=0', '--match', 'v*');
+  const newest = git(
+    'for-each-ref',
+    '--sort=-creatordate',
+    '--count=1',
+    '--format=%(refname:short)',
+    'refs/tags/v*',
+  );
+  return newest || null;
 }
 
 /**
- * Commit subjects since a tag, newest first. Everything when there is no tag yet.
+ * Subjects of the commits no release contains yet, newest first. Everything when there is no release.
+ *
+ * "Not in any release tag" rather than "since the last tag", for the same reason as lastTag: after a
+ * stable release, everything develop holds is inside the tag on master, and counting from a tag develop
+ * can reach would report all of it as unreleased again.
  *
  * Merge commits are left out: with pull requests into develop every change arrives with one, and its
  * subject ("Merge pull request #4 from ...") says nothing about what kind of change it carried.
  */
-function commitsSince(tag) {
-  const range = tag ? `${tag}..HEAD` : 'HEAD';
-  const out = git('log', range, '--no-merges', '--format=%s');
+function unreleasedSubjects() {
+  const out = git('log', 'HEAD', '--no-merges', '--format=%s', '--not', '--tags=v*');
   return out ? out.split('\n').filter(Boolean) : [];
 }
 
@@ -296,16 +313,20 @@ function summarise(subjects) {
 /**
  * Everything worth knowing about whether a release is due.
  *
- * `git describe` needs the tags, so anywhere this runs on a shallow clone has to fetch them first.
+ * It reads the release tags, so anywhere this runs on a shallow clone has to fetch them first.
+ *
+ * It has to give the same answer on develop and master. A stable release is tagged on master's merge
+ * commit, which develop never contains, so anything based on the tags develop can reach would report what
+ * just shipped as unreleased and invite a beta with nothing new in it. See lastTag and unreleasedSubjects.
  */
 function releaseState() {
   const current = authoritative();
-  const tag = lastTag();
+  const released = git('rev-parse', '--verify', '--quiet', `refs/tags/v${current}`) !== null;
   return {
     current,
-    tag,
-    released: tag !== null && git('rev-parse', '--verify', `refs/tags/v${current}`) !== null,
-    subjects: commitsSince(tag),
+    tag: lastTag(),
+    released,
+    subjects: unreleasedSubjects(),
   };
 }
 
@@ -354,7 +375,7 @@ async function commandBump(requested) {
     }
   }
 
-  const subjects = commitsSince(tag);
+  const subjects = unreleasedSubjects();
   if (subjects.length === 0) {
     // Finishing a beta usually has nothing new in it: the beta held up, so it ships as it is. That is the
     // one step that makes sense with no new commits, so it is allowed and offered; anything else is not.
