@@ -159,6 +159,7 @@ node scripts/version.mjs bump          # show what is unreleased and choose the 
 node scripts/version.mjs bump beta     # start or continue a beta on develop, like 0.4.0-beta.1
 node scripts/version.mjs bump release  # finish a beta as stable: 0.4.0-beta.2 becomes 0.4.0, then develop to master
 node scripts/version.mjs notes         # the [Unreleased] changelog section, as release notes
+node scripts/version.mjs notes 0.6.0   # a released version's section, what a stable release gets
 node scripts/version.mjs next-ticket   # the next free OAR number, for a commit message
 node scripts/version.mjs pending       # report whether a release is due, or make pending
 ```
@@ -285,8 +286,10 @@ from the GitHub web interface**, and attaches one archive per target with a `sha
 is built once in its own job and shared, so all four archives ship identical assets. Trigger it manually
 with `workflow_dispatch` to rehearse the build without publishing anything.
 
-Pushing a tag on its own no longer builds anything. The release object is what starts it, which is also
-what keeps the release notes you wrote by hand instead of overwriting them with generated ones.
+Pushing a tag on its own no longer builds anything. The release object is what starts it. Once the files
+are attached, the `notes` job replaces release notes that are empty or are GitHub's generated list with the
+version's changelog section, and leaves hand written notes alone; it runs after the files are attached
+because attaching them rewrites the release.
 
 ## Code conventions
 
@@ -461,9 +464,9 @@ Things worth knowing:
   "try again later" rather than a fault.
 - **`GET /api/updates` never touches the network.** Only the scheduled check and `POST /api/updates/check`
   do, which is why the router tests exercise only the first.
-- **The notes are whatever is written on the GitHub release.** Betas get the changelog section
-  automatically; for a stable release, paste the changelog section into the release notes, or users see
-  GitHub's generated list of pull requests instead.
+- **The notes are whatever is written on the GitHub release.** Betas get the changelog section from
+  beta-publish.yml, and release.yml fills a stable release's empty or generated notes from its changelog
+  section, so users never read a list of pull request titles.
 
 ## Troubleshooting
 

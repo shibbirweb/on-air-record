@@ -244,7 +244,9 @@ semicolons and trailing commas in TS). Project specifics on top of those:
   "latest" the installers hand to everybody.
 - A user visible change also gets an entry in `CHANGELOG.md`, under the unreleased version at the top
   (start a `## [Unreleased]` section if the top one already has a date), written for someone running the app rather than for a developer, with its ticket in brackets. Fixes to
-  something that never shipped in a release do not belong there. That section becomes the release notes.
+  something that never shipped in a release do not belong there. That section becomes the release notes:
+  beta-publish.yml writes it onto betas, and release.yml's `notes` job writes a stable version's dated
+  section onto its release when the notes are empty or GitHub generated, keeping hand written ones.
 - No `unwrap()` or `expect()` outside `main.rs`, tests, and mutex locks. Everything else returns
   `AppResult<T>`.
 - Doc comments explain **why**, not what. The existing code is dense with rationale; match that.
