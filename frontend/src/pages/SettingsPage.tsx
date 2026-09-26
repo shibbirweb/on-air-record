@@ -15,6 +15,7 @@ import { RecordingQuality } from '@/features/settings/RecordingQuality';
 import { SettingsActionBar } from '@/features/settings/SettingsActionBar';
 import { RetentionSettings } from '@/features/settings/RetentionSettings';
 import { SettingsPanel } from '@/features/settings/SettingsPanel';
+import { UpdateSettings } from '@/features/settings/UpdateSettings';
 import { usePolling } from '@/hooks/usePolling';
 import { useCanAdminister } from '@/store/useAuthStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
@@ -83,6 +84,16 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent>
           <SettingsPanel />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Updates</CardTitle>
+          <CardDescription>The version running here, and whether a newer one is out.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <UpdateSettings />
         </CardContent>
       </Card>
 

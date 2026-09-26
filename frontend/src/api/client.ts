@@ -24,6 +24,7 @@ import type {
   TimelineRange,
   TwoFactorSetup,
   TwoFactorStatus,
+  UpdateStatus,
   User,
 } from './types';
 
@@ -212,6 +213,10 @@ export const api = {
     }),
 
   settingsDefaults: () => request<Settings>('/settings/defaults'),
+
+  updates: () => request<UpdateStatus>('/updates'),
+
+  checkForUpdates: () => request<UpdateStatus>('/updates/check', { method: 'POST' }),
 
   testRecordingsDir: (path: string | null) =>
     request<DirectoryTest>('/settings/test-recordings-dir', {

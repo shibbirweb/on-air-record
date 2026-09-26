@@ -146,6 +146,41 @@ Change your own password. Signs the account out everywhere except this session. 
 { "currentPassword": "...", "newPassword": "..." }
 ```
 
+### `GET /api/updates` (admin)
+
+Whether a newer release exists, from the service's last check. Never waits on the network: the service
+asks GitHub a minute after it starts and every six hours after, while `checkForUpdates` is on.
+
+```json
+{
+  "currentVersion": "0.6.0",
+  "channel": "stable",
+  "automatic": true,
+  "checkedAtMs": 1790385176043,
+  "error": null,
+  "available": { "version": "0.7.0", "tag": "v0.7.0", "prerelease": false, "publishedAtMs": 1790900000000, "notes": "### Added\n\n- ...", "url": "https://github.com/shibbirweb/on-air-record/releases/tag/v0.7.0" },
+  "releases": [ { "version": "0.7.0", "...": "..." } ],
+  "install": { "kind": "installer", "dir": "/home/pi/on-air-record", "os": "linux", "target": "x86_64-unknown-linux-gnu" },
+  "releasesUrl": "https://github.com/shibbirweb/on-air-record/releases"
+}
+```
+
+- `channel` is `stable` or `beta`: `OAR_CHANNEL` in the environment, else the installer's `config` file
+  beside the program, else `beta` for a beta build and `stable` otherwise. A stable channel is never
+  offered a beta.
+- `available` is the newest newer release, or `null`. `releases` is every newer release on the channel,
+  newest first, each with its notes in Markdown as written on GitHub.
+- `error` is why the last check failed, with the previous answer kept. `checkedAtMs` is `null` until the
+  first check.
+- `install.kind` is `installer` (a folder with the installer's start script beside the program; `dir`
+  names it), `systemd` (started by systemd, detected by `INVOCATION_ID`), or `manual`. `target` is the
+  build's target triple, which names its release download.
+
+### `POST /api/updates/check` (admin)
+
+Ask GitHub now, and answer with the same body as `GET /api/updates`. Works with automatic checks off.
+GitHub being unreachable is not an error here: the answer carries it in `error`.
+
 ### `GET /api/users` (admin)
 
 ```json
@@ -275,7 +310,8 @@ a new recording session because the sample rate may differ. Returns the status b
   "retentionHours": 24,
   "autoStart": true,
   "autoStartDelaySeconds": 0,
-  "frameMs": 100
+  "frameMs": 100,
+  "checkForUpdates": true
 }
 ```
 
@@ -296,6 +332,7 @@ Accepts any subset of the settings object and returns the full updated object.
 | `autoStart` | boolean | | On next service start |
 | `autoStartDelaySeconds` | integer | 0 to 600 | On next service start. Seconds auto start waits before opening the device; the HTTP server does not wait |
 | `frameMs` | integer | 20 to 500 | On next capture start |
+| `checkForUpdates` | boolean | | On the next scheduled check. Whether the service asks GitHub every six hours for a newer release; see `GET /api/updates` |
 
 ### `GET /api/settings/defaults`
 

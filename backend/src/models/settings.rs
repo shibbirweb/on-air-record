@@ -16,6 +16,7 @@ pub const KEY_AUTO_START_DELAY_SECONDS: &str = "auto_start_delay_seconds";
 pub const KEY_FRAME_MS: &str = "frame_ms";
 pub const KEY_RECORDINGS_DIR: &str = "recordings_dir";
 pub const KEY_RECORDING_SAMPLE_RATE: &str = "recording_sample_rate";
+pub const KEY_CHECK_FOR_UPDATES: &str = "check_for_updates";
 
 /// Sample rates the recorder will downmix to, highest first.
 ///
@@ -64,6 +65,9 @@ pub struct Settings {
     /// Always an absolute path when set, because the process working directory is not something the
     /// operator controls once the service runs under a service manager.
     pub recordings_dir: Option<String>,
+    /// Whether to ask GitHub every few hours if a newer release exists. It is the only request the
+    /// service makes to the internet, so it can be switched off for a host that should make none.
+    pub check_for_updates: bool,
 }
 
 impl Default for Settings {
@@ -78,6 +82,7 @@ impl Default for Settings {
             frame_ms: 100,
             recording_sample_rate: None,
             recordings_dir: None,
+            check_for_updates: true,
         }
     }
 }
@@ -102,6 +107,10 @@ impl Settings {
                 defaults.retention_hours,
             ),
             auto_start: parse_bool(pairs.get(KEY_AUTO_START), defaults.auto_start),
+            check_for_updates: parse_bool(
+                pairs.get(KEY_CHECK_FOR_UPDATES),
+                defaults.check_for_updates,
+            ),
             auto_start_delay_seconds: parse_u32(
                 pairs.get(KEY_AUTO_START_DELAY_SECONDS),
                 defaults.auto_start_delay_seconds,
@@ -140,6 +149,10 @@ impl Settings {
                     .unwrap_or_default(),
             ),
             (KEY_AUTO_START.to_string(), self.auto_start.to_string()),
+            (
+                KEY_CHECK_FOR_UPDATES.to_string(),
+                self.check_for_updates.to_string(),
+            ),
             (
                 KEY_AUTO_START_DELAY_SECONDS.to_string(),
                 self.auto_start_delay_seconds.to_string(),
@@ -223,6 +236,7 @@ pub struct SettingsPatch {
     pub recording_sample_rate: Option<Option<u32>>,
     /// `Some(None)` returns to the default location under the data directory.
     pub recordings_dir: Option<Option<String>>,
+    pub check_for_updates: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -236,6 +250,7 @@ impl SettingsPatch {
             && self.frame_ms.is_none()
             && self.recording_sample_rate.is_none()
             && self.recordings_dir.is_none()
+            && self.check_for_updates.is_none()
     }
 
     /// Apply the patch to `base` and return the clamped result.
@@ -259,6 +274,9 @@ impl SettingsPatch {
         }
         if let Some(auto_start) = self.auto_start {
             updated.auto_start = auto_start;
+        }
+        if let Some(check_for_updates) = self.check_for_updates {
+            updated.check_for_updates = check_for_updates;
         }
         if let Some(auto_start_delay_seconds) = self.auto_start_delay_seconds {
             updated.auto_start_delay_seconds = auto_start_delay_seconds;
@@ -341,6 +359,7 @@ mod tests {
             frame_ms: 40,
             recording_sample_rate: Some(16_000),
             recordings_dir: Some("/mnt/audio".to_string()),
+            check_for_updates: false,
         };
         let pairs: HashMap<String, String> = settings.to_pairs().into_iter().collect();
         assert_eq!(Settings::from_pairs(&pairs), settings);

@@ -15,6 +15,7 @@ const STORED: Settings = {
   recordingSampleRate: null,
   recordingsDir: null,
   effectiveRecordingsDir: '/srv/oar/recordings',
+  checkForUpdates: true,
 };
 
 const DEFAULTS: Settings = { ...STORED };

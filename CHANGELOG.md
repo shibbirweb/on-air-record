@@ -5,6 +5,16 @@ Every release of On Air Record, newest first. The format follows
 [Semantic Versioning](https://semver.org/). Each release's section is also used as its notes on the
 [releases page](https://github.com/shibbirweb/on-air-record/releases).
 
+## [0.7.0] - 2026-09-26
+
+### Added
+
+- **Update notices.** When a new version is released, admins see a note under the top bar with what changed
+  in every release since theirs and the exact steps to update for how it was installed. The recorder never
+  updates itself. The Updates card in Settings shows the running version and has a Check now button. The
+  check asks GitHub every six hours and is the only request the recorder makes to the internet; switch it
+  off there if the machine should make none. (OAR-87)
+
 ## [0.6.0] - 2026-09-26
 
 ### Added
@@ -165,6 +175,7 @@ The first release.
 - There is no authentication, by design. Anyone who can reach the port can listen, so keep it on a network
   you trust.
 
+[0.7.0]: https://github.com/shibbirweb/on-air-record/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/shibbirweb/on-air-record/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/shibbirweb/on-air-record/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/shibbirweb/on-air-record/compare/v0.3.0...v0.4.0

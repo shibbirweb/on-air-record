@@ -4,8 +4,9 @@
 # machine is download, extract, run.
 #
 # Releases are cut from the GitHub web interface: Releases, Draft a new release, pick or create the tag,
-# Publish. That publish is what starts this. Creating the release first also means the notes are whatever
-# you wrote there, rather than something a workflow generated over the top of them.
+# Publish. That publish is what starts this. Notes written there are kept. Notes left empty, or filled with
+# GitHub's generated list of pull requests, are replaced with the version's section of CHANGELOG.md, because
+# that is what the running app shows admins as What's new.
 #
 # Betas go the same way, from develop, with a version like 0.4.0-beta.1 and "Set as a pre-release" ticked.
 # GitHub never counts a pre-release as the latest release, so the installers keep handing stable users the
@@ -116,6 +117,52 @@ jobs:
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "rehearsing $tag, nothing will be published"
           fi
+
+  # The release notes are what the app shows admins as What's new, so they must be the changelog written
+  # for people running it, not GitHub's generated list of pull request titles. Stable releases were being
+  # published with the generated list, so this fills in the changelog section when the notes are empty or
+  # generated, and leaves anything written by hand alone. Betas already carry theirs from beta-publish.yml.
+  #
+  # After the files are attached rather than alongside, because attaching them rewrites the release, and
+  # one that read the notes first could put the generated ones back.
+  notes:
+    name: release notes
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    if: needs.version.outputs.publish == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - name: Fill in empty or generated notes from the changelog
+        env:
+          TAG: ${{ needs.version.outputs.artifact_tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          if [ -n "$current" ] && ! printf '%s\n' "$current" | grep -qE '^## What.s Changed|^\*\*Full Changelog\*\*'; then
+            echo "keeping the notes written on the release"
+            exit 0
+          fi
+
+          # A beta is published from the unreleased section; a stable version has its own dated one.
+          case "$VERSION" in
+            *-*) found() { node scripts/version.mjs notes > notes.md; } ;;
+            *) found() { node scripts/version.mjs notes "$VERSION" > notes.md; } ;;
+          esac
+          # Missing notes are worth a warning, not a failed release: the files still matter more.
+          if ! found; then
+            echo "::warning::CHANGELOG.md has no section for $VERSION, so the release notes were left as they are."
+            exit 0
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          echo "release notes set from CHANGELOG.md"
 
   # Built once and shared, so every platform ships byte identical assets rather than four separate builds
   # that merely ought to match.
@@ -245,9 +292,8 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # The release already exists, made by hand, so this only uploads the files onto it. No release notes
-      # are generated here on purpose: whatever was written in the web interface is the notes, and
-      # regenerating them would throw that away.
+      # The release already exists, made by hand, so this only uploads the files onto it. It never
+      # touches the notes; the notes job above looks after them.
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.artifact_tag }}

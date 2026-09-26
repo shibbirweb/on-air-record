@@ -178,6 +178,9 @@ flowchart TB
   never across an `await`. Changes are announced through a `tokio::sync::watch` channel carrying a version
   number rather than the list itself, so a change costs one increment however many admins are watching, and
   each watcher copies the map only when it wakes.
+- The update check is a tokio task that sleeps six hours between checks and runs the one HTTPS request
+  on a blocking thread (`ureq`), so a slow or unreachable GitHub never ties up a runtime worker. A tokio
+  mutex makes a Check now pressed during a scheduled check wait for it rather than ask twice.
 - SQLite is accessed through a single connection behind a mutex. Write volume is one row per segment (once
   every few seconds), so contention is not a concern, and it avoids the write lock errors that concurrent
   connections cause on some filesystems.
@@ -378,6 +381,7 @@ through history is a listener too.
 | Support a new codec | Implement `FrameEncoder`, register it in `audio::encoder::build_encoder` |
 | Add a live audio consumer | Subscribe to `BroadcastHub`, nothing else |
 | Show something new about each listener | `models/listener.rs`, `ListenerView` in `ws/messages.rs` and `api/types.ts`, `lib/listeners.ts`, `features/status/ListenersBadge.tsx`. If the value changes during a session, give `ListenerHandle` a setter that goes through `ListenerRegistry::modify` so unchanged values wake nobody |
+| Add something to the update notice | `models/update.rs` for the rules, `services/update_service.rs` for the fetch, `dto/update_dto.rs`, `lib/updateSteps.ts` for the steps shown |
 | Change who may see the listener list | `may_watch_listeners` in `ws/session.rs`, and the matching test there |
 | Change the storage backend | Reimplement the repository traits, leave the services alone |
 

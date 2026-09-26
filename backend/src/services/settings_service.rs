@@ -333,6 +333,7 @@ mod tests {
                 frame_ms: 40,
                 recording_sample_rate: None,
                 recordings_dir: None,
+                check_for_updates: false,
             })
             .expect("configure");
 
@@ -347,6 +348,10 @@ mod tests {
             Settings::default().auto_start_delay_seconds
         );
         assert_eq!(reset.frame_ms, Settings::default().frame_ms);
+        assert_eq!(
+            reset.check_for_updates,
+            Settings::default().check_for_updates
+        );
         // The microphone is chosen elsewhere, so resetting the tuning must not move it.
         assert_eq!(reset.input_device_id, Some("Scarlett Solo USB".to_string()));
     }
