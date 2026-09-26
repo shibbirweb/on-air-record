@@ -31,6 +31,7 @@ running it on macOS, Linux and Windows.
 
 - [Opening it](#opening-it)
 - [Signing in](#signing-in)
+- [Your account settings](#your-account-settings)
 - [The screen at a glance](#the-screen-at-a-glance)
 - [The top bar](#the-top-bar)
 - [Listening to what is happening now](#listening-to-what-is-happening-now)
@@ -79,36 +80,112 @@ included, because a browser assumes a different one if you leave it out. Changin
 
 ## Signing in
 
-Whoever set the recorder up chose whether it needs a login.
+Whoever set the recorder up chose whether it needs a login. If it does not ask you to sign in, it was left
+open: anyone who can open the address can listen and change the settings. That is meant for a network you
+trust, such as a home, and not for the open internet.
 
-**If it asks you to sign in,** use the email and password the admin gave you. There are two kinds of
-account:
+### The first visit: choosing whether to have logins
 
-- **Listener**: you can listen live, go back through the recordings, change day, play faster or slower,
-  jump to bookmarks, and save audio as a file. The buttons for things you cannot change, such as Record and
-  Stop, the microphone choice, adding bookmarks and the Settings page, are simply not shown to you.
+![The first visit: a question over the control room asking whether to set up accounts or keep the recorder open](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/first-run.png)
+
+The very first time anyone opens the page, it asks one question, and it does not go away until it is
+answered:
+
+- **Set up accounts**: everybody will need to sign in. You create the first account, which becomes the
+  admin, and can add other people afterwards.
+- **Keep it open**: no login, as before. You can still switch accounts on later from the settings page.
+
+Whoever answers first decides, so if other people share the network, open the page yourself first.
+[Logins and accounts](SETUP.md#logins-and-accounts) in the installation guide helps with the choice.
+
+![Creating the admin account: email, password, and the password again](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/first-run-setup.png)
+
+Choosing **Set up accounts** asks for an email and a password. Nothing is ever sent to the email; it is only
+the name you sign in with. The password needs at least 8 characters, and a short sentence works well.
+**Create and sign in** finishes setup and signs you straight in.
+
+### Signing in with your password
+
+![The sign in page, with email and password](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/login.png)
+
+With accounts on, the page asks for your email and password before showing anything else. Use the ones the
+admin gave you. If you have forgotten your password, ask an admin to set a new one.
+
+After five wrong passwords, the device you are using has to wait 15 minutes before trying again. Other
+devices are not affected.
+
+### Signing in with a code
+
+![The second step of signing in, asking for the 6 digit code from the authenticator app](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/login-code.png)
+
+If you have switched on [two factor sign in](#two-factor-sign-in), a right password takes you to a second
+step. Open your authenticator app, find **On Air Record**, and type the 6 digit code it shows. No phone to
+hand? Type one of your recovery codes instead. **Use a different account** goes back to the password.
+
+### Admins and listeners
+
+There are two kinds of account:
+
 - **Admin**: everything, including the settings and the list of accounts.
+- **Listener**: listen live, go back through the recordings, change day, play faster or slower, jump to
+  bookmarks, and save audio as a file.
 
-Your account is the person icon at the top right. It shows your email and role, and has **Account settings**
-and **Sign out**. Account settings is where you change your password and set up two factor sign in, and
-every account can open it, listeners included. Changing your password signs you out on every other device
-you use. If you forget it, ask an admin to set a new one.
+![The control room as a listener sees it: no Settings link, no Record button, and the microphone choice greyed out](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/listener-view.png)
 
-**Two factor sign in** adds a second step after your password: a 6 digit code from an authenticator app on
-your phone, such as Google Authenticator, Microsoft Authenticator, Authy or 1Password. To switch it on,
-open **Account settings**, press **Set up** under **Two factor sign in**, scan the QR code with the app,
-and type the code the app then shows. You are given ten recovery codes: save them somewhere safe, away from
-your phone. Each one signs you in once if your phone is lost. From then on, signing in asks for the code
-after your password. If you lose your phone and your recovery codes, an admin can switch it off for you.
+A listener sees the same control room without the things they cannot change. There is no **Settings** link
+in the top bar, no **Record** or **Stop** button, the microphone choice is greyed out, and bookmarks can be
+jumped to but not added or removed.
 
-**If it does not ask you to sign in,** it was left open: anyone who can open the address can listen and
-change the settings. That is intended for a network you trust, such as a home, and not for the open
-internet.
+## Your account settings
 
-**If you are the first person ever to open it,** it asks you to choose. **Set up accounts** makes you the
-admin; **Keep it open** leaves it without a login. The installation guide explains the choice under
-[Logins and accounts](SETUP.md#logins-and-accounts). An open recorder can still be switched to accounts
-later from Settings.
+![The account menu, open under the person icon: the email, the role, Account settings and Sign out](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/account-menu.png)
+
+With accounts on, the person icon at the top right is your account. It shows your email and whether you are
+an admin or a listener, and has **Account settings** and **Sign out**.
+
+![Account settings: changing your password, and two factor sign in](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/account-settings.png)
+
+**Account settings** is yours whatever your role, listeners included. It opens as a page inside the app, so
+audio you are listening to keeps playing.
+
+To **change your password**, type the current one and the new one twice, then press **Change password**.
+Every other device signed in to your account is signed out, which is the point if you think someone may know
+the old one. The device you are using stays signed in.
+
+### Two factor sign in
+
+Two factor sign in adds a second step after your password: a 6 digit code from an authenticator app on your
+phone, such as Google Authenticator, Microsoft Authenticator, Authy or 1Password. Someone who learns your
+password still cannot sign in without your phone. It is especially worth having on an admin account.
+
+**To switch it on**, open **Account settings** and press **Set up** under **Two factor sign in**, then
+**Set up** again.
+
+![Setting up two factor sign in: a QR code to scan, and a box for the code the app then shows](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/two-factor-scan.png)
+
+1. Scan the QR code with your authenticator app. It appears there as **On Air Record** with your email.
+   If you cannot scan it, open **Cannot scan it? Type this key instead** and type the key into the app.
+2. Type the 6 digit code the app now shows, and press **Turn on**. Codes change every 30 seconds, so type
+   the current one.
+
+![Ten recovery codes, with Copy, Download and I have saved them](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/two-factor-codes.png)
+
+3. You are given ten **recovery codes**. Each one signs you in once, in place of a code from your phone,
+   for the day your phone is lost or flat. They are shown only now, so press **Download** and keep the file
+   somewhere safe and away from your phone, then press **I have saved them**. On a plain `http://` address
+   the browser does not allow **Copy**, so use **Download**.
+
+From then on, signing in asks for [the code after your password](#signing-in-with-a-code). The **Two factor
+sign in** card on Account settings says it is on and how many recovery codes you have left, and **Manage**
+opens it again:
+
+- **New recovery codes** replaces the whole set, for when they are running low or you have lost the file.
+  The old ones stop working. It asks for your password.
+- **Turn off** goes back to signing in with just your password. It asks for your password too.
+
+**If you lose your phone:** sign in with a recovery code, then open **Manage**, turn two factor sign in off
+and set it up again on the new phone. If you have no recovery codes left either, an admin can switch it off
+for you from the settings page.
 
 ## The screen at a glance
 
@@ -132,7 +209,7 @@ reporting a problem, and the version number.
 
 ## The top bar
 
-![The top bar, showing the ON AIR sign, the page links, the connection status and the listener count](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/header.png)
+![The top bar, showing the ON AIR sign, the page links, the connection status, the listener count and the account icon](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/header.png)
 
 Reading from left to right:
 
@@ -145,6 +222,8 @@ Reading from left to right:
   [Questions and problems](#questions-and-problems).
 - **The listener count** is how many browsers are currently connected.
 - **The moon or sun icon** switches between light and dark colours.
+- **The person icon** is your account, when the recorder has logins: see
+  [Your account settings](#your-account-settings). A listener sees no **Settings** link.
 
 ## Listening to what is happening now
 
@@ -363,6 +442,8 @@ it levels off is set by the retention window, described next.
 
 ![The settings page](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/settings.png)
 
+With logins on, only admins have a settings page; listeners never see it.
+
 Settings work differently from the rest of the app: **nothing you change takes effect until you press Save
 changes.** A bar appears at the bottom of the page with three buttons.
 
@@ -416,7 +497,7 @@ on playing normally, so you can move the location without losing history.
 
 ### Microphone level, block length and start up
 
-![The audio settings: input gain, segment length and record on start up](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/settings-audio.png)
+![The audio settings: input gain, segment length, record on start up and start up delay](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/settings-audio.png)
 
 **Input gain** makes a quiet microphone louder. Watch the level meter on the control room page while you
 adjust it. Above 1.00x you risk distorting an already loud microphone.
@@ -434,6 +515,39 @@ recording after a reboot turns out silent while pressing Stop and then Start fix
 microphone was not ready yet when the service started, which is common with USB microphones on a machine
 that runs the service at boot. Ten to thirty seconds is usually plenty. The page itself is available
 straight away; only the recording waits.
+
+### Who can use the recorder
+
+The **Access** card at the bottom of the page is different from the rest: whatever you do there happens at
+once, without pressing Save.
+
+On a recorder that was kept open, it has a **Set up accounts** button, which asks for the first admin
+account exactly as the [first visit](#the-first-visit-choosing-whether-to-have-logins) does. Anyone already
+listening is asked to sign in within a few seconds.
+
+![The Access card: the list of accounts, each with its role, and Add an account](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/settings-access.png)
+
+With accounts on, it lists everyone who can sign in. Your own account is marked **you**, and **2FA** marks
+anyone who uses [two factor sign in](#two-factor-sign-in). For each of the others:
+
+- **The role menu** makes them an admin or a listener. The recorder applies it at once, without them signing
+  in again; their page shows the buttons for the new role the next time it loads.
+- **The key button** sets a new password for them, for when they have forgotten theirs. They are signed out
+  everywhere and sign in again with the new one.
+- **The shield button**, shown only for someone using two factor sign in, removes it, for when they have
+  lost both their phone and their recovery codes. They then sign in with just their password.
+- **The bin button** removes the account, after asking you to confirm. They are signed out at once, and
+  anything they were listening to stops within 15 seconds.
+
+There is always at least one admin: the last one cannot be made a listener or removed. You cannot change
+your own role or remove yourself here either; another admin does that, so nobody locks themselves out by
+accident.
+
+![Adding an account: email, password twice, and the role](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/add-account.png)
+
+**Add an account** asks for the person's email, a first password, and whether they are a listener or an
+admin. Give them the email and password yourself, since nothing is sent to them. They can change the
+password under [Account settings](#your-account-settings) once they are in.
 
 ## On a phone or a tablet
 

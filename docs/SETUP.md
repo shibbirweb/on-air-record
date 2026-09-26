@@ -472,6 +472,8 @@ the choice.
 A recorder is a microphone that is always on, so decide who can reach it. The first person to open the page
 is asked once:
 
+![The first visit: a question over the control room asking whether to set up accounts or keep the recorder open](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/first-run.png)
+
 - **Set up accounts.** They create the admin account on the spot, and from then on everybody signs in.
 - **Keep it open.** No login, as in earlier versions. Anyone who can reach the page can listen, go back
   through the recordings, download them, and change the settings.
@@ -483,6 +485,9 @@ websites are refused, so opening some other site cannot make a browser listen in
 The question is asked by whoever arrives first. On a network with other people on it, open the page
 yourself as soon as it starts, so that nobody answers it before you do. An existing installation that is
 upgraded asks the question too, on its next visit.
+
+The [user guide](USER_GUIDE.md#signing-in) walks through every screen of this with pictures: the first
+visit, signing in, account settings, two factor sign in, and managing accounts.
 
 ### Who can do what
 
