@@ -268,6 +268,9 @@ async fn a_listener_can_listen_but_not_change_anything() {
             Some(json!({ "timestampMs": 1, "label": "x" })),
         ),
         (Method::GET, "/api/users", None),
+        // The update notice is for the people who can act on it, and names the install folder.
+        (Method::GET, "/api/updates", None),
+        (Method::POST, "/api/updates/check", None),
     ];
     for (method, path, body) in forbidden {
         let reply = call(&app, method.clone(), path, Some(&listener), body).await;
@@ -284,6 +287,27 @@ async fn a_listener_can_listen_but_not_change_anything() {
     )
     .await;
     assert_eq!(changed.status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn admins_read_the_update_notice_without_waiting_on_the_network() {
+    let app = app("updates");
+
+    // Open: everybody has admin powers, so everybody may read it.
+    let open = call(&app, Method::GET, "/api/updates", None, None).await;
+    assert_eq!(open.status, StatusCode::OK, "{}", open.body);
+    assert_eq!(open.body["currentVersion"], env!("CARGO_PKG_VERSION"));
+    // Nothing has been checked yet: the first check waits a minute after start, and reading the status
+    // never asks GitHub itself.
+    assert_eq!(open.body["checkedAtMs"], Value::Null);
+    assert_eq!(open.body["available"], Value::Null);
+    assert_eq!(open.body["automatic"], true);
+
+    let admin = set_up_admin(&app).await;
+    let signed_out = call(&app, Method::GET, "/api/updates", None, None).await;
+    assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED);
+    let as_admin = call(&app, Method::GET, "/api/updates", Some(&admin), None).await;
+    assert_eq!(as_admin.status, StatusCode::OK);
 }
 
 #[tokio::test]

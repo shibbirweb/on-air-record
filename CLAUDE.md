@@ -34,7 +34,7 @@ The underlying commands:
 ```sh
 # Backend, from backend/
 cargo run                                    # API on :8080, reads ../frontend/dist
-cargo test                                   # ~290 unit and router tests
+cargo test                                   # ~310 unit and router tests
 cargo test day_bounds                        # single test by name substring
 cargo test --lib services::playback_service  # one module
 cargo clippy --all-targets -- -D warnings    # must be clean
@@ -43,7 +43,7 @@ cargo fmt
 # Frontend, from frontend/
 npm run dev      # Vite on :5173, proxies /api and the WebSocket to :8080
 npm run build    # tsc -b then vite build, writes dist/, which a release backend embeds
-npm test         # Vitest, ~126 tests
+npm test         # Vitest, ~165 tests
 npm run lint     # oxlint
 ```
 
@@ -109,6 +109,18 @@ recorder) watch it and push the whole list to their browser on every change. Rul
   listener session never subscribes; do not rely on the frontend to hide it.
 - The registry is also the listener count in `GET /api/status`; `BroadcastHub::listener_count` only counts
   sessions on the live feed.
+
+### Update notices
+
+`services/update_service.rs` asks GitHub for the releases list a minute after start and every six hours,
+while the `check_for_updates` setting is on, and keeps the releases newer than the running version on this
+install's channel. It is **notify only** and the service's **only request to the internet**: keep it that
+way unless the user asks, and keep it switchable. It uses `ureq` with `ring` and bundled roots, run on a
+blocking thread; not `reqwest`, whose rustls default pulls in `aws-lc-rs` and a CMake and NASM build on
+Windows. `GET /api/updates` never waits on the network. Version order, channel filtering and install
+detection are pure functions in `models/update.rs`; the update steps the UI shows are built in
+`frontend/src/lib/updateSteps.ts` from what the service reports (install kind, folder, OS, target triple
+from `build.rs`). Release notes render through `lib/releaseNotes.ts` as data, never HTML.
 
 ### Storage invariants
 
@@ -232,7 +244,9 @@ semicolons and trailing commas in TS). Project specifics on top of those:
   "latest" the installers hand to everybody.
 - A user visible change also gets an entry in `CHANGELOG.md`, under the unreleased version at the top
   (start a `## [Unreleased]` section if the top one already has a date), written for someone running the app rather than for a developer, with its ticket in brackets. Fixes to
-  something that never shipped in a release do not belong there. That section becomes the release notes.
+  something that never shipped in a release do not belong there. That section becomes the release notes:
+  beta-publish.yml writes it onto betas, and release.yml's `notes` job writes a stable version's dated
+  section onto its release when the notes are empty or GitHub generated, keeping hand written ones.
 - No `unwrap()` or `expect()` outside `main.rs`, tests, and mutex locks. Everything else returns
   `AppResult<T>`.
 - Doc comments explain **why**, not what. The existing code is dense with rationale; match that.

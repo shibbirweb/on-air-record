@@ -569,6 +569,38 @@ microphone was not ready yet when the service started, which is common with USB 
 that runs the service at boot. Ten to thirty seconds is usually plenty. The page itself is available
 straight away; only the recording waits.
 
+### Updates
+
+![The strip under the top bar saying On Air Record 0.6.0 is available, with a button for what is new and how to update](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/update-banner.png)
+
+When a newer version is released, admins see a strip under the top bar saying so. Listeners never see it,
+since there is nothing they could do about it. **What's new and how to update** opens the details, and the
+**X** hides the strip until the release after that one, in that browser.
+
+![What is new in 0.6.0, then the steps to update: stop it, then run the installer again, with commands to copy](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/whats-new.png)
+
+The window lists what changed in every release since yours, not just the newest, so nothing you skipped is
+missed. Below that are the steps to update, written for how your copy was installed:
+
+- **Installed with the installer script**: stop it, then run the installer again with the update option.
+  The commands name your install folder, so you can copy them as they are. Your settings, accounts and
+  recordings are kept, and it starts again when it is done.
+- **Running as a Linux service**: commands to download the new version, check it, put it in place and
+  restart the service.
+- **Anything else**: which download to get for your machine.
+
+Updating restarts the service, so a few seconds are not recorded. The recorder never updates itself; it
+only tells you.
+
+![The Updates card: the running version, a note that 0.6.0 is available, the time of the last check, What is new and Check now buttons, and the automatic check switch](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/settings-updates.png)
+
+The **Updates** card on the settings page shows the version you are running, whether it follows stable or
+beta releases (whichever the installer was told), and when it last checked. **Check now** asks straight
+away. **Check for updates automatically** is on to start with: the recorder asks GitHub every few hours. It
+is the only thing the recorder ever sends to the internet, so switch it off, and save, for a machine that
+should not contact anything outside your network. Without internet access it simply finds nothing, and
+says so under **Check now**.
+
 ### Who can use the recorder
 
 The **Access** card at the bottom of the page is different from the rest: whatever you do there happens at

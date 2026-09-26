@@ -832,9 +832,29 @@ tested to face the open internet. If you need access from elsewhere, use a VPN i
 
 ## Upgrading
 
+The control room tells admins when a new version is out, with what changed and the commands to update for
+the way this copy was installed; see the user guide's Updates section. To do it by hand:
+
 1. Stop the service.
 2. Replace the program file with the new one.
 3. Start it again.
+
+For a folder made by the installer, those three steps are two commands, run as the account that owns the
+folder:
+
+```sh
+./on-air-record/stop.sh
+curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh -s -- --update
+```
+
+Stop it first: `--update` replaces the program and starts it again, and a copy still running would hold
+the port.
+
+**The update check.** Every six hours, and a minute after it starts, the service asks
+`api.github.com` for the list of releases. That is the only request it ever makes to the internet. It
+sends nothing about the recorder beyond its version in the user agent, and it never downloads or installs
+anything. Turn it off under Settings, Updates, **Check for updates automatically**. A machine with no
+internet access needs no change: the check fails quietly and tries again later.
 
 Leave the data directory alone. Recordings, settings and bookmarks all live there and carry over. The
 database upgrades itself on first start if the new version needs it.
@@ -1009,9 +1029,10 @@ Go to **Releases**, then **Draft a new release**.
 - **Choose a tag**: type `v` followed by the version, so `v0.2.0`, and pick **Create new tag on publish**.
 - **Target**: `master` for a stable release, `develop` for a beta.
 - **Title**: the version is fine.
-- **Notes**: for a stable release, paste the version's section from [`CHANGELOG.md`](../CHANGELOG.md), after
-  replacing "Unreleased" in its heading with today's date and committing that. For a beta, paste the
-  `[Unreleased]` section as it stands, and leave the file alone until the stable release.
+- **Notes**: leave them empty. The workflow fills them in from the version's section of
+  [`CHANGELOG.md`](../CHANGELOG.md), which is what the app shows admins as What's new. Do not press
+  **Generate release notes**: GitHub's list of pull requests is replaced the same way, but it is not worth
+  the confusion. Anything you do write by hand is kept exactly as it is.
 - **Set as a pre-release**: ticked for a beta, unticked for a stable release. The workflow checks this
   against the version and refuses to build if they disagree, because a beta published as a normal release
   would be handed to everybody.
@@ -1030,12 +1051,13 @@ Publishing starts [`.github/workflows/release.yml`](../.github/workflows/release
    `aarch64-apple-darwin` and `x86_64-apple-darwin` on a macOS runner, `x86_64-unknown-linux-gnu` on Linux,
    and `x86_64-pc-windows-msvc` on Windows.
 4. Packs each into a `.tar.gz`, or a `.zip` on Windows, with a `.sha256` alongside.
-5. Attaches all eight files to the release you just published.
+5. Attaches all eight files to the release you just published, then fills in the notes from
+   `CHANGELOG.md` if they are empty or are GitHub's generated list.
 6. Installs what it just published, on macOS, Linux and Windows, using the installer scripts exactly as a
    user would, and checks the service starts and reports the version the archive is named for.
 
 Expect ten to fifteen minutes, most of it compiling. The release exists and is visible the whole time; the
-files appear at the end. Your notes are left exactly as you wrote them.
+files appear at the end. Notes you wrote yourself are left exactly as they are.
 
 That last step runs after publishing, because there is nothing to install until the files exist. So if it
 fails, the release is already public and broken. Delete it and its tag, fix the problem, and cut it again.

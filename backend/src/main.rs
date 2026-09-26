@@ -52,6 +52,7 @@ async fn main() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     tokio::spawn(state.retention.clone().run(shutdown_rx.clone()));
+    tokio::spawn(state.updates.clone().run(shutdown_rx.clone()));
     tokio::spawn(state.capture.clone().start_if_configured(shutdown_rx));
 
     let address = config.socket_addr();

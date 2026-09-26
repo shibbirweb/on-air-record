@@ -48,7 +48,13 @@ pub fn required_access(method: &Method, path: &str) -> Option<Access> {
     if path == "/auth/password" || path.starts_with("/auth/two-factor") {
         return Some(Access::Listen);
     }
-    if path == "/users" || path.starts_with("/users/") {
+    // Reading the update notice is admin only too: listeners cannot act on it, and it names the
+    // install folder.
+    if path == "/users"
+        || path.starts_with("/users/")
+        || path == "/updates"
+        || path.starts_with("/updates/")
+    {
         return Some(Access::Administer);
     }
     if method == Method::GET || method == Method::HEAD {

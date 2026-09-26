@@ -11,6 +11,7 @@ pub mod session_dto;
 pub mod settings_dto;
 pub mod status_dto;
 pub mod timeline_dto;
+pub mod update_dto;
 
 pub use auth_dto::{
     AuthStateResponse, ChangePasswordRequest, CodeRequest, ConfirmPasswordRequest,
@@ -30,3 +31,4 @@ pub use timeline_dto::{
     CoverageDto, ExportPlanResponse, ExportQuery, PeaksQuery, PeaksResponse, RecordingDayDto,
     RecordingDaysResponse, TimelineRangeResponse,
 };
+pub use update_dto::UpdateStatusResponse;

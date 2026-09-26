@@ -25,4 +25,10 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed={}", dist.display());
+
+    // The target triple, which names the release download for this machine. Cargo gives it to build
+    // scripts only, so it is handed on to the program as a compile time variable.
+    if let Ok(target) = std::env::var("TARGET") {
+        println!("cargo:rustc-env=OAR_TARGET={target}");
+    }
 }

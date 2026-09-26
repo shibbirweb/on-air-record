@@ -96,6 +96,7 @@ export function SettingsActionBar() {
         'autoStartDelaySeconds',
         'recordingSampleRate',
         'recordingsDir',
+        'checkForUpdates',
       ] as const
     ).every(
       (key) => Object.is(pending[key], defaults[key]),

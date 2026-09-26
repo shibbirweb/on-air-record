@@ -17,6 +17,7 @@ pub mod retention_service;
 pub mod settings_service;
 pub mod timeline_service;
 pub mod totp;
+pub mod update_service;
 
 pub use auth_service::{AuthService, LoginOutcome, SignedIn, TwoFactorSetup};
 pub use bookmark_service::BookmarkService;
@@ -30,3 +31,4 @@ pub use recorder_service::{RecorderHandle, RecorderService};
 pub use retention_service::RetentionService;
 pub use settings_service::SettingsService;
 pub use timeline_service::{RecordingDay, TimelineRange, TimelineService};
+pub use update_service::UpdateService;
