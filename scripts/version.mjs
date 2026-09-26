@@ -387,7 +387,7 @@ async function commandBump(requested) {
     minor: 'new features, nothing broken',
     major: 'something that was working now behaves differently',
     beta: onBeta ? 'another beta of the same version' : 'a pre-release to test first, from develop',
-    release: 'the beta is ready: publish it as stable, from master',
+    release: 'the beta is ready: make it stable, through develop into master',
   };
 
   let level = requested;
@@ -441,14 +441,20 @@ function finishBump(current, level, target) {
     return result;
   }
 
-  // A beta goes to develop and is published as a pre-release; a stable version to master as a normal
-  // release. Both branches take changes only by pull request. The release workflow refuses the wrong
-  // pre-release setting, so say which it is up front.
+  // Every change enters through develop, releases included. A beta is published from develop as a
+  // pre-release; a stable version goes on into master and is published from there as a normal release.
+  // Both branches take changes only by pull request. The release workflow refuses the wrong pre-release
+  // setting, so say which it is up front.
   const isBeta = betaNumber(target) !== null;
   const branch = isBeta ? 'develop' : 'master';
-  console.log(`\nNothing is released yet. Commit this on a branch and merge it into ${branch} by pull request:\n`);
+  console.log('\nNothing is released yet. Commit this on a branch cut from develop:\n');
   console.log(`  git commit -am "chore:[OAR-${nextTicket()}] release ${target}"`);
   console.log('');
+  console.log(
+    isBeta
+      ? 'Then merge it into develop by pull request.'
+      : 'Then merge it into develop by pull request, and develop into master by another.',
+  );
   console.log(
     `Once it is on ${branch}, on GitHub: Releases, Draft a new release, create the tag v${target} on` +
       ` ${branch},` +

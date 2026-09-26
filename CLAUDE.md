@@ -197,10 +197,12 @@ semicolons and trailing commas in TS). Project specifics on top of those:
   GitHub starts no workflow for anything done with the built in token. Anything in `release.yml` that
   checks out code must keep passing `ref: ${{ inputs.tag }}`, or a called build compiles the wrong commit.
 - Betas are released from `develop` as GitHub pre-releases with versions like `0.4.0-beta.1`
-  (`version.mjs bump beta`). When a beta has held up, `develop` is merged into `master` by pull request and
-  released as stable (`version.mjs bump release`). CI runs on pushes to both and on every pull request, on
-  Linux, macOS and Windows. `release.yml` refuses a beta version not marked as a pre-release and a stable
-  one that is, so a beta can never become the "latest" the installers hand to everybody.
+  (`version.mjs bump beta`). When a beta has held up, `version.mjs bump release` finishes the version on a
+  branch from `develop`, that branch is merged into `develop`, then `develop` into `master`, and the stable
+  release is published from `master`. Every change enters through `develop`, so no back merge is needed.
+  CI runs on pushes to both and on every pull request, on Linux, macOS and Windows. `release.yml` refuses
+  a beta version not marked as a pre-release and a stable one that is, so a beta can never become the
+  "latest" the installers hand to everybody.
 - A user visible change also gets an entry in `CHANGELOG.md`, under the unreleased version at the top
   (start a `## [Unreleased]` section if the top one already has a date), written for someone running the app rather than for a developer, with its ticket in brackets. Fixes to
   something that never shipped in a release do not belong there. That section becomes the release notes.
