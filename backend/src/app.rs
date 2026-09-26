@@ -11,16 +11,17 @@ use crate::config::AppConfig;
 use crate::db::Database;
 use crate::error::AppResult;
 use crate::repositories::{
-    BookmarkRepository, SegmentRepository, SessionRepository, SettingsRepository,
+    AuthRepository, BookmarkRepository, SegmentRepository, SessionRepository, SettingsRepository,
 };
 use crate::services::{
-    BookmarkService, BroadcastHub, CaptureService, DeviceService, ExportService, PlaybackService,
-    RetentionService, SettingsService, TimelineService,
+    AuthService, BookmarkService, BroadcastHub, CaptureService, DeviceService, ExportService,
+    PlaybackService, RetentionService, SettingsService, TimelineService,
 };
 use crate::util::time::now_ms;
 
 pub struct AppState {
     pub config: Arc<AppConfig>,
+    pub auth: Arc<AuthService>,
     pub settings: Arc<SettingsService>,
     pub devices: Arc<DeviceService>,
     pub capture: Arc<CaptureService>,
@@ -48,7 +49,8 @@ impl AppState {
         let settings_repository = Arc::new(SettingsRepository::new(database.clone()));
         let sessions = Arc::new(SessionRepository::new(database.clone()));
         let segments = Arc::new(SegmentRepository::new(database.clone()));
-        let bookmark_repository = Arc::new(BookmarkRepository::new(database));
+        let bookmark_repository = Arc::new(BookmarkRepository::new(database.clone()));
+        let auth = Arc::new(AuthService::new(Arc::new(AuthRepository::new(database))));
 
         // A hard kill leaves the last session marked as still recording. Closing it now keeps the
         // sessions list honest and stops the UI from showing two active sessions after a restart.
@@ -86,6 +88,7 @@ impl AppState {
 
         Ok(Arc::new(Self {
             config,
+            auth,
             settings,
             devices,
             capture,

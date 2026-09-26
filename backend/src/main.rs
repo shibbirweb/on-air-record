@@ -3,18 +3,33 @@
 //! `main` does four things and nothing else: set up logging, resolve the configuration, build the
 //! application, and serve it until asked to stop. Everything interesting happens behind [`AppState`].
 
+use std::net::SocketAddr;
+
 use clap::Parser;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 use on_air_record::app::AppState;
+use on_air_record::cli;
 use on_air_record::config::{AppConfig, CliArgs};
 use on_air_record::routes;
 
 #[tokio::main]
 async fn main() {
-    let config = AppConfig::resolve(CliArgs::parse());
+    let mut args = CliArgs::parse();
+    let command = args.command.take();
+    let config = AppConfig::resolve(args);
+
+    // A maintenance command runs against the data directory and exits, without starting the service.
+    if let Some(command) = command {
+        if let Err(error) = cli::run(&config, command) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     init_tracing(&config.log_level);
 
     tracing::info!(
@@ -50,7 +65,8 @@ async fn main() {
 
     tracing::info!(%address, "control room ready on http://{address}");
 
-    let router = routes::build(state.clone());
+    // Connection info gives handlers the client address, which the login throttle counts failures by.
+    let router = routes::build(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
     let server = axum::serve(listener, router).with_graceful_shutdown(wait_for_shutdown());
 
     if let Err(error) = server.await {

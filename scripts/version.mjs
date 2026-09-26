@@ -187,11 +187,38 @@ function lastTag() {
   return git('describe', '--tags', '--abbrev=0', '--match', 'v*');
 }
 
-/** Commit subjects since a tag, newest first. Everything when there is no tag yet. */
+/**
+ * Commit subjects since a tag, newest first. Everything when there is no tag yet.
+ *
+ * Merge commits are left out: with pull requests into develop every change arrives with one, and its
+ * subject ("Merge pull request #4 from ...") says nothing about what kind of change it carried.
+ */
 function commitsSince(tag) {
   const range = tag ? `${tag}..HEAD` : 'HEAD';
-  const out = git('log', range, '--format=%s');
+  const out = git('log', range, '--no-merges', '--format=%s');
   return out ? out.split('\n').filter(Boolean) : [];
+}
+
+/**
+ * The `[Unreleased]` section of the changelog, without its heading: what beta.yml uses as the release
+ * notes, and what a stable release's notes are pasted from by hand.
+ */
+function commandNotes() {
+  const text = read(join(ROOT, 'CHANGELOG.md'));
+  const start = text.indexOf('## [Unreleased]');
+  if (start === -1) {
+    console.error('CHANGELOG.md has no [Unreleased] section to take release notes from');
+    return 1;
+  }
+  const body = text.slice(text.indexOf('\n', start) + 1);
+  const end = body.search(/^## \[/m);
+  const notes = (end === -1 ? body : body.slice(0, end)).trim();
+  if (notes === '') {
+    console.error('the [Unreleased] section of CHANGELOG.md is empty');
+    return 1;
+  }
+  console.log(notes);
+  return 0;
 }
 
 /** The next OAR ticket, so the suggested commit line is ready to paste. */
@@ -201,13 +228,39 @@ function nextTicket() {
   return used.length > 0 ? Math.max(...used) + 1 : 1;
 }
 
-function nextVersions(current) {
-  const [major, minor, patch] = current.split('-')[0].split('.').map(Number);
-  return {
+/** The beta number of a version like 0.4.0-beta.2, or null for a stable version. */
+function betaNumber(version) {
+  const match = /-beta\.(\d+)$/.exec(version);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Every version the next release could carry, by level.
+ *
+ * From a stable version, `beta` is the first beta of whichever release the commits suggest, so a beta
+ * always previews a real next version rather than an arbitrary one. From a beta, `beta` is the next beta
+ * of the same version and `release` is that version, finished. `suggested` is the stable level the
+ * commits imply.
+ */
+function nextVersions(current, suggested = 'minor') {
+  const core = current.split('-')[0];
+  const [major, minor, patch] = core.split('.').map(Number);
+  const stable = {
     patch: `${major}.${minor}.${patch + 1}`,
     minor: `${major}.${minor + 1}.0`,
     major: `${major + 1}.0.0`,
   };
+
+  const beta = betaNumber(current);
+  if (beta === null) {
+    return { ...stable, beta: `${stable[suggested]}-beta.1` };
+  }
+  return { beta: `${core}-beta.${beta + 1}`, release: core };
+}
+
+/** The levels `bump` offers from a version: betas can only move to another beta or be finished. */
+function levelsFrom(current) {
+  return betaNumber(current) === null ? ['patch', 'minor', 'major', 'beta'] : ['beta', 'release'];
 }
 
 /**
@@ -273,9 +326,14 @@ function commandPending() {
   }
 
   const level = suggest(subjects);
+  const next = nextVersions(current, level);
   console.log(`Unreleased       ${subjects.length} commits (${summarise(subjects)})`);
   console.log('');
-  console.log(`A ${level} release would make this ${nextVersions(current)[level]}.`);
+  if (betaNumber(current) === null) {
+    console.log(`A ${level} release would make this ${next[level]}, or ${next.beta} as a beta.`);
+  } else {
+    console.log(`The next beta would be ${next.beta}, and finishing it would make ${next.release}.`);
+  }
   console.log('Run `node scripts/version.mjs bump` to cut it.');
   return 0;
 }
@@ -298,6 +356,13 @@ async function commandBump(requested) {
 
   const subjects = commitsSince(tag);
   if (subjects.length === 0) {
+    // Finishing a beta usually has nothing new in it: the beta held up, so it ships as it is. That is the
+    // one step that makes sense with no new commits, so it is allowed and offered; anything else is not.
+    if (betaNumber(current) !== null && (requested === undefined || requested === 'release')) {
+      const target = nextVersions(current).release;
+      console.log(`\nNothing has landed since ${tag}, so the one step is to finish it as ${target}.`);
+      return finishBump(current, 'release', target);
+    }
     console.log('\nNothing has landed since that release, so there is nothing to put in a new one.');
     return 0;
   }
@@ -310,13 +375,19 @@ async function commandBump(requested) {
     console.log(`  ... and ${subjects.length - 20} more`);
   }
 
-  const next = nextVersions(current);
-  const suggested = suggest(subjects);
-  const levels = ['patch', 'minor', 'major'];
+  const stableLevel = suggest(subjects);
+  const next = nextVersions(current, stableLevel);
+  const onBeta = betaNumber(current) !== null;
+  // On a beta the question is whether it needs another round or is ready; the commits cannot tell, so
+  // another beta is the careful suggestion.
+  const suggested = onBeta ? 'beta' : stableLevel;
+  const levels = levelsFrom(current);
   const describe = {
     patch: 'bug fixes only',
     minor: 'new features, nothing broken',
     major: 'something that was working now behaves differently',
+    beta: onBeta ? 'another beta of the same version' : 'a pre-release to test first, from develop',
+    release: 'the beta is ready: make it stable, through develop into master',
   };
 
   let level = requested;
@@ -328,10 +399,11 @@ async function commandBump(requested) {
   if (!level) {
     console.log('\nWhat kind of release is this?\n');
     levels.forEach((name, index) => {
-      const mark = name === suggested ? '  <- suggested by the commits above' : '';
-      console.log(`  ${index + 1}) ${name.padEnd(6)} ${next[name].padEnd(8)} ${describe[name]}${mark}`);
+      const mark = name === suggested ? '  <- suggested' : '';
+      console.log(`  ${index + 1}) ${name.padEnd(7)} ${next[name].padEnd(14)} ${describe[name]}${mark}`);
     });
-    console.log('  4) cancel');
+    const cancel = levels.length + 1;
+    console.log(`  ${cancel}) cancel`);
 
     if (!process.stdin.isTTY) {
       console.error('\nNo terminal to ask at. Pass the level: version.mjs bump minor');
@@ -345,7 +417,7 @@ async function commandBump(requested) {
     const answer = (await rl.question(`\nWhich? [${levels.indexOf(suggested) + 1}] `)).trim();
     rl.close();
 
-    if (answer === '4' || answer.toLowerCase() === 'cancel') {
+    if (answer === String(cancel) || answer.toLowerCase() === 'cancel') {
       console.log('Nothing changed.');
       return 0;
     }
@@ -357,7 +429,11 @@ async function commandBump(requested) {
     level = chosen;
   }
 
-  const target = next[level];
+  return finishBump(current, level, next[level]);
+}
+
+/** Move the manifests to `target` and say what finishing the release takes from here. */
+function finishBump(current, level, target) {
   console.log(`\n${level}: ${current} -> ${target}\n`);
 
   const result = commandSet(target);
@@ -365,13 +441,32 @@ async function commandBump(requested) {
     return result;
   }
 
-  console.log(`\nNothing is released yet. To finish:\n`);
+  // Every change enters through develop, releases included. A beta is published from develop as a
+  // pre-release; a stable version goes on into master and is published from there as a normal release.
+  // Both branches take changes only by pull request. The release workflow refuses the wrong pre-release
+  // setting, so say which it is up front.
+  const isBeta = betaNumber(target) !== null;
+  const branch = isBeta ? 'develop' : 'master';
+  console.log('\nNothing is released yet. Commit this on a branch cut from develop:\n');
   console.log(`  git commit -am "chore:[OAR-${nextTicket()}] release ${target}"`);
-  console.log('  git push origin master');
   console.log('');
-  console.log(`Then on GitHub: Releases, Draft a new release, create the tag v${target}, Publish.`);
+  console.log(
+    isBeta
+      ? 'Then merge it into develop by pull request.'
+      : 'Then merge it into develop by pull request, and develop into master by another.',
+  );
+  console.log(
+    `Once it is on ${branch}, on GitHub: Releases, Draft a new release, create the tag v${target} on` +
+      ` ${branch},` +
+      (isBeta ? ' tick "Set as a pre-release",' : ' leave "Set as a pre-release" unticked,') +
+      ' Publish.',
+  );
   console.log('The workflow refuses any other tag, builds all four platforms, attaches them, and then');
   console.log('installs the result on macOS, Linux and Windows to prove it works.');
+  if (isBeta) {
+    console.log('The Beta release workflow does all of this for you; see "A beta in two clicks".');
+    console.log('Testers install it with the installer\'s --beta option; stable users are not offered it.');
+  }
   return 0;
 }
 
@@ -387,6 +482,11 @@ if (action === 'show' && argument === undefined) {
   process.exit(await commandBump(argument));
 } else if (action === 'pending' && argument === undefined) {
   process.exit(commandPending());
+} else if (action === 'notes' && argument === undefined) {
+  process.exit(commandNotes());
+} else if (action === 'next-ticket' && argument === undefined) {
+  console.log(nextTicket());
+  process.exit(0);
 } else {
   console.error(
     [
@@ -396,7 +496,11 @@ if (action === 'show' && argument === undefined) {
       '  node scripts/version.mjs set 0.2.0            move all four to an exact version',
       '  node scripts/version.mjs bump                 show what is unreleased and choose the next version',
       '  node scripts/version.mjs bump minor           the same without the question',
+      '  node scripts/version.mjs bump beta            start or continue a beta, like 0.4.0-beta.1',
+      '  node scripts/version.mjs bump release         finish a beta: 0.4.0-beta.3 becomes 0.4.0',
       '  node scripts/version.mjs pending              report whether a release is due, never fails',
+      '  node scripts/version.mjs notes                print the [Unreleased] changelog section',
+      '  node scripts/version.mjs next-ticket          print the next free OAR ticket number',
     ].join('\n'),
   );
   process.exit(2);

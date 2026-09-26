@@ -156,6 +156,10 @@ node scripts/version.mjs show          # the authoritative version
 node scripts/version.mjs check         # verify all four agree, exit 1 if not
 node scripts/version.mjs set 0.2.0     # move all four to an exact version
 node scripts/version.mjs bump          # show what is unreleased and choose the next version, or make release
+node scripts/version.mjs bump beta     # start or continue a beta on develop, like 0.4.0-beta.1
+node scripts/version.mjs bump release  # finish a beta as stable: 0.4.0-beta.2 becomes 0.4.0, then develop to master
+node scripts/version.mjs notes         # the [Unreleased] changelog section, as release notes
+node scripts/version.mjs next-ticket   # the next free OAR number, for a commit message
 node scripts/version.mjs pending       # report whether a release is due, or make pending
 ```
 

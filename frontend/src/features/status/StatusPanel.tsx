@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { LevelMeter } from '@/features/broadcast/LevelMeter';
 import { formatDuration } from '@/lib/format';
+import { useCanAdminister } from '@/store/useAuthStore';
 import { useConnectionStore } from '@/store/useConnectionStore';
 import { useStatusStore } from '@/store/useStatusStore';
 
@@ -17,6 +18,8 @@ export function StatusPanel() {
   const error = useStatusStore((state) => state.error);
   const startCapture = useStatusStore((state) => state.startCapture);
   const stopCapture = useStatusStore((state) => state.stopCapture);
+  // A listener sees the recorder's state but cannot start or stop it.
+  const mayAdminister = useCanAdminister();
 
   const levels = useConnectionStore((state) => state.levels);
   const connected = useConnectionStore((state) => state.connected);
@@ -55,15 +58,17 @@ export function StatusPanel() {
           {recording && <span className="text-muted-foreground text-xs tabular">{formatDuration(elapsedMs)}</span>}
         </div>
 
-        <Button
-          size="sm"
-          variant={recording ? 'outline' : 'default'}
-          disabled={busy || !reachable}
-          onClick={() => void (recording ? stopCapture() : startCapture())}
-        >
-          {recording ? <Square /> : <Circle />}
-          {recording ? 'Stop' : 'Record'}
-        </Button>
+        {mayAdminister && (
+          <Button
+            size="sm"
+            variant={recording ? 'outline' : 'default'}
+            disabled={busy || !reachable}
+            onClick={() => void (recording ? stopCapture() : startCapture())}
+          >
+            {recording ? <Square /> : <Circle />}
+            {recording ? 'Stop' : 'Record'}
+          </Button>
+        )}
       </div>
 
       <LevelMeter rms={levels.rms} peak={levels.peak} active={recording && connected} />

@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
 import { formatClock, formatDateTime } from '@/lib/format';
+import { useCanAdminister } from '@/store/useAuthStore';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useTimelineStore } from '@/store/useTimelineStore';
 import { useTransportStore } from '@/store/useTransportStore';
@@ -29,6 +30,8 @@ export function BookmarkControls({ getPlayheadMs }: BookmarkControlsProps) {
   const add = useBookmarkStore((state) => state.add);
   const remove = useBookmarkStore((state) => state.remove);
   const clearError = useBookmarkStore((state) => state.clearError);
+  // Listeners can jump to bookmarks but not add or remove them.
+  const mayAdminister = useCanAdminister();
 
   const requestedPositionMs = useTransportStore((state) => state.requestedPositionMs);
   const seek = useTransportStore((state) => state.seek);
@@ -68,51 +71,53 @@ export function BookmarkControls({ getPlayheadMs }: BookmarkControlsProps) {
 
   return (
     <div className="flex items-center gap-1">
-      <Popover open={adding} onOpenChange={(open) => (open ? openForm() : setAdding(false))}>
-        <PopoverTrigger asChild>
-          <Button size="icon-sm" variant="outline" aria-label="Add a bookmark here">
-            <BookmarkPlus />
-          </Button>
-        </PopoverTrigger>
-
-        <PopoverContent align="start" className="w-72 space-y-3 p-3">
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Bookmark this moment</p>
-            <p className="text-muted-foreground text-xs tabular">
-              {pendingAt === null ? '' : formatDateTime(pendingAt)}
-            </p>
-          </div>
-
-          <Input
-            autoFocus
-            value={label}
-            maxLength={120}
-            placeholder="What happened here?"
-            onChange={(event) => setLabel(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                void submit();
-              }
-              if (event.key === 'Escape') {
-                setAdding(false);
-              }
-            }}
-          />
-
-          {error && <p className="text-destructive text-xs">{error}</p>}
-
-          <div className="flex justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>
-              <X />
-              Cancel
+      {mayAdminister && (
+        <Popover open={adding} onOpenChange={(open) => (open ? openForm() : setAdding(false))}>
+          <PopoverTrigger asChild>
+            <Button size="icon-sm" variant="outline" aria-label="Add a bookmark here">
+              <BookmarkPlus />
             </Button>
-            <Button size="sm" disabled={saving || label.trim() === ''} onClick={() => void submit()}>
-              <Check />
-              Save
-            </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
+          </PopoverTrigger>
+
+          <PopoverContent align="start" className="w-72 space-y-3 p-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Bookmark this moment</p>
+              <p className="text-muted-foreground text-xs tabular">
+                {pendingAt === null ? '' : formatDateTime(pendingAt)}
+              </p>
+            </div>
+
+            <Input
+              autoFocus
+              value={label}
+              maxLength={120}
+              placeholder="What happened here?"
+              onChange={(event) => setLabel(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  void submit();
+                }
+                if (event.key === 'Escape') {
+                  setAdding(false);
+                }
+              }}
+            />
+
+            {error && <p className="text-destructive text-xs">{error}</p>}
+
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>
+                <X />
+                Cancel
+              </Button>
+              <Button size="sm" disabled={saving || label.trim() === ''} onClick={() => void submit()}>
+                <Check />
+                Save
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
 
       <Popover open={listOpen} onOpenChange={setListOpen}>
         <PopoverTrigger asChild>
@@ -151,15 +156,17 @@ export function BookmarkControls({ getPlayheadMs }: BookmarkControlsProps) {
                       {formatDateTime(bookmark.timestampMs)} at {formatClock(bookmark.timestampMs)}
                     </span>
                   </button>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    disabled={saving}
-                    aria-label={`Remove ${bookmark.label}`}
-                    onClick={() => void remove(bookmark.id)}
-                  >
-                    <Trash2 />
-                  </Button>
+                  {mayAdminister && (
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      disabled={saving}
+                      aria-label={`Remove ${bookmark.label}`}
+                      onClick={() => void remove(bookmark.id)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>

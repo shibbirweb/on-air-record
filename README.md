@@ -38,7 +38,9 @@ on-air-record/
 Nothing is written anywhere else, so moving the installation is moving that folder, and removing it is
 deleting it. Start it again any time with `./on-air-record/start.sh`, which reads the config, so the port
 only has to be chosen once. Re-run the installer with `--update` for a newer release, `--release v0.1.0`
-for a specific one, or `--reconfigure` to change the port. `--help` lists the rest.
+for a specific one, `--beta` to try new features before everybody else
+([Trying a beta](docs/SETUP.md#trying-a-beta)), or `--reconfigure` to change the port. `--help` lists the
+rest.
 
 There is no prebuilt binary for ARM Linux, such as a Raspberry Pi. The installer says so and points at
 [building from source](#build-from-source).
@@ -156,7 +158,10 @@ through every part of the interface with screenshots.
   in SQLite so the service comes back on the same microphone after a restart.
 - **Bounded disk use.** A retention window is enforced by a janitor that prunes expired audio, its index
   rows, and the directories they leave behind, so an always on recorder cannot quietly fill the disk.
-- **No authentication.** Designed for a trusted local network, so there is nothing to log into.
+- **Optional logins.** The first visit asks whether to set up accounts or keep it open. With accounts,
+  admins control the recorder and listeners can only listen, scrub and export, and anyone can add two
+  factor sign in with an authenticator app. Either way, pages served by other websites cannot listen in or
+  press buttons. Still built for a local network, not the open internet.
 
 ## How it works
 
@@ -400,10 +405,21 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Release workflow producing macOS, Linux, and Windows artifacts
 - [x] systemd unit template, with the Windows service wrapper documented
 
+### Milestone 7: access control
+
+- [x] First run choice between accounts and staying open, asked once
+- [x] Email and password accounts, Argon2id hashed, with admin and listener roles
+- [x] Server side sessions in an HttpOnly, SameSite=Strict cookie, revocable on the next request
+- [x] Open streams re-checked every 15 seconds and closed when access ends
+- [x] Other websites refused for state changes and the stream, in every mode
+- [x] Failed login throttling per client address
+- [x] Account management page, self service password change, and host side recovery commands
+- [x] Two factor sign in with an authenticator app, recovery codes, and admin and host side reset
+
 ## Testing
 
 ```bash
-cd backend  && cargo test                              # 204 unit tests
+cd backend  && cargo test                              # 282 unit and router tests
 cd backend  && cargo clippy --all-targets -- -D warnings
 cd frontend && npm test                                # Vitest, framework free logic
 cd frontend && npm run lint

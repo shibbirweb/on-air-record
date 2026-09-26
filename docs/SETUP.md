@@ -29,6 +29,7 @@ flowchart LR
 - [Step 1: download](#step-1-download)
 - [Step 2: run it](#step-2-run-it)
 - [Step 3: open it](#step-3-open-it)
+- [Logins and accounts](#logins-and-accounts)
 - [Choosing a port](#choosing-a-port)
 - [All the settings you can pass at start up](#all-the-settings-you-can-pass-at-start-up)
 - [Where the recordings are written](#where-the-recordings-are-written)
@@ -37,6 +38,7 @@ flowchart LR
 - [Keeping it running: Windows](#keeping-it-running-windows)
 - [Letting other machines reach it](#letting-other-machines-reach-it)
 - [Upgrading](#upgrading)
+- [Trying a beta](#trying-a-beta)
 - [Uninstalling](#uninstalling)
 - [Building from source](#building-from-source)
 - [Publishing a release](#publishing-a-release)
@@ -101,6 +103,8 @@ That reads `config`, so the port is only chosen once. Useful options:
 | `--release v0.1.0` | `-Release v0.1.0` | Install that exact version instead of the newest |
 | `--reconfigure` | `-Reconfigure` | Ask for the port again |
 | `--update` | `-Update` | Fetch a newer release over the top |
+| `--beta` | `-Beta` | Follow beta releases, see [Trying a beta](#trying-a-beta) |
+| `--stable` | `-Stable` | Go back to stable releases |
 | `--no-start` | `-NoStart` | Install and configure, but do not start |
 | `--dir <path>` | `-Dir <path>` | Install somewhere other than the current folder |
 
@@ -459,6 +463,115 @@ ipconfig
 Then open `http://<that-address>:8080` from the phone, tablet or laptop. Give that address to anyone who
 needs to listen.
 
+**The first time anyone opens the page, it asks whether to protect the recorder with a login.** Be the
+first to open it, so that you are the one who answers. [Logins and accounts](#logins-and-accounts) explains
+the choice.
+
+## Logins and accounts
+
+A recorder is a microphone that is always on, so decide who can reach it. The first person to open the page
+is asked once:
+
+![The first visit: a question over the control room asking whether to set up accounts or keep the recorder open](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/first-run.png)
+
+- **Set up accounts.** They create the admin account on the spot, and from then on everybody signs in.
+- **Keep it open.** No login, as in earlier versions. Anyone who can reach the page can listen, go back
+  through the recordings, download them, and change the settings.
+
+Keeping it open is reasonable on a network where you trust every person and every device. On a shared
+network, an office, or anywhere reachable from outside, set up accounts. Either way, pages served by other
+websites are refused, so opening some other site cannot make a browser listen in or press buttons here.
+
+The question is asked by whoever arrives first. On a network with other people on it, open the page
+yourself as soon as it starts, so that nobody answers it before you do. An existing installation that is
+upgraded asks the question too, on its next visit.
+
+The [user guide](USER_GUIDE.md#signing-in) walks through every screen of this with pictures: the first
+visit, signing in, account settings, two factor sign in, and managing accounts.
+
+### Who can do what
+
+| | Admin | Listener |
+| --- | --- | --- |
+| Listen live, scrub back, change day, play faster or slower | Yes | Yes |
+| Export audio as WAV | Yes | Yes |
+| See bookmarks and jump to them | Yes | Yes |
+| Start and stop recording, choose the microphone | Yes | No |
+| Add and remove bookmarks | Yes | No |
+| Settings, including retention and where recordings go | Yes | No |
+| Add, change and remove accounts | Yes | No |
+
+Admins add accounts under **Settings, Access**, and give each person their email and a first password;
+there is no mail server, so nobody is emailed anything. Everyone can change their own password under
+**Account settings**, in the account menu at the top right. There is always at least one admin: the last
+one cannot be removed or made a listener.
+
+### Switching accounts on later
+
+If you kept it open and change your mind, go to **Settings, Access, Set up accounts**. Anyone already
+listening is asked to sign in within a few seconds.
+
+### Two factor sign in
+
+Anyone with an account, admin or listener, can add a second step to signing in: a 6 digit code from an
+authenticator app on their phone, such as Google Authenticator, Microsoft Authenticator, Authy or
+1Password. Someone who learns the password still cannot sign in without the phone. It is recommended for
+admins, whose accounts can change everything.
+
+Each person switches it on for themselves, under **Account settings** in the account menu at the top right:
+scan the QR code with the app, type the code it then shows, and save the ten **recovery codes** it hands
+out. Each recovery code signs in once in place of a code from the phone. They are shown only at that
+moment, so download or copy them and keep them away from the phone. On a plain `http://` address the
+browser does not allow copying, so use **Download**.
+
+Codes change every 30 seconds and depend on the clock, so the host and the phone need roughly the right
+time. About 30 seconds either way is forgiven. If codes are refused that the phone is showing, check the
+host's clock first; `timedatectl` on Linux shows whether it is kept in sync.
+
+**Admins can see who has it**, as a **2FA** badge next to each account under **Settings, Access**.
+
+### A lost phone
+
+- **With a recovery code:** sign in with it in place of the code. Then set up the new phone under **Account
+  settings**, **Two factor sign in**: turn it off with your password and set it up again. **New recovery
+  codes** there replaces a set that is running low.
+- **Without recovery codes, when an admin can help:** the admin presses the shield button next to the
+  account under **Settings, Access**. The person then signs in with their password alone.
+- **The only admin, without recovery codes:** remove it on the host, like a password reset:
+
+  ```sh
+  ./on-air-record/on-air-record --data-dir ./on-air-record/data auth reset-2fa you@example.com
+  ```
+
+### Forgotten passwords
+
+- **A listener, or an admin when another admin can help:** an admin opens **Settings, Access**, and sets a
+  new password with the key button next to the account.
+- **The only admin:** reset it on the host, with the program itself, against the same data folder. It
+  prints a new password and works whether or not the service is running:
+
+  ```sh
+  ./on-air-record/on-air-record --data-dir ./on-air-record/data auth reset-password you@example.com
+  ```
+
+  For the systemd service, run it as the service account, so the database keeps its owner:
+  `sudo -u on-air-record on-air-record --data-dir /var/lib/on-air-record auth reset-password you@example.com`.
+
+- **Turn logins off completely**, deleting every account, with `auth disable` in place of
+  `auth reset-password you@example.com`. The page then works without a login, and accounts can be set up
+  again from the settings.
+
+After five wrong passwords or codes from one device, that device has to wait 15 minutes. Restarting the
+service clears the wait, which is worth knowing if it was you.
+
+### Behind a reverse proxy with HTTPS
+
+Logins work over plain HTTP on your network. If you put the recorder behind a reverse proxy that serves it
+over HTTPS, have the proxy send `X-Forwarded-Proto: https` and pass the original `Host` header through
+unchanged. The first marks the login cookie secure. The second matters because the recorder refuses
+changes from any page whose address does not match the one it was reached on, and a proxy that rewrites
+`Host` makes every request look like it came from somewhere else.
+
 ## Choosing a port
 
 8080 is only the default. Change it with `--port` on the command line:
@@ -712,9 +825,10 @@ incoming connections for `on-air-record`.
 Also check that `--host` has not been set to `127.0.0.1`, which restricts it to the machine itself on
 purpose.
 
-**Do not forward this port through your router to the internet.** There is no login of any kind. Anyone who
-can reach the address can listen to the microphone and change the settings. It is built for a network you
-trust. If you need access from elsewhere, use a VPN into that network.
+**Do not forward this port through your router to the internet**, even with accounts switched on. Without
+them, anyone who can reach the address can listen to the microphone and change the settings. With them, a
+password is all that stands between the internet and the microphone, and the service has not been built or
+tested to face the open internet. If you need access from elsewhere, use a VPN into that network.
 
 ## Upgrading
 
@@ -725,7 +839,39 @@ trust. If you need access from elsewhere, use a VPN into that network.
 Leave the data directory alone. Recordings, settings and bookmarks all live there and carry over. The
 database upgrades itself on first start if the new version needs it.
 
+Upgrading from a version without logins: the next visit to the page asks whether to set up accounts. Open
+it yourself straight after upgrading, so that you are the one who answers. See
+[Logins and accounts](#logins-and-accounts).
+
 Nothing else is written anywhere on the machine, so there is no cache or configuration file to clear.
+
+## Trying a beta
+
+New features are released as a **beta** first, with a version like `0.4.0-beta.1`, for people willing to
+try them before everybody else gets them. Betas are tested on all three platforms like any release, but
+they are new, so expect the occasional rough edge, and please
+[report what you find](#reporting-a-problem).
+
+Install or switch to betas with the installer's `--beta` option:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh -s -- --beta
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1))) -Beta
+```
+
+That installs the newest release of any kind, beta or stable, and the folder remembers the choice, so a
+later `--update` fetches the newest beta without needing `--beta` again. When a beta becomes the stable
+release, you get that too.
+
+To go back to stable releases, run the installer with `--stable` (or `-Stable`). It does not step
+backwards: if the beta you have is newer than the latest stable release, it keeps the beta, because an
+older version may not understand the newer one's data, and switches over as soon as a newer stable
+release is out. To pin one exact version instead, use `--release v0.4.0-beta.1`.
+
+A beta's data carries over into the stable release it leads up to, so there is nothing to migrate by hand.
 
 ## Uninstalling
 
@@ -773,6 +919,52 @@ changing the code.
 
 For maintainers. Releases are made from the GitHub web interface, and the binaries build themselves.
 
+There are two channels, one per branch:
+
+```mermaid
+flowchart LR
+    feature["feature branches"] -- "pull request" --> develop["develop<br/>beta"]
+    develop -- "pull request, when a beta has held up" --> master["master<br/>stable"]
+    develop -. "v0.4.0-beta.1, pre-release" .-> betas["beta testers<br/>install --beta"]
+    master -. "v0.4.0, release" .-> everyone["everybody else<br/>the default"]
+```
+
+- **Beta**, from `develop`: a version like `0.4.0-beta.1`, published as a GitHub **pre-release**. GitHub
+  never counts a pre-release as the latest release, so the installers do not offer it to anybody who has
+  not asked for betas.
+- **Stable**: the finished version, like `0.4.0`, is merged into `develop` like any other change, then
+  `develop` is merged into `master`, and it is published from `master` as a normal release. Every change,
+  releases included, enters through `develop`, so after a stable release the two branches are the same.
+
+The steps are the same for both; where they differ it says so below.
+
+### A beta in two clicks
+
+A beta can skip all the steps below. `develop` only takes changes by pull request, so the version bump
+arrives as one too, and merging it is the decision to release:
+
+1. On GitHub, open **Actions**, choose **Beta release**, press **Run workflow**, leave **Use workflow
+   from** on `develop`, and run it. It refuses unless CI has passed on the newest `develop` commit,
+   something has landed since the last release, and no other release is under way. Then it works out the
+   next beta version, `0.4.0-beta.1` or the next number after the current beta, and opens a pull request
+   `chore:[OAR-N] release 0.4.0-beta.1` that changes only the version, with the release notes from the
+   `[Unreleased]` section of `CHANGELOG.md` in its description.
+2. **Merge that pull request.** Once CI passes on `develop` afterwards, the **Publish beta** workflow
+   starts by itself: it publishes the pre-release from the commit CI passed on, then builds every
+   platform, attaches the files and installs them on macOS, Linux and Windows, exactly as below.
+
+Close the pull request instead to cancel; nothing is published until it is merged. Tick **Dry run** in step
+1 to see the version, commit and notes in the run summary, with nothing pushed or opened.
+
+It needs one setting, once: **Settings**, **Actions**, **General**, **Workflow permissions**, tick **Allow
+GitHub Actions to create and approve pull requests**. Without it the first step says so and stops.
+
+If publishing fails after the merge, open **Actions**, **Publish beta**, and re-run it; it picks up where
+it left off, and a new beta cannot be started until this one is out.
+
+Stable releases are still made by hand, with the steps below, because they also date the changelog and are
+the ones that reach everybody.
+
 ### 1. Decide the version
 
 The version lives in `backend/Cargo.toml` and nowhere else that matters. It is what the program reports
@@ -784,13 +976,26 @@ make release          # or: node scripts/version.mjs bump
 ```
 
 That lists everything that has landed since the last release, suggests whether it is a patch, a minor or
-a major from the commit types, and moves all four files once you choose. It prints the commit line to
-paste afterwards. Nothing is committed, tagged or pushed for you:
+a major from the commit types, and moves all four files once you choose. Run it on a branch cut from
+`develop`. It prints the commit line to paste afterwards and where to merge it. Nothing is committed,
+tagged or pushed for you:
 
 ```sh
-git commit -am "chore:[OAR-56] release 0.2.0"
-git push origin master
+git switch -c chore/OAR-N-release-0.4.0 develop
+node scripts/version.mjs bump release
+git commit -am "chore:[OAR-N] release 0.4.0"
+# pull request into develop, then a pull request from develop into master
 ```
+
+Or skip the question:
+
+```sh
+node scripts/version.mjs bump beta       # 0.3.0 -> 0.4.0-beta.1, then 0.4.0-beta.1 -> 0.4.0-beta.2
+node scripts/version.mjs bump release    # 0.4.0-beta.2 -> 0.4.0, then into develop and develop into master
+```
+
+From a stable version, the first beta previews whichever release the commits call for, so feature work
+gives `0.4.0-beta.1` rather than `0.3.1-beta.1`.
 
 You never have to work out whether a release is due: every CI run says so in its summary, and
 `make pending` answers the same question locally.
@@ -802,10 +1007,14 @@ To release the version the manifest already carries, there is nothing to do here
 Go to **Releases**, then **Draft a new release**.
 
 - **Choose a tag**: type `v` followed by the version, so `v0.2.0`, and pick **Create new tag on publish**.
-- **Target**: `master`.
+- **Target**: `master` for a stable release, `develop` for a beta.
 - **Title**: the version is fine.
-- **Notes**: paste the version's section from [`CHANGELOG.md`](../CHANGELOG.md), after replacing
-  "Unreleased" in its heading with today's date and committing that.
+- **Notes**: for a stable release, paste the version's section from [`CHANGELOG.md`](../CHANGELOG.md), after
+  replacing "Unreleased" in its heading with today's date and committing that. For a beta, paste the
+  `[Unreleased]` section as it stands, and leave the file alone until the stable release.
+- **Set as a pre-release**: ticked for a beta, unticked for a stable release. The workflow checks this
+  against the version and refuses to build if they disagree, because a beta published as a normal release
+  would be handed to everybody.
 - Press **Publish release**.
 
 The tag is created for you. You never have to run `git tag`.

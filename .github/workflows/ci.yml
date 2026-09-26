@@ -1,15 +1,20 @@
-# Every push is built and tested on the three platforms the service claims to support.
+# Every push is built and tested on the three platforms the service claims to support: the backend, the
+# frontend and the installers each run on Linux, macOS and Windows.
 #
 # The Windows job exists specifically because it cannot be run from a developer machine: bundled SQLite
 # needs a Windows C toolchain, so cross compiling fails and only a real runner settles whether the claim
 # holds.
 name: CI
 
+# master is stable and develop is the beta: feature branches merge into develop by pull request, and
+# develop merges into master for a stable release. Both are tested on every push, as is every pull request
+# whichever branch it targets, so nothing reaches beta testers or stable users untested on any platform.
 on:
   push:
     branches:
       - main
       - master
+      - develop
   pull_request:
 
 # A new push makes an in flight run of the same branch pointless.
@@ -96,9 +101,19 @@ jobs:
       - name: Test
         run: cargo test
 
+  # On all three platforms too. The UI runs in the browser, but its toolchain does not: oxlint and the
+  # Vite bundler ship native binaries per platform, and a developer on Windows or a Mac runs these same
+  # scripts, so each has to be shown to work rather than assumed.
   frontend:
-    name: frontend
-    runs-on: ubuntu-latest
+    name: frontend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
     defaults:
       run:
         working-directory: frontend
@@ -153,6 +168,10 @@ jobs:
       - name: install.sh
         if: runner.os != 'Windows'
         shell: bash
+        env:
+          # The beta check asks the GitHub API, whose anonymous limit runners share. The installer uses this
+          # token when it is set; users never need one.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eu
           work="$RUNNER_TEMP/installer-test"
@@ -212,7 +231,8 @@ jobs:
           echo "stop.sh shut it down and freed the port"
 
           # Saying so plainly beats failing, since there is nothing wrong with stopping what is stopped.
-          ./on-air-record/stop.sh | grep -q 'Nothing is running' || { echo "a second stop should be a no-op"; exit 1; }
+          stopped_again="$(./on-air-record/stop.sh)"
+          echo "$stopped_again" | grep -q 'Nothing is running' || { echo "a second stop should be a no-op"; exit 1; }
           echo "a second stop is a no-op"
 
           echo "::group::second run"
@@ -228,11 +248,28 @@ jobs:
           grep -q '^OAR_PORT=8080$' on-air-record/config || { echo "the non interactive default was not used"; exit 1; }
           echo "non interactive run fell back to the default port"
 
+          # The beta channel: --beta installs the newest release of any kind, and the folder remembers it,
+          # so a later plain run stays on betas instead of dropping back to stable.
+          mkdir -p "$work/beta" && cd "$work/beta"
+          sh "$GITHUB_WORKSPACE/scripts/install.sh" --beta --port 8096 --no-start > beta.log 2>&1 \
+            || { cat beta.log; echo "the beta install failed"; exit 1; }
+          grep -q '^OAR_CHANNEL=beta$' on-air-record/config || { echo "the beta channel was not saved"; exit 1; }
+          grep -q '^OAR_PORT=8096$' on-air-record/config || { echo "saving the channel lost the port"; exit 1; }
+          echo "beta install: $(./on-air-record/on-air-record --version)"
+          # Captured first, never piped straight into grep -q: this shell runs with pipefail, and grep -q
+          # stops reading at the first match, so the installer dies of a broken pipe mid output and the
+          # whole pipeline counts as failed even though the text was there.
+          again="$(sh "$GITHUB_WORKSPACE/scripts/install.sh" --no-start)"
+          echo "$again" | grep -q 'on beta releases' || { echo "$again"; echo "a plain re-run forgot the beta channel"; exit 1; }
+          echo "the beta channel is saved and remembered"
+
       # Windows PowerShell 5.1 on purpose: it is what a Windows machine has out of the box, it negotiates
       # TLS 1.0 by default, and it is where the checksum file arrives as a byte array.
       - name: install.ps1 on Windows PowerShell 5.1
         if: runner.os == 'Windows'
         shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $work = Join-Path $env:RUNNER_TEMP 'installer-test'
@@ -292,6 +329,20 @@ jobs:
           Write-Host '::endgroup::'
           if ($second -notmatch 'Already installed here') { throw 'it downloaded again instead of reusing the install' }
           if ($second -notmatch 'Using the settings already saved') { throw 'it did not reuse the saved config' }
+
+          # The beta channel: -Beta installs the newest release of any kind, and the folder remembers it, so
+          # a later plain run stays on betas instead of dropping back to stable.
+          $beta = Join-Path $env:RUNNER_TEMP 'installer-test-beta'
+          New-Item -ItemType Directory -Path $beta -Force | Out-Null
+          Set-Location $beta
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\install.ps1" -Beta -Port 8096 -NoStart
+          if ($LASTEXITCODE -ne 0) { throw "the beta install exited with $LASTEXITCODE" }
+          if (-not (Select-String -Path 'on-air-record\config' -Pattern '^OAR_CHANNEL=beta$' -Quiet)) { throw 'the beta channel was not saved' }
+          if (-not (Select-String -Path 'on-air-record\config' -Pattern '^OAR_PORT=8096$' -Quiet)) { throw 'saving the channel lost the port' }
+          Write-Host "beta install: $(& '.\on-air-record\on-air-record.exe' --version)"
+          $again = & powershell -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\install.ps1" -NoStart | Out-String
+          if ($again -notmatch 'on beta releases') { throw 'a plain re-run forgot the beta channel' }
+          Write-Host 'the beta channel is saved and remembered'
 
       # PowerShell 7 is a different engine, and anybody who has installed it will use it by reflex.
       - name: install.ps1 on PowerShell 7

@@ -7,6 +7,7 @@
  */
 
 import type {
+  AuthState,
   Bookmark,
   DirectoryTest,
   ExportPlan,
@@ -18,11 +19,28 @@ import type {
   ServiceStatus,
   Settings,
   SettingsPatch,
+  Role,
   Storage,
   TimelineRange,
+  TwoFactorSetup,
+  TwoFactorStatus,
+  User,
 } from './types';
 
 const API_BASE = '/api';
+
+let onUnauthorized: (() => void) | null = null;
+
+/**
+ * Hear about a session that has ended, from whichever request notices first.
+ *
+ * A session can end between two requests: signed out in another tab, account removed, password changed
+ * elsewhere. Routing every 401 here lets the auth store show the login page without every other store
+ * having to know that logins exist.
+ */
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
 
 /** An error the server described in its own words, so the UI can show something specific. */
 export class ApiError extends Error {
@@ -74,6 +92,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // The body was not the documented envelope. The status line is still worth reporting.
     }
 
+    // A failed login or code is also a 401, but it is the answer to the form, not news that a session
+    // ended. Every other 401, the account's own two factor routes included, means the session is gone.
+    if (response.status === 401 && !path.startsWith('/auth/login') && path !== '/auth/setup') {
+      onUnauthorized?.();
+    }
+
     throw new ApiError(message, code, response.status);
   }
 
@@ -86,6 +110,84 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<Health>('/health'),
+
+  authState: () => request<AuthState>('/auth/state'),
+
+  chooseOpen: () => request<AuthState>('/auth/open', { method: 'POST' }),
+
+  setUp: (email: string, password: string) =>
+    request<AuthState>('/auth/setup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  logIn: (email: string, password: string) =>
+    request<AuthState>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  /** The second step of a sign in: a code from the authenticator app, or a recovery code. */
+  verifyLogin: (code: string) =>
+    request<AuthState>('/auth/login/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  logOut: () => request<AuthState>('/auth/logout', { method: 'POST' }),
+
+  twoFactorStatus: () => request<TwoFactorStatus>('/auth/two-factor'),
+
+  beginTwoFactorSetup: () => request<TwoFactorSetup>('/auth/two-factor/setup', { method: 'POST' }),
+
+  enableTwoFactor: (code: string) =>
+    request<{ recoveryCodes: string[] }>('/auth/two-factor/enable', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }).then((body) => body.recoveryCodes),
+
+  disableTwoFactor: (password: string) =>
+    request<void>('/auth/two-factor/disable', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+
+  regenerateRecoveryCodes: (password: string) =>
+    request<{ recoveryCodes: string[] }>('/auth/two-factor/recovery-codes', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }).then((body) => body.recoveryCodes),
+
+  resetUserTwoFactor: (userId: number) =>
+    request<void>(`/users/${userId}/two-factor`, { method: 'DELETE' }),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>('/auth/password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+
+  users: () => request<{ users: User[] }>('/users').then((body) => body.users),
+
+  createUser: (email: string, password: string, role: Role) =>
+    request<User>('/users', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, role }),
+    }),
+
+  updateUserRole: (userId: number, role: Role) =>
+    request<User>(`/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    }),
+
+  setUserPassword: (userId: number, password: string) =>
+    request<void>(`/users/${userId}/password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+
+  deleteUser: (userId: number) => request<void>(`/users/${userId}`, { method: 'DELETE' }),
 
   status: () => request<ServiceStatus>('/status'),
 

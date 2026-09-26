@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A Rust service that captures a microphone on the host machine, records it continuously to disk, and
 broadcasts it over WebSocket to browsers on the local network. The React UI plays the live feed and lets
 you scrub back to any point in the retention window on a CCTV style timeline. One binary serves the API,
-the WebSocket, and the compiled UI. No authentication, by design. See `README.md` for the feature status
-checklist, which is kept current as work lands.
+the WebSocket, and the compiled UI. Logins are optional, chosen on first visit. See `README.md` for the
+feature status checklist, which is kept current as work lands.
 
 ## Environment
 
@@ -34,7 +34,7 @@ The underlying commands:
 ```sh
 # Backend, from backend/
 cargo run                                    # API on :8080, reads ../frontend/dist
-cargo test                                   # ~204 unit tests
+cargo test                                   # ~282 unit and router tests
 cargo test day_bounds                        # single test by name substring
 cargo test --lib services::playback_service  # one module
 cargo clippy --all-targets -- -D warnings    # must be clean
@@ -43,7 +43,7 @@ cargo fmt
 # Frontend, from frontend/
 npm run dev      # Vite on :5173, proxies /api and the WebSocket to :8080
 npm run build    # tsc -b then vite build, writes dist/, which a release backend embeds
-npm test         # Vitest, ~90 tests
+npm test         # Vitest, ~101 tests
 npm run lint     # oxlint
 ```
 
@@ -120,6 +120,41 @@ sample rate and channels on every frame so the input device can change mid strea
 `frontend/src/lib/audio/frameCodec.ts` is the mirror of `ws/protocol.rs`. **Change one and you must change
 the other**, and both have tests that encode and decode the documented layout.
 
+### Access control
+
+The `auth_state` table holds one of three modes: `undecided` (behaves as `open`), `open`, or `accounts`.
+With accounts there are two roles, admin and listener. `models::authorize` is the single rule, kept free of
+HTTP so it is tested exhaustively.
+
+- **One guard, default deny.** `routes/guard.rs` sits in front of every `/api` route as a `route_layer`.
+  `required_access` decides by method and path: a named public list, then reads (`GET`) need a listener and
+  everything else needs an admin, with named exceptions (`/auth/password` is listener, `/users*` is admin).
+  **A new route needs no auth code**; think only about whether its method matches its intent. A `GET` that
+  reveals something only admins should see must be added to the exceptions.
+- **Other websites are refused in every mode.** The guard rejects state changing requests and the
+  WebSocket when `Origin` does not match `Host`. Browsers send bodiless `POST`s and WebSockets cross site
+  without asking, so this is the open mode's only protection. **Never add a CORS layer.** The Vite proxy
+  runs with `changeOrigin: false` for the same reason.
+- **Sessions are checked on every request**, by SHA-256 of the cookie, so revocation is immediate. A
+  WebSocket is only checked at the handshake by the guard, so `ws/session.rs` re-checks every 15 seconds
+  and closes the socket; keep that if the session loop is restructured.
+- **Argon2 runs off the runtime.** Hashing takes tens of milliseconds by design; controllers call it
+  through `auth_controller::blocking`. Debug builds optimise `argon2` and `blake2` via `[profile.dev]` so
+  tests and `cargo run` logins stay fast.
+- **Two factor sign in is TOTP** (RFC 6238, HMAC-SHA1, 6 digits, 30 s), written out in
+  `services/totp.rs` and tested against the RFC's own vectors. A right password on such an account
+  creates no session: `log_in` returns `LoginOutcome::SecondFactorRequired` and an in memory challenge in
+  the `oar_challenge` cookie, and `verify_second_factor` turns it into a session. Keep it that way; a
+  session must never exist before the code is checked. `totp_last_step` blocks replays, and wrong codes
+  feed the same throttle as wrong passwords.
+- **Recovery is on the host**: `on-air-record auth reset-password <email>`, `auth reset-2fa <email>` and
+  `auth disable`, in `cli.rs`. There is no mail server; shell access is what proves ownership.
+
+The frontend's `AuthGate` renders before `AppShell`, so with accounts on no audio engine or socket exists
+until somebody is signed in. Any `401` calls the handler registered with `setUnauthorizedHandler`, which
+sends the page back through the gate. Hide admin only controls with `useCanAdminister()`; the server
+enforces the rule regardless.
+
 ### Frontend
 
 `api/` is transport only, `store/` holds all shared state as Zustand slices, `lib/` is framework free
@@ -149,9 +184,25 @@ semicolons and trailing commas in TS). Project specifics on top of those:
   Take the next number after the highest in `git log`. Beyond `feat` and `fix`, history also uses `docs`,
   `test`, `refactor` and `chore` with the same bracket format. Bodies explain the reasoning and what was
   verified, in prose.
-- Work happens on a branch cut from `master`, never on `master` itself. Name it
+- **Two long lived branches: `master` is stable, `develop` is beta.** Work happens on a branch cut from
+  `develop`, never on either of them directly, and goes back into `develop` by pull request. Name it
   `<type>/OAR-N-short-summary`, where the type and ticket match the commit it will carry, in lowercase
   kebab case after the ticket: `feat/OAR-62-auto-start-delay`, `fix/OAR-58-version-script-old-node`.
+- Betas take two workflows, because `develop` requires pull requests and the built in token cannot get
+  past that rule. **Beta release** (`beta.yml`, run by hand) checks CI passed on develop's head, bumps with
+  `version.mjs bump beta`, and opens a `release/v<version>` pull request. Merging it is the release
+  decision. **Publish beta** (`beta-publish.yml`) runs on every CI completion on develop and acts only on
+  a passing push run whose commit is at an untagged beta version: it publishes the pre-release from that
+  commit with `version.mjs notes` as the notes and calls `release.yml` through `workflow_call`, since
+  GitHub starts no workflow for anything done with the built in token. Anything in `release.yml` that
+  checks out code must keep passing `ref: ${{ inputs.tag }}`, or a called build compiles the wrong commit.
+- Betas are released from `develop` as GitHub pre-releases with versions like `0.4.0-beta.1`
+  (`version.mjs bump beta`). When a beta has held up, `version.mjs bump release` finishes the version on a
+  branch from `develop`, that branch is merged into `develop`, then `develop` into `master`, and the stable
+  release is published from `master`. Every change enters through `develop`, so no back merge is needed.
+  CI runs on pushes to both and on every pull request, on Linux, macOS and Windows. `release.yml` refuses
+  a beta version not marked as a pre-release and a stable one that is, so a beta can never become the
+  "latest" the installers hand to everybody.
 - A user visible change also gets an entry in `CHANGELOG.md`, under the unreleased version at the top
   (start a `## [Unreleased]` section if the top one already has a date), written for someone running the app rather than for a developer, with its ticket in brackets. Fixes to
   something that never shipped in a release do not belong there. That section becomes the release notes.
@@ -174,8 +225,13 @@ the playback cursor walking a real directory of real PCM across a recording gap.
 data directory plus an in memory SQLite, because the interaction between the two is the thing worth
 testing.
 
-Frontend tests cover `lib/` and the Zustand slices in `store/`. Components are not unit tested, because what would break in them is
-canvas drawing and Web Audio scheduling and neither is meaningfully exercised in jsdom.
+`routes/tests.rs` drives the real router over HTTP with `tower::ServiceExt::oneshot`, on a temp data
+directory, to prove the access rules through the wiring rather than in isolation. Add a case there when a
+route's access changes.
+
+Frontend tests cover `lib/` and the Zustand slices in `store/`. Components are not unit tested, because
+what would break in them is canvas drawing and Web Audio scheduling and neither is meaningfully exercised
+in jsdom.
 
 Verify audio changes by running the service and listening. Browsers require a user gesture before audio
 starts, so headless checks cannot confirm playback. A useful trick for exercising the DVR without waiting
