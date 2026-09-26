@@ -263,12 +263,14 @@ The browser cannot simply `decodeAudioData` a stream of raw PCM frames, so playb
    media player, which is also what lock screen controls attach to (`lib/audio/mediaSession.ts`). On Safari
    the engine also sets `navigator.audioSession.type = "playback"`. Where the element cannot play, the
    graph is connected to `context.destination` instead, exactly as before, so no browser loses sound.
-7. On Android the engine also loops a ten second silent WAV, built in memory by `lib/audio/silence.ts`, in a
-   second element. Chrome keeps a MediaStream element playing with the screen off but, treating it like a
-   video call, never gives it a media notification; it shows one only for an unmuted element with a known
-   duration of at least five seconds. The silent clip is that element, and the notification then carries the
-   Media Session metadata and buttons. The session declares an infinite duration so Chrome does not draw
-   the clip's ten seconds as a progress bar. The iPhone shows controls for the stream element itself.
+7. In every browser except Apple's WebKit the engine also loops a ten second silent WAV, built in memory by
+   `lib/audio/silence.ts`, in a second element. Chrome keeps a MediaStream element playing with the screen
+   off but, treating it like a video call, never gives it media controls: not the notification and lock
+   screen on Android, not the toolbar media button or the system Now Playing on a computer. It shows them
+   only for an unmuted element with a known duration of at least five seconds. The silent clip is that
+   element, and the controls then carry the Media Session metadata and buttons. The session declares an
+   infinite duration so the clip's ten seconds are not drawn as a progress bar. WebKit, which is every
+   browser on an iPhone or iPad and Safari on a Mac, shows controls for the stream element itself.
 
 Browsers block audio until a user gesture, so the `AudioContext` is created suspended and resumed on the
 first click on the play control. The hidden element's `play()` is called synchronously inside that click,

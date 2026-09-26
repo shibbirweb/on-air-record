@@ -11,7 +11,8 @@ Every release of On Air Record, newest first. The format follows
 
 - **Keeps playing with the screen off.** On a phone, the broadcast now carries on when the screen turns off
   or you switch apps, like a radio app, and shows on the lock screen with play and pause buttons. Before,
-  locking the phone stopped the sound. (OAR-84)
+  locking the phone stopped the sound. On a computer it now shows in the browser's media controls and the
+  system's Now Playing, and the keyboard's play and pause key works. (OAR-84)
 
 ## [0.5.0] - 2026-09-26
 

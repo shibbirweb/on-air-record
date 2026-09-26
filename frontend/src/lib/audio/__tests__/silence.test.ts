@@ -31,22 +31,34 @@ describe('silentWav', () => {
   });
 });
 
+const UA = {
+  androidChrome:
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36',
+  iphoneChrome:
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0 Mobile/15E148 Safari/604.1',
+  iphoneSafari:
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1',
+  ipadFirefox:
+    'Mozilla/5.0 (iPad; CPU OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/130.0 Mobile/15E148 Safari/605.1.15',
+  macSafari:
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15',
+  macChrome:
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  windowsEdge:
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0',
+  linuxFirefox: 'Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0',
+};
+
 describe('needsNotificationKeeper', () => {
-  it('is needed on Android only', () => {
-    expect(
-      needsNotificationKeeper(
-        'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36',
-      ),
-    ).toBe(true);
-    expect(
-      needsNotificationKeeper(
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0 Mobile/15E148 Safari/604.1',
-      ),
-    ).toBe(false);
-    expect(
-      needsNotificationKeeper(
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-      ),
-    ).toBe(false);
+  it('is needed by Chrome, Edge and Firefox, on phones and computers', () => {
+    for (const userAgent of [UA.androidChrome, UA.macChrome, UA.windowsEdge, UA.linuxFirefox]) {
+      expect(needsNotificationKeeper(userAgent)).toBe(true);
+    }
+  });
+
+  it('is not needed by WebKit, which shows controls for the stream itself', () => {
+    for (const userAgent of [UA.iphoneChrome, UA.iphoneSafari, UA.ipadFirefox, UA.macSafari]) {
+      expect(needsNotificationKeeper(userAgent)).toBe(false);
+    }
   });
 });

@@ -1,12 +1,13 @@
 /**
- * A silent clip for Chrome on Android's media notification.
+ * A silent clip, so browsers show their media controls.
  *
- * Chrome on Android shows its media notification, and with it the lock screen controls, only for media it
- * considers real content: an element with a known duration of at least five seconds. The engine's output
- * element plays a live MediaStream, which Chrome treats like a video call and never gives a notification,
- * though it does keep it playing with the screen off. Looping this silent clip alongside it gives Chrome
- * something it will show, and the notification then carries the metadata and buttons set through the
- * Media Session API. The iPhone shows controls for the stream itself, so it does not need this.
+ * Chrome shows its media controls, the notification and lock screen on Android, the media button in the
+ * toolbar and the system Now Playing on a computer, only for media it considers real content: an unmuted
+ * element with a known duration of at least five seconds. The engine's output element plays a live
+ * MediaStream, which Chrome treats like a video call and never gives controls, though it keeps it playing.
+ * Looping this silent clip alongside it gives the browser something it will show, and the controls then
+ * carry the metadata and buttons set through the Media Session API. Apple's WebKit shows controls for the
+ * stream itself, so browsers built on it do without.
  */
 
 /** Long enough to clear Chrome's five second threshold with room to spare. */
@@ -48,7 +49,15 @@ export function silentWav(
   return bytes;
 }
 
-/** Whether this browser needs the silent clip: Chrome and the others built on it, on Android. */
+/**
+ * Whether this browser needs the silent clip: everything except Apple's WebKit. Every browser on an iPhone
+ * or iPad is WebKit underneath whatever it is called, and so is Safari on a Mac, which is the one desktop
+ * browser that carries no other engine's name in its user agent.
+ */
 export function needsNotificationKeeper(userAgent: string): boolean {
-  return /Android/i.test(userAgent);
+  if (/iPhone|iPad|iPod/.test(userAgent)) {
+    return false;
+  }
+  const safari = /Safari\//.test(userAgent) && !/Chrome|Chromium|CriOS|Edg|OPR|Firefox|FxiOS/.test(userAgent);
+  return !safari;
 }

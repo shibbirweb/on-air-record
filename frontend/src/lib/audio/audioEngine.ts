@@ -49,7 +49,7 @@ export class AudioEngine {
   private analyserNode: AnalyserNode | null = null;
   /** The element carrying the graph's output, or null when it plays straight to the speakers. */
   private output: HTMLAudioElement | null = null;
-  /** Android only: a looping silent clip, so Chrome shows its media notification. See `silence.ts`. */
+  /** Everywhere but WebKit: a looping silent clip, so the browser shows media controls. See `silence.ts`. */
   private keeper: HTMLAudioElement | null = null;
   /**
    * Whether the listener wants sound. Set by `start` and cleared by `suspend`, so that anything else that

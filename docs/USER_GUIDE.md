@@ -626,7 +626,9 @@ zoom.
 screen turns off or you switch to another app, like a radio app would. On the lock screen, and in the
 notification area on Android, it shows as **On Air Record**, **Live** or **Listening back**, with the
 recorder's address underneath and play and pause buttons, so you can stop and start it without unlocking.
-Pausing from there pauses the page too, and the other way round. If another app starts playing sound, or a
+Pausing from there pauses the page too, and the other way round. On a computer the same controls appear
+wherever the browser shows media: the media button in Chrome's toolbar, Now Playing on a Mac, and the
+media overlay on Windows, and the keyboard's play and pause key works too. If another app starts playing sound, or a
 call comes in, the broadcast pauses; press play again when you are ready.
 
 There is no pointing on a touch screen, so things that open when you point at them with a mouse open with a
