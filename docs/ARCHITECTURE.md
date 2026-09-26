@@ -94,6 +94,17 @@ to reach the whole application.
 single publisher. Live WebSocket sessions, the recorder, and the level meter are subscribers. Adding a new
 consumer of live audio means subscribing to the hub, never modifying the capture code.
 
+`ListenerRegistry` (`src/services/listener_registry.rs`) is the same idea for presence rather than audio:
+every stream session is in it, and every admin session watches it. See
+[Watching who is listening](#watching-who-is-listening) for how the two halves meet.
+
+### RAII handle (`src/services/listener_registry.rs`)
+
+`ListenerRegistry::register` returns a `ListenerHandle` whose `Drop` removes the entry. The session holds
+it for exactly as long as `run` executes, so every way a session can end (a clean close, a network error, an
+access check failing, a panic unwinding the task) takes it off the list. No code path has to remember to
+unregister, which is the only way a presence list stays free of ghosts.
+
 ### Strategy (`src/audio/encoder.rs`)
 
 `FrameEncoder` is a trait with `encode(&AudioFrame) -> Vec<u8>` plus format metadata. `PcmS16Encoder` is the
@@ -111,6 +122,14 @@ in one enum avoids the tangle of booleans that DVR code usually grows.
 Each WebSocket connection owns a tokio task, a `select!` loop over the inbound socket, the audio subscription,
 and a pacing timer. Connections share no mutable state, so a slow listener cannot stall the recorder or the
 other listeners. A lagging broadcast receiver is resynchronised rather than disconnected.
+
+A connection also ends when its client vanishes without closing it, which TCP alone can take many minutes to
+notice. Two limits cover the two ways that looks from inside the loop. The session pings on its 15 second
+access check and drops a client it has not heard from, pongs included, for 45 seconds (`IDLE_TIMEOUT`).
+And every write goes through `deliver`, which gives up after 20 seconds (`SEND_TIMEOUT`), because a
+vanished client stops draining the socket and a send into a full buffer would otherwise wait forever inside
+a branch, where the idle check never runs. Streaming live, the send limit fires first; paused, with nothing
+but pings on the wire, the idle limit does.
 
 ### Builder (`src/config`)
 
@@ -155,6 +174,10 @@ flowchart TB
   which is reported as `droppedFrames` in the status API.
 - Inside the runtime, `BroadcastHub` fans frames out to N subscribers. Broadcast lag is visible to each
   subscriber and is handled per connection.
+- `ListenerRegistry` is a `std::sync::Mutex` around a map, held only for one insert, update or copy and
+  never across an `await`. Changes are announced through a `tokio::sync::watch` channel carrying a version
+  number rather than the list itself, so a change costs one increment however many admins are watching, and
+  each watcher copies the map only when it wakes.
 - SQLite is accessed through a single connection behind a mutex. Write volume is one row per segment (once
   every few seconds), so contention is not a concern, and it avoids the write lock errors that concurrent
   connections cause on some filesystems.
@@ -188,6 +211,7 @@ Rules:
   | `useSettingsStore` | Runtime preferences, plus the unsaved draft of the settings page |
   | `useTimelineStore` | The visible window, coverage bands, recorded days and the fetched envelope |
   | `useStorageStore` | Disk usage and recent sessions |
+  | `useListenersStore` | The realtime listener list pushed to admins over the stream socket |
 - High frequency data (audio frames, level meters, playhead position at 60fps) bypasses React state and is
   pushed through refs and imperative canvas drawing. Only low frequency state changes go through Zustand.
 - The settings page is explicit save. Edits accumulate in `useSettingsStore.draft`, which holds only the
@@ -199,7 +223,7 @@ Rules:
   `useStreamEngine` builds the socket and the audio graph, then calls `attachController`, so any component
   can call `seek` without being handed a WebSocket and the store stays free of side effects.
 
-## 6. Data flow for the three core scenarios
+## 6. Data flow for the core scenarios
 
 One socket carries all three of the first two scenarios, which is why the session is a state machine rather
 than a set of flags:
@@ -268,6 +292,71 @@ zooming from throwing away the moment the operator is looking at, so the toolbar
 scroll wheel passes the pointer. Any navigation to a specific moment also clears `followingLive`, or the
 next range poll would drag the window back to the live edge and undo it.
 
+### Watching who is listening
+
+Every stream session registers itself in `ListenerRegistry` when it opens. The same sessions are also the
+audience: a session whose user may see the list (`may_watch_listeners` in `ws/session.rs`: an admin, or
+anyone on an open recorder) watches the registry and sends its browser a full copy whenever it changes.
+
+```mermaid
+sequenceDiagram
+    participant K as Kitchen browser
+    participant KS as kitchen session
+    participant R as ListenerRegistry
+    participant AS as admin session
+    participant A as Admin browser
+
+    A->>AS: open /api/ws/stream
+    AS->>R: register, subscribe to changes
+    AS-->>A: stream-info, then listeners [admin]
+
+    K->>KS: open /api/ws/stream
+    KS->>R: register (account, address, user agent)
+    R-->>AS: version changed
+    AS-->>A: listeners [admin, kitchen: not reported yet]
+    K->>KS: player, idle
+    KS->>R: set player idle
+    R-->>AS: version changed
+    AS-->>A: listeners [admin, kitchen: not playing]
+
+    K->>KS: seek
+    Note over KS: next loop turn sees mode Playback
+    KS->>R: set activity Playback, from
+    R-->>AS: version changed
+    AS-->>A: listeners [admin, kitchen: history from]
+
+    K--xKS: tab closed
+    Note over KS: run returns, ListenerHandle dropped
+    KS->>R: remove
+    R-->>AS: version changed
+    AS-->>A: listeners [admin]
+```
+
+Each entry carries two independent facts, because the server cannot see the second one:
+
+- **`activity`**, what the session is streaming: `live`, `playback` (with where it started) or `paused`.
+  The session loop compares it with what it last reported at the top of every turn, before `select!`,
+  because several branches below `continue`. Only the kind of activity is compared, plus a flag set by
+  `seek`, so a moving playhead does not republish the list ten times a second.
+- **`player`**, what the browser says the person hears: `idle`, `playing` or `paused`, from the
+  informational `player` client message. Browsers only allow audio after a click, and the UI's pause button
+  suspends the `AudioContext` without telling the server, so from the server's side an untouched tab and a
+  paused one both look live. The UI sends it on every connect, because a reconnect is a new session, and on
+  every change of `useTransportStore.playing`. It is taken off before `handle_command`, so it can never
+  affect the transport. A client that never sends it is listed as `playing`.
+
+The frontend labels a tab from both: `player` first (`Not playing`, `Paused`), then `activity` (`Live`,
+`History from`, `Paused`), in `describeActivity` and `activityTone` in `lib/listeners.ts`.
+
+Whether a session may see the list is decided at connect and again on the existing 15 second access check.
+Losing it sends `listeners-hidden` and stops watching; gaining it sends a list at once. A listener's
+session never subscribes, so it cannot receive the list even by a bug in the frontend.
+
+The list is always sent whole, never as a difference: at household sizes it is a few hundred bytes, and a
+client that missed a message has nothing to reconcile. The registry is also the listener count in
+`GET /api/status`, because `BroadcastHub` only counts sessions on the live feed and someone listening back
+through history is a listener too.
+
 ## 7. Extension points
 
 | I want to | Touch this |
@@ -278,6 +367,8 @@ next range poll would drag the window back to the live edge and undo it.
 | Add a stored preference | `models/settings.rs`, `repositories/settings_repository.rs`, settings DTO, frontend `settingsStore` |
 | Support a new codec | Implement `FrameEncoder`, register it in `audio::encoder::build_encoder` |
 | Add a live audio consumer | Subscribe to `BroadcastHub`, nothing else |
+| Show something new about each listener | `models/listener.rs`, `ListenerView` in `ws/messages.rs` and `api/types.ts`, `lib/listeners.ts`, `features/status/ListenersBadge.tsx`. If the value changes during a session, give `ListenerHandle` a setter that goes through `ListenerRegistry::modify` so unchanged values wake nobody |
+| Change who may see the listener list | `may_watch_listeners` in `ws/session.rs`, and the matching test there |
 | Change the storage backend | Reimplement the repository traits, leave the services alone |
 
 ## 8. Testing
@@ -287,7 +378,12 @@ concentrate on the parts where a mistake is silent rather than loud: timestamp a
 builder, byte offset maths in `Segment`, the segment index queries, envelope rendering, and the playback
 cursor stepping across a real data directory of real PCM files.
 
+The listener list is tested in layers. `listener_registry.rs` proves entries leave with their handle and
+that only real changes wake watchers; `ws/session.rs` proves who may see the list across open, admin,
+listener, promotion and demotion against a real temp data directory; `ws/messages.rs` pins the wire shapes.
+
 The frontend tests the framework free half with `npm test` (Vitest) from `frontend/`: the binary frame
-decoder, the timeline geometry, and the formatters. Components are not unit tested, because what would
+decoder, the timeline geometry, the formatters, the listener grouping and labels in `lib/listeners.ts`,
+and the Zustand slices. Components are not unit tested, because what would
 break in them is canvas drawing and Web Audio scheduling, and neither is meaningfully exercised in jsdom.
 Those are verified by running the service and listening.

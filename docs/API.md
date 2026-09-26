@@ -218,7 +218,8 @@ The one call the UI polls for the state of the world.
 }
 ```
 
-`capture.state` is one of `idle`, `starting`, `recording`, or `error`.
+`capture.state` is one of `idle`, `starting`, `recording`, or `error`. `listeners` counts every open stream
+socket, whether it is following the live feed, playing back history, or paused.
 
 ### `POST /api/capture/start`
 
@@ -570,6 +571,13 @@ on and there is no valid session. An open socket re-checks its session every 15 
 closes it once the session has ended, the account was removed, or accounts were switched on after it
 connected.
 
+On the same 15 second beat the server sends a WebSocket ping frame. Browsers and WebSocket libraries answer
+these automatically, so a client needs to do nothing. A socket the server has heard nothing from for 45
+seconds (no message, no ping, no pong) is dropped without a close frame, and so is one that has not
+accepted a write for 20 seconds. Both mean the device has gone without closing the connection, and without
+them it would stay open, and listed, until TCP gave up. A client that pauses and sits quiet stays connected,
+because its pongs keep it heard.
+
 ### Server to client control messages
 
 | `type` | Payload | Meaning |
@@ -582,6 +590,51 @@ connected.
 | `level` | `rms`, `peak` | Input meter, emitted about ten times per second in live mode |
 | `speed` | `value` | The playback speed actually in force, after clamping, and whenever the server resets it |
 | `error` | `code`, `message` | Request could not be honoured, the socket stays open |
+| `listeners` | `listeners` | Everybody connected right now. Admins only, see below |
+| `listeners-hidden` | | This socket may no longer see the list; drop the copy you have |
+
+### The listener list
+
+A socket whose user may see who else is connected (an admin, or anybody on an open recorder) receives a
+`listeners` message straight after `stream-info`, then a fresh one whenever somebody connects, disconnects,
+or moves between `live`, `playback` and `paused`, and when a listener in `playback` seeks. It is always
+the whole list, oldest connection first, never a difference, so a client that missed one loses nothing. A
+listener account never receives it.
+
+```json
+{
+  "type": "listeners",
+  "listeners": [
+    {
+      "id": 7,
+      "email": "kitchen@example.com",
+      "role": "listener",
+      "address": "192.168.1.24",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) ...",
+      "connectedAtMs": 1757033100000,
+      "activity": "playback",
+      "fromMs": 1757029500000,
+      "player": "playing"
+    }
+  ]
+}
+```
+
+- `id` is stable for the life of the connection and never reused while the service runs.
+- `email` and `role` are `null` for a guest on an open recorder.
+- `address` is the peer address the service sees, which behind a reverse proxy is the proxy.
+- `userAgent` is the browser's header as sent, trimmed and cut to 512 characters, or `null`.
+- `activity` is `live`, `playback` or `paused`. `fromMs` is where playback started or last jumped to,
+  not the moving playhead, and is `null` unless `activity` is `playback`.
+- `player` is what the client last said with a `player` message: `idle` (play not pressed since the page
+  opened), `playing`, or `paused`. `activity` is what the server streams, and the two differ because
+  browsers only start audio after a click and the UI's pause button stops the speakers, not the stream. A
+  client that never sends `player` is listed as `playing`. The UI sends it on every connect and whenever
+  play or pause is pressed. It changes nothing about what the socket sends.
+
+Whether a socket may see the list is checked again with the session every 15 seconds. A socket that loses
+it, because its account was made a listener or accounts were switched on, gets `listeners-hidden`; one
+that gains it gets a `listeners` message at once.
 
 ### Client to server control messages
 
@@ -593,6 +646,7 @@ connected.
 | `speed` | `value` | Play history at `0.25`, `0.5`, `1`, `1.5`, `2` or `4` times real time. Anything else snaps to the nearest. Ignored while live |
 | `resume` | | Continue from the paused position |
 | `ping` | `clientTimeMs` | Keep alive, answered with `pong` carrying both clocks |
+| `player` | `state` | `idle`, `playing` or `paused`: whether the person is hearing the stream. Informational only, see the listener list |
 
 Speed is pacing, not processing: at double speed the server simply hands over frames twice as often, and
 the client plays each one twice as fast. The cursor, the segment index and the binary format stay entirely

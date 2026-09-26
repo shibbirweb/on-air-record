@@ -34,6 +34,7 @@ running it on macOS, Linux and Windows.
 - [Your account settings](#your-account-settings)
 - [The screen at a glance](#the-screen-at-a-glance)
 - [The top bar](#the-top-bar)
+  - [Who is listening](#who-is-listening)
 - [Listening to what is happening now](#listening-to-what-is-happening-now)
 - [Choosing which microphone to use](#choosing-which-microphone-to-use)
 - [The timeline](#the-timeline)
@@ -220,10 +221,62 @@ Reading from left to right:
   answer "am I hearing the room right now?".
 - **Stream connected** means your browser is talking to the host computer. If it says disconnected, see
   [Questions and problems](#questions-and-problems).
-- **The listener count** is how many browsers are currently connected.
+- **The listener count** is how many browsers are currently connected, whether they are following the live
+  feed or listening back through history. An admin can see who they are: see
+  [Who is listening](#who-is-listening).
 - **The moon or sun icon** switches between light and dark colours.
 - **The person icon** is your account, when the recorder has logins: see
   [Your account settings](#your-account-settings). A listener sees no **Settings** link.
+
+### Who is listening
+
+![The listener list open under the listener count: the owner is listening live on a Mac, the kitchen account is listening back through history on an iPhone, and the office account is paused on a Windows PC](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/listeners.png)
+
+Admins can see who is connected right now. Point at the listener count in the top bar and a list opens
+underneath it; move the pointer away and it closes. On a phone or tablet, tap the count to open the list and
+tap it again, or anywhere else, to close it. With a keyboard, move to the count with Tab and press Enter;
+Escape closes it.
+
+The list keeps itself up to date while it is open. People appear the moment they open the page and vanish
+the moment they close it, and what each one is doing changes in front of you. There is nothing to reload.
+
+**Each person is listed once**, by the email they signed in with and their role. Everyone who opened the
+page more than once, say on a laptop and a phone, has one line per browser tab underneath. Your own account
+is always at the top, marked **you**.
+
+**Each tab shows three things:**
+
+1. **What it is doing**, with a coloured dot:
+
+   | Dot | Shows | Meaning |
+   | --- | --- | --- |
+   | Hollow | **Not playing** | The page is open but nobody has pressed play in it |
+   | Red | **Live** | Playing what the microphone hears right now |
+   | Amber | **History from** 07:35:43 | Listening back, from the time they started or last jumped to. The day is added when it is not today |
+   | Grey | **Paused** | Play was pressed, then pause |
+
+2. **The browser and device**, such as "Safari on iOS" or "Firefox on Windows", followed by the network
+   address the tab connects from. Point at the line for the browser's full description and the exact time
+   it connected.
+3. **How long it has been connected**, such as "just now", "12 min" or "2 h 5 min".
+
+A tab counts from the moment the page opens, which is why **Not playing** exists: browsers only start sound
+after a click, so a page nobody has touched is connected but silent. Reloading a page puts it back to **Not
+playing**. A long email is shortened to fit; point at it to read it whole.
+
+**Who can see the list.** Only admins. A listener sees the same count in the same place, with nothing
+behind it. If an admin is made a listener while the page is open, their list disappears within about 15
+seconds, and it appears just as quickly for a listener who is made an admin.
+
+**On a recorder without logins**, everyone has admin powers, so everyone sees the list. Nobody has signed
+in, so people are shown as **Guest**, one entry for each network address, with that device's tabs
+underneath:
+
+![The listener list on a recorder without logins: one guest, with one tab playing live and another that has not pressed play, both on the same Mac](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/listeners-guests.png)
+
+**About the network address.** It is the address the host computer sees the connection come from. On a
+home or office network that is the device itself. If the recorder is behind a reverse proxy, every tab shows
+the proxy's address instead, and on an open recorder they then all collapse into a single guest.
 
 ## Listening to what is happening now
 
@@ -557,6 +610,10 @@ The same web address works on a phone or tablet on the same network. The layout 
 everything still works, including the timeline, which responds to touch: tap to move, drag to pan, pinch to
 zoom.
 
+There is no pointing on a touch screen, so things that open when you point at them with a mouse open with a
+tap instead. For an admin that includes the list of [who is listening](#who-is-listening): tap the listener
+count to open it, and tap again to close it.
+
 ## Dark mode
 
 ![The control room in dark mode](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/dark-mode.png)
@@ -603,6 +660,20 @@ admin can make some of them listeners under Settings, Access.
 Sessions last 30 days. You are also signed out when you change your password on another device, when an
 admin sets a new password for you or removes your account, and when a recorder that was open is switched
 to accounts. Sign in again; if your password no longer works, ask an admin.
+
+**I cannot see who is listening.**
+The list behind the listener count is for admins only; a listener sees just the number. If you are an admin
+and the count is still plain, the stream is probably reconnecting: the list comes back with the connection,
+usually within a few seconds. See [Who is listening](#who-is-listening).
+
+**Somebody is still listed after they left.**
+Closing the tab or the browser removes them at once. A device that simply drops off the network, such as a
+phone that lost Wi-Fi or a laptop closed while playing, cannot say goodbye, so the host computer waits a
+little to be sure: it is removed within about a minute.
+
+**Somebody shows as Not playing, but I can hear them in the room.**
+**Not playing** means nobody pressed play in that browser tab, so the tab is connected but silent. They
+may be listening on a different device or tab, which has its own line under their name.
 
 **It says too many failed logins.**
 After five wrong passwords or codes, that device has to wait 15 minutes before trying again. Other devices

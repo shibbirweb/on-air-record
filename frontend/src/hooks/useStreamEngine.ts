@@ -10,9 +10,11 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { StreamSocket } from '@/api/streamSocket';
-import type { AudioFrame, ServerMessage } from '@/api/types';
+import type { AudioFrame, PlayerState, ServerMessage } from '@/api/types';
 import { AudioEngine } from '@/lib/audio/audioEngine';
+import { playerState } from '@/lib/listeners';
 import { useConnectionStore } from '@/store/useConnectionStore';
+import { useListenersStore } from '@/store/useListenersStore';
 import { useTimelineStore } from '@/store/useTimelineStore';
 import { useTransportStore } from '@/store/useTransportStore';
 
@@ -84,10 +86,37 @@ export function useStreamEngine(): StreamEngine {
           useConnectionStore.getState().setError(message.message);
           break;
 
+        case 'listeners':
+          useListenersStore.getState().setListeners(message.listeners);
+          break;
+
+        case 'listeners-hidden':
+          useListenersStore.getState().clear();
+          break;
+
         case 'pong':
           break;
       }
     };
+
+    // Tell the server whether anybody is hearing this tab, for the admin listener list. Only changes are
+    // sent, and the state is sent again on every connect, because a reconnect is a new session that knows
+    // nothing about the old one.
+    let started = transport.playing;
+    let reported: PlayerState | null = null;
+    const reportPlayer = () => {
+      const current = playerState(useTransportStore.getState().playing, started);
+      if (current !== reported && socketRef.current?.connected) {
+        reported = current;
+        socketRef.current.send({ type: 'player', state: current });
+      }
+    };
+    const stopWatchingPlayer = useTransportStore.subscribe((state) => {
+      if (state.playing) {
+        started = true;
+      }
+      reportPlayer();
+    });
 
     const socket = new StreamSocket({
       onFrame,
@@ -95,9 +124,14 @@ export function useStreamEngine(): StreamEngine {
       onOpen: () => {
         useConnectionStore.getState().setConnected(true);
         useConnectionStore.getState().setError(null);
+        reported = null;
+        reportPlayer();
       },
       onClose: () => {
         useConnectionStore.getState().setConnected(false);
+        // Nobody is keeping the list current any more. The count falls back to the polled status until the
+        // reconnected socket sends a fresh list.
+        useListenersStore.getState().clear();
         // The scheduled buffers belong to a connection that no longer exists, and playing them out after
         // a reconnect would put stale audio in front of the new stream.
         engine.flush();
@@ -145,6 +179,7 @@ export function useStreamEngine(): StreamEngine {
     connection.setConnected(false);
 
     return () => {
+      stopWatchingPlayer();
       useTransportStore.getState().attachController(null);
       socket.close();
       socketRef.current = null;
