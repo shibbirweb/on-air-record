@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { StreamSocket } from '@/api/streamSocket';
 import type { AudioFrame, PlayerState, ServerMessage } from '@/api/types';
 import { AudioEngine } from '@/lib/audio/audioEngine';
+import { bindSessionActions, showNowPlaying } from '@/lib/audio/mediaSession';
 import { playerState } from '@/lib/listeners';
 import { useConnectionStore } from '@/store/useConnectionStore';
 import { useListenersStore } from '@/store/useListenersStore';
@@ -118,6 +119,22 @@ export function useStreamEngine(): StreamEngine {
       reportPlayer();
     });
 
+    // The lock screen: what is playing, and play and pause buttons that drive the same transport as the
+    // page. Kept in step with the store, so pausing from either place shows on both.
+    const session = typeof navigator !== 'undefined' ? navigator.mediaSession : undefined;
+    const unbindSession = bindSessionActions(session, {
+      play: () => void useTransportStore.getState().play(),
+      pause: () => useTransportStore.getState().pause(),
+    });
+    const stopShowingNowPlaying = useTransportStore.subscribe((state, previous) => {
+      if (state.playing !== previous.playing || state.mode !== previous.mode) {
+        showNowPlaying(session, state.playing, state.mode, window.location.host);
+      }
+    });
+    // The phone took the audio away (another app, a call). Pause the transport so the page and the lock
+    // screen stop claiming to play, and the next tap on play starts cleanly.
+    engine.onInterrupted(() => useTransportStore.getState().pause());
+
     const socket = new StreamSocket({
       onFrame,
       onMessage,
@@ -180,6 +197,9 @@ export function useStreamEngine(): StreamEngine {
 
     return () => {
       stopWatchingPlayer();
+      stopShowingNowPlaying();
+      unbindSession();
+      engine.onInterrupted(null);
       useTransportStore.getState().attachController(null);
       socket.close();
       socketRef.current = null;

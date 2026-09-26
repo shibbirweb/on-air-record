@@ -10,9 +10,16 @@
  * The engine lives outside React entirely. Rebuilding an audio graph during a render causes audible
  * artefacts, and audio arrives far too often to be React state, so a component owns an instance through a
  * ref and reads from it on an animation frame.
+ *
+ * The graph does not end at the speakers but at a hidden `<audio>` element fed from a media stream. Phones
+ * keep a page running with the screen off only while it plays media through an element: pure Web Audio is
+ * suspended as soon as the screen locks, which on a phone meant the broadcast stopped with it. Routing
+ * through an element makes the page a media player like any radio site, and is what lock screen controls
+ * attach to. Where the element cannot play, the graph falls back to the speakers directly, as it always did.
  */
 
 import type { AudioFrame } from '@/api/types';
+import { needsNotificationKeeper, silentWav } from '@/lib/audio/silence';
 
 /** How far ahead of the present the first buffer is scheduled. */
 const DEFAULT_JITTER_SECONDS = 0.15;
@@ -33,10 +40,30 @@ export type AudioEngineStats = {
   speed: number;
 };
 
+/** Safari's Audio Session API, not yet in the DOM typings. */
+type AudioSessionNavigator = Navigator & { audioSession?: { type: string } };
+
 export class AudioEngine {
   private context: AudioContext | null = null;
   private gainNode: GainNode | null = null;
   private analyserNode: AnalyserNode | null = null;
+  /** The element carrying the graph's output, or null when it plays straight to the speakers. */
+  private output: HTMLAudioElement | null = null;
+  /** Android only: a looping silent clip, so Chrome shows its media notification. See `silence.ts`. */
+  private keeper: HTMLAudioElement | null = null;
+  /**
+   * Whether the listener wants sound. Set by `start` and cleared by `suspend`, so that anything else that
+   * stops the audio, the phone locking or another app taking the speaker, is recognised as an interruption
+   * to recover from rather than a pause somebody asked for.
+   */
+  private wantsToPlay = false;
+  /** Called when the phone pauses playback on its own, so the transport can stop claiming to play. */
+  private interruptedHandler: (() => void) | null = null;
+  private readonly onVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      this.recover();
+    }
+  };
 
   /** Context time the next buffer will start at. */
   private nextStartTime = 0;
@@ -68,6 +95,18 @@ export class AudioEngine {
    * `AudioContext` any other way and a context created outside one stays suspended forever.
    */
   async start(): Promise<void> {
+    this.wantsToPlay = true;
+    // Tells an iPhone this is media playback rather than sound effects, so it keeps playing with the
+    // screen locked and ignores the silent switch. Only Safari has it, and only recent versions.
+    const audioSession = (navigator as AudioSessionNavigator).audioSession;
+    if (audioSession) {
+      try {
+        audioSession.type = 'playback';
+      } catch {
+        // Refused, or read only in this browser. Playback still works, just not as media.
+      }
+    }
+
     if (!this.context) {
       const context = new AudioContext({ latencyHint: 'interactive' });
       const gainNode = context.createGain();
@@ -80,23 +119,47 @@ export class AudioEngine {
 
       gainNode.gain.value = this.muted ? 0 : this.volume;
       gainNode.connect(analyserNode);
-      analyserNode.connect(context.destination);
 
       this.context = context;
       this.gainNode = gainNode;
       this.analyserNode = analyserNode;
+      this.output = this.routeOutput(context, analyserNode);
+      this.keeper = this.output && needsNotificationKeeper(navigator.userAgent) ? this.createKeeper() : null;
+      context.onstatechange = () => this.recover();
+      document.addEventListener('visibilitychange', this.onVisibilityChange);
     }
 
-    if (this.context.state === 'suspended') {
+    // Started before any await: phones allow media to begin only while the tap that asked for it is
+    // still being handled, and an await hands control back first.
+    const playing = this.output?.play();
+    const keeping = this.keeper?.play();
+
+    if (this.context.state !== 'running') {
       await this.context.resume();
     }
+    if (playing) {
+      await playing.catch(() => this.fallBackToSpeakers());
+    }
+    // Without it there is no notification, but the sound is unaffected, so a refusal is not an error.
+    await keeping?.catch(() => undefined);
 
     this.resetClock();
   }
 
+  /**
+   * Called when the phone pauses playback by itself, for example when another app starts playing.
+   * Not called for `suspend`, which is a pause somebody asked for.
+   */
+  onInterrupted(handler: (() => void) | null): void {
+    this.interruptedHandler = handler;
+  }
+
   /** Stop playing and release the scheduled buffers, keeping the graph for a quick restart. */
   async suspend(): Promise<void> {
+    this.wantsToPlay = false;
     this.flush();
+    this.output?.pause();
+    this.keeper?.pause();
     if (this.context && this.context.state === 'running') {
       await this.context.suspend();
     }
@@ -104,14 +167,34 @@ export class AudioEngine {
 
   /** Tear the graph down completely. */
   async close(): Promise<void> {
+    this.wantsToPlay = false;
     this.flush();
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    if (this.output) {
+      this.output.onpause = null;
+      this.output.pause();
+      this.output.srcObject = null;
+    }
+    if (this.keeper) {
+      this.keeper.onpause = null;
+      this.keeper.pause();
+      URL.revokeObjectURL(this.keeper.src);
+      this.keeper = null;
+    }
     const context = this.context;
     this.context = null;
     this.gainNode = null;
     this.analyserNode = null;
+    this.output = null;
     if (context) {
+      context.onstatechange = null;
       await context.close().catch(() => undefined);
     }
+  }
+
+  /** Whether sound is going through a media element, which is what lets it play with the screen off. */
+  get playsAsMedia(): boolean {
+    return this.output !== null;
   }
 
   get running(): boolean {
@@ -259,6 +342,75 @@ export class AudioEngine {
       sampleRate: context?.sampleRate ?? 0,
       speed: this.speed,
     };
+  }
+
+  /**
+   * Send the graph's output through a hidden media element, or straight to the speakers if this browser
+   * has no media stream destination.
+   */
+  private routeOutput(context: AudioContext, last: AudioNode): HTMLAudioElement | null {
+    if (typeof context.createMediaStreamDestination !== 'function' || typeof Audio === 'undefined') {
+      last.connect(context.destination);
+      return null;
+    }
+    const stream = context.createMediaStreamDestination();
+    last.connect(stream);
+    const element = new Audio();
+    element.srcObject = stream.stream;
+    element.onpause = () => this.pausedByPhone();
+    return element;
+  }
+
+  private createKeeper(): HTMLAudioElement {
+    const element = new Audio(URL.createObjectURL(new Blob([silentWav()], { type: 'audio/wav' })));
+    element.loop = true;
+    element.onpause = () => this.pausedByPhone();
+    return element;
+  }
+
+  /**
+   * A pause nobody asked for is the phone taking the audio away. Let the transport know, so the play
+   * button tells the truth when the listener comes back to the page.
+   */
+  private pausedByPhone(): void {
+    if (this.wantsToPlay) {
+      this.wantsToPlay = false;
+      this.interruptedHandler?.();
+    }
+  }
+
+  /** The element refused to play, so play to the speakers the old way. Sound, if not in the background. */
+  private fallBackToSpeakers(): void {
+    const context = this.context;
+    const analyserNode = this.analyserNode;
+    if (!context || !analyserNode || !this.output) {
+      return;
+    }
+    this.output.onpause = null;
+    this.output.srcObject = null;
+    this.output = null;
+    analyserNode.disconnect();
+    analyserNode.connect(context.destination);
+  }
+
+  /**
+   * Try to get sound back after the phone interrupted it, when the page is visible again or the context
+   * changed state. Best effort: some phones insist on a fresh tap, and then the play button is the way back.
+   */
+  private recover(): void {
+    const context = this.context;
+    if (!this.wantsToPlay || !context) {
+      return;
+    }
+    if (context.state !== 'running' && context.state !== 'closed') {
+      void context.resume().catch(() => undefined);
+    }
+    if (this.output?.paused) {
+      void this.output.play().catch(() => undefined);
+    }
+    if (this.keeper?.paused) {
+      void this.keeper.play().catch(() => undefined);
+    }
   }
 
   private applyGain(): void {

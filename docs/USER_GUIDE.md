@@ -622,6 +622,13 @@ The same web address works on a phone or tablet on the same network. The layout 
 everything still works, including the timeline, which responds to touch: tap to move, drag to pan, pinch to
 zoom.
 
+**Listening with the screen off.** Once you have pressed play, the broadcast keeps playing when the phone's
+screen turns off or you switch to another app, like a radio app would. On the lock screen, and in the
+notification area on Android, it shows as **On Air Record**, **Live** or **Listening back**, with the
+recorder's address underneath and play and pause buttons, so you can stop and start it without unlocking.
+Pausing from there pauses the page too, and the other way round. If another app starts playing sound, or a
+call comes in, the broadcast pauses; press play again when you are ready.
+
 There is no pointing on a touch screen, so things that open when you point at them with a mouse open with a
 tap instead. For an admin that includes the list of [who is listening](#who-is-listening): tap the listener
 count to open it, and tap again to close it.
@@ -672,6 +679,12 @@ admin can make some of them listeners under Settings, Access.
 Sessions last 30 days. You are also signed out when you change your password on another device, when an
 admin sets a new password for you or removes your account, and when a recorder that was open is switched
 to accounts. Sign in again; if your password no longer works, ask an admin.
+
+**It stops when my phone's screen turns off.**
+Press play on the page first: the phone only keeps playing sound that was started by a tap. If it still
+stops, check that the browser is not in a battery saving mode that closes background pages, and that the
+page is open in the browser itself rather than inside another app's built in browser, which may not allow
+background audio.
 
 **I cannot see who is listening.**
 The list behind the listener count is for admins only; a listener sees just the number. If you are an admin

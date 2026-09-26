@@ -257,8 +257,27 @@ The browser cannot simply `decodeAudioData` a stream of raw PCM frames, so playb
 5. An `AnalyserNode` on the output feeds the live waveform visualiser, and a `GainNode` provides the volume
    control and the mute button.
 
+6. The graph ends not at the speakers but at a `MediaStreamAudioDestinationNode`, played by a hidden
+   `<audio>` element. Phones keep a page running with the screen off only while it plays media through an
+   element; pure Web Audio is suspended when the screen locks. Playing through an element makes the page a
+   media player, which is also what lock screen controls attach to (`lib/audio/mediaSession.ts`). On Safari
+   the engine also sets `navigator.audioSession.type = "playback"`. Where the element cannot play, the
+   graph is connected to `context.destination` instead, exactly as before, so no browser loses sound.
+7. On Android the engine also loops a ten second silent WAV, built in memory by `lib/audio/silence.ts`, in a
+   second element. Chrome keeps a MediaStream element playing with the screen off but, treating it like a
+   video call, never gives it a media notification; it shows one only for an unmuted element with a known
+   duration of at least five seconds. The silent clip is that element, and the notification then carries the
+   Media Session metadata and buttons. The session declares an infinite duration so Chrome does not draw
+   the clip's ten seconds as a progress bar. The iPhone shows controls for the stream element itself.
+
 Browsers block audio until a user gesture, so the `AudioContext` is created suspended and resumed on the
-first click on the play control.
+first click on the play control. The hidden element's `play()` is called synchronously inside that click,
+before any `await`, because phones allow media to start only while the gesture is still being handled.
+
+If the phone pauses the element on its own, for another app or a call, the engine reports it and the
+transport pauses, so the page and the lock screen stop claiming to play. When the page becomes visible again
+while the listener still wants sound, the engine tries to resume the context and the element; some phones
+insist on a fresh tap, and then the play button is the way back.
 
 ## 7. Latency budget
 
@@ -269,7 +288,11 @@ first click on the play control.
 | Hub fan out and socket write | under 5 ms on a LAN |
 | Browser jitter buffer | 150 ms default |
 | Web Audio output buffer | 10 to 25 ms |
+| Media element output | Browser dependent, not yet measured |
 | **Total** | **roughly 300 to 350 ms** |
+
+The playhead is read from the `AudioContext` clock, so whatever the media element adds on top is not in it:
+the playhead runs that far ahead of what is heard.
 
 That is well inside what a monitoring or broadcast style application needs. Reducing the frame size to 20 ms
 and the jitter buffer to 60 ms gets it under 150 ms at the cost of more overhead per frame and less tolerance
