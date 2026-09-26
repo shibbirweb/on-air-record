@@ -1,0 +1,88 @@
+# Publishes a stable release once it reaches master and CI has passed there.
+#
+# The last step of stable.yml and stable-promote.yml. It runs whenever CI finishes on a push to master,
+# and acts only when CI passed and master is at a stable version with no tag yet: every other run ends with
+# a note. It publishes the release from the commit CI passed on, with the version's changelog section as
+# its notes, and calls release.yml to build, attach and install it on all three platforms.
+#
+# Publishing here rather than by hand is what makes a release impossible to cut from a master that has
+# not got the new version yet: this only ever acts on the version master actually holds.
+name: Publish stable
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: write
+  actions: read
+
+# The same release must not be published twice by two CI runs finishing close together.
+concurrency:
+  group: stable-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish the release
+    runs-on: ubuntu-latest
+    # Only CI that passed, on a push to master. A pull request's CI never publishes anything.
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - name: Is there a stable release to publish?
+        id: check
+        run: |
+          version="$(node scripts/version.mjs show)"
+          case "$version" in
+            *-*)
+              echo "master is at $version, a beta. Betas are published from develop; nothing to do." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+          esac
+          if git rev-parse --verify --quiet "refs/tags/v$version" > /dev/null; then
+            echo "v$version is already published. Nothing to do." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release
+        if: steps.check.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.check.outputs.tag }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if ! node scripts/version.mjs notes "${TAG#v}" > "$RUNNER_TEMP/notes.md"; then
+            echo 'No user visible changes in this release.' > "$RUNNER_TEMP/notes.md"
+          fi
+          # --latest so the installers, which follow GitHub's latest release, hand it out straight away.
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$SHA" --latest \
+            --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          {
+            echo "### Published $TAG"
+            echo ''
+            cat "$RUNNER_TEMP/notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # GitHub starts no workflow for anything done with the built in token, including publishing a release,
+  # so release.yml's own "published" trigger will not fire for this one. It is called instead.
+  build:
+    name: build, attach and verify
+    needs: publish
+    if: needs.publish.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}

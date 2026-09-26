@@ -240,6 +240,46 @@ function commandNotes(version) {
   return 0;
 }
 
+/** The newest stable release tag, like v0.6.0, whatever betas came after it. */
+function lastStableTag() {
+  const tags = git('for-each-ref', '--sort=-creatordate', '--format=%(refname:short)', 'refs/tags/v*');
+  return (tags ?? '').split('\n').find((tag) => tag !== '' && !tag.includes('-')) ?? null;
+}
+
+/**
+ * Date the changelog for a stable release: `## [Unreleased]` becomes `## [0.7.0] - 2026-09-27`, and the
+ * compare link at the bottom follows it. A beta leaves the changelog alone, because its notes stay
+ * unreleased until the stable version ships them.
+ *
+ * The date is the local calendar day, which on a CI runner is UTC. A release with nothing user visible
+ * has no `[Unreleased]` section, which is fine: there is simply nothing to date.
+ */
+function dateChangelog(version, previousTag, today = new Date()) {
+  const path = join(ROOT, 'CHANGELOG.md');
+  const text = read(path);
+  if (!text.includes('## [Unreleased]')) {
+    console.log('CHANGELOG.md has no [Unreleased] section, so there is nothing to date');
+    return text;
+  }
+  const date = today.toLocaleDateString('en-CA');
+  let dated = text.replace('## [Unreleased]', `## [${version}] - ${date}`);
+
+  // The repository URL is read off the links already there, so this never names a repository by hand.
+  const base = /^\[[^\]]+\]: (https:\/\/github\.com\/[^/\s]+\/[^/\s]+)\//m.exec(dated)?.[1];
+  if (base && previousTag) {
+    const link = `[${version}]: ${base}/compare/${previousTag}...v${version}`;
+    if (/^\[Unreleased\]: .*$/m.test(dated)) {
+      dated = dated.replace(/^\[Unreleased\]: .*$/m, link);
+    } else {
+      // No unreleased link to turn into this one: put it above the newest version link.
+      dated = dated.replace(/^(\[\d+\.\d+\.\d+[^\]]*\]: )/m, `${link}\n$1`);
+    }
+  }
+  writeFileSync(path, dated, 'utf8');
+  console.log(`CHANGELOG.md           [Unreleased] -> [${version}] - ${date}`);
+  return dated;
+}
+
 /** The next OAR ticket, so the suggested commit line is ready to paste. */
 function nextTicket() {
   const out = git('log', '--format=%s') ?? '';
@@ -470,6 +510,9 @@ function finishBump(current, level, target) {
   // setting, so say which it is up front.
   const isBeta = betaNumber(target) !== null;
   const branch = isBeta ? 'develop' : 'master';
+  if (!isBeta) {
+    dateChangelog(target, lastStableTag());
+  }
   console.log('\nNothing is released yet. Commit this on a branch cut from develop:\n');
   console.log(`  git commit -am "chore:[OAR-${nextTicket()}] release ${target}"`);
   console.log('');
@@ -489,6 +532,9 @@ function finishBump(current, level, target) {
   if (isBeta) {
     console.log('The Beta release workflow does all of this for you; see "A beta in two clicks".');
     console.log('Testers install it with the installer\'s --beta option; stable users are not offered it.');
+  } else {
+    console.log('The Stable release workflow does all of this for you, including the develop to master pull');
+    console.log('request and publishing; see "A stable release in two merges".');
   }
   return 0;
 }

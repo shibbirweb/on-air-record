@@ -1,19 +1,22 @@
-# Starts the next beta from develop: Actions, "Beta release", Run workflow, on develop.
+# Finishes the current beta as a stable release: Actions, "Stable release", Run workflow, on develop.
 #
-# develop only takes changes by pull request, and GitHub gives the built in token no way past that rule,
-# so this does not push the version bump itself. It opens a release pull request carrying it, like
-# `chore:[OAR-72] release 0.4.0-beta.1`, with the release notes in its description. Merging that pull
-# request is the decision to release. Once CI passes on develop after the merge, beta-publish.yml sees an
-# unpublished beta version there and publishes it, builds it and installs it on all three platforms.
+# The first of two merges. It moves develop from a published beta, like 0.7.0-beta.1, to its stable
+# version, 0.7.0, dates the changelog, and opens a release pull request into develop, like
+# `chore:[OAR-90] release 0.7.0`, with the release notes in its description. Merging it is the decision to
+# release. Once CI passes on develop, stable-promote.yml opens the develop to master pull request; merging
+# that is the second decision, and once CI passes on master, stable-publish.yml publishes the release,
+# builds it and installs it on all three platforms.
 #
-# Tick "dry run" to see the version, commit and notes it would use, with nothing pushed or opened.
+# Every change enters through develop, releases included, which is why this goes to develop and not
+# straight to master: a version bump that only master had would leave develop numbering the next beta
+# from the old version.
 #
-# Needs one repository setting: Settings, Actions, General, Workflow permissions, "Allow GitHub Actions to
-# create and approve pull requests". Without it GitHub refuses to open the pull request, and says so.
+# It only finishes a beta that is published and has nothing new since, because anything landed after the
+# beta has not been tried by anybody and would go straight to everybody. Cut another beta for that first.
 #
-# Stable releases have their own three: stable.yml opens the release pull request, stable-promote.yml the
-# develop to master one, and stable-publish.yml publishes from master.
-name: Beta release
+# Tick "dry run" to see the version, commit and notes it would use, with nothing pushed or opened. Needs
+# the same repository setting as beta.yml: "Allow GitHub Actions to create and approve pull requests".
+name: Stable release
 
 on:
   workflow_dispatch:
@@ -28,7 +31,7 @@ permissions:
   pull-requests: write
   actions: read
 
-# Two runs at once would race for the same version number.
+# One release at a time, betas included.
 concurrency:
   group: beta-release
   cancel-in-progress: false
@@ -41,10 +44,10 @@ jobs:
       - name: Only from develop
         if: github.ref != 'refs/heads/develop'
         run: |
-          echo "::error::Betas are cut from develop, and this was started on ${GITHUB_REF#refs/heads/}. Choose develop under 'Use workflow from'."
+          echo "::error::Stable releases are cut from develop, and this was started on ${GITHUB_REF#refs/heads/}. Choose develop under 'Use workflow from'."
           exit 1
 
-      # Full history and tags: version.mjs reads the last release tag and the commits since it.
+      # Full history and tags: version.mjs reads the release tags and the commits since them.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -61,8 +64,6 @@ jobs:
         working-directory: backend
         run: cargo fetch --locked
 
-      # A beta is something people install, so it only starts from a commit CI has passed on all three
-      # platforms, never from one it failed on or has not finished with.
       - name: Check CI passed on this commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -76,21 +77,33 @@ jobs:
           fi
           echo "CI passed on ${sha:0:7}"
 
-      # One release at a time. A release pull request already open, or a beta already merged but not yet
-      # published, has to finish first; bumping past it would skip a version nobody ever got.
-      - name: Check no release is already under way
+      # Only a beta that people could actually install, and nothing untried on top of it.
+      - name: Check there is a finished beta to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           current="$(node scripts/version.mjs show)"
           case "$current" in
-            *-beta.*)
-              if ! git rev-parse --verify --quiet "refs/tags/v$current" > /dev/null; then
-                echo "::error::develop is already at $current, which has not been published. Once CI passes on develop, Publish beta publishes it; if that failed, re-run it from Actions."
-                exit 1
-              fi
+            *-beta.*) ;;
+            *)
+              echo "::error::develop is at $current, which is not a beta. A stable release finishes a published beta; run Beta release first."
+              exit 1
               ;;
           esac
+          if ! git rev-parse --verify --quiet "refs/tags/v$current" > /dev/null; then
+            echo "::error::$current has not been published yet. Let Publish beta finish, and try it, before making it stable."
+            exit 1
+          fi
+
+          # Documentation, tests and tooling do not change what people run, so they need no beta of their
+          # own. Anything else, a feat, fix or refactor, does.
+          untried="$(git log HEAD --no-merges --format='%h %s' --not --tags='v*' \
+            | grep -vE '^[0-9a-f]+ (docs|test|chore)[:[(]' || true)"
+          if [ -n "$untried" ]; then
+            echo "::error::These landed on develop after v$current was published, so nobody has tried them yet. Run Beta release to put them in a new beta first."
+            printf '%s\n' "$untried"
+            exit 1
+          fi
 
           open="$(gh pr list --repo "$GITHUB_REPOSITORY" --base develop --state open --json headRefName,url \
             --jq '[.[] | select(.headRefName | startswith("release/"))][0].url // ""')"
@@ -99,24 +112,14 @@ jobs:
             exit 1
           fi
 
-      - name: Bump to the next beta
+      - name: Finish the beta and date the changelog
         id: bump
         run: |
-          before="$(node scripts/version.mjs show)"
-          node scripts/version.mjs bump beta
+          node scripts/version.mjs bump release
           version="$(node scripts/version.mjs show)"
-
-          # bump leaves the version alone when nothing has landed since the last release. Say so plainly
-          # rather than open a pull request that changes nothing.
-          if [ "$version" = "$before" ]; then
-            echo "::error::Nothing has landed on develop since $before was released, so there is nothing for a new beta to hold."
-            exit 1
-          fi
           case "$version" in
-            *-beta.*) ;;
-            *) echo "::error::Expected a beta version, got $version."; exit 1 ;;
+            *-*) echo "::error::Expected a stable version, got $version."; exit 1 ;;
           esac
-
           {
             echo "version=$version"
             echo "tag=v$version"
@@ -125,13 +128,17 @@ jobs:
 
       - name: Release notes from the changelog
         run: |
-          node scripts/version.mjs notes > "$RUNNER_TEMP/notes.md"
+          # A release with nothing user visible has no section to show; say so rather than fail.
+          if ! node scripts/version.mjs notes "${{ steps.bump.outputs.version }}" > "$RUNNER_TEMP/notes.md"; then
+            echo '_No user visible changes are recorded in CHANGELOG.md for this version._' > "$RUNNER_TEMP/notes.md"
+          fi
           {
-            echo "Merging this releases **${{ steps.bump.outputs.tag }}** as a beta: once CI passes on develop,"
-            echo "the Publish beta workflow publishes it as a pre-release, builds every platform and installs"
-            echo "it on macOS, Linux and Windows. It changes only the version, in the four files that carry it."
+            echo "Merging this finishes **${{ steps.bump.outputs.tag }}** as a stable release. It changes the version in"
+            echo "the four files that carry it and dates the changelog. Once CI passes on develop, Promote stable"
+            echo "opens the pull request from develop into master; merging that publishes the release, builds"
+            echo "every platform and installs it on macOS, Linux and Windows."
             echo ''
-            echo 'Close it instead to cancel this beta; nothing is published until it is merged.'
+            echo 'Close it instead to cancel; nothing is published until both pull requests are merged.'
             echo ''
             echo '## Release notes'
             echo ''

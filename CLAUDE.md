@@ -235,6 +235,14 @@ semicolons and trailing commas in TS). Project specifics on top of those:
   commit with `version.mjs notes` as the notes and calls `release.yml` through `workflow_call`, since
   GitHub starts no workflow for anything done with the built in token. Anything in `release.yml` that
   checks out code must keep passing `ref: ${{ inputs.tag }}`, or a called build compiles the wrong commit.
+- Stable releases take three workflows on the same pattern. **Stable release** (`stable.yml`, run by hand
+  on develop) refuses unless develop is at a published beta with no `feat`, `fix` or other program change
+  since it (`docs`, `test` and `chore` are allowed), runs `version.mjs bump release`, which also dates the
+  changelog, and opens the `release/v<version>` pull request into develop. **Promote stable**
+  (`stable-promote.yml`) opens the develop to master pull request when CI passes on develop at an untagged
+  stable version, under the same untried rule. **Publish stable** (`stable-publish.yml`) publishes the
+  release from master when CI passes there at an untagged stable version, and calls `release.yml`. The
+  release commit goes to develop, never straight to master, so develop always carries the version.
 - Betas are released from `develop` as GitHub pre-releases with versions like `0.4.0-beta.1`
   (`version.mjs bump beta`). When a beta has held up, `version.mjs bump release` finishes the version on a
   branch from `develop`, that branch is merged into `develop`, then `develop` into `master`, and the stable
