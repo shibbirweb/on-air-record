@@ -14,6 +14,7 @@ import { OnAirSign } from '@/components/OnAirSign';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { UserMenu } from '@/features/auth/UserMenu';
+import { ListenersBadge } from '@/features/status/ListenersBadge';
 import { usePolling } from '@/hooks/usePolling';
 import { useStreamEngine } from '@/hooks/useStreamEngine';
 import { useTheme } from '@/hooks/useTheme';
@@ -52,7 +53,6 @@ export function AppShell() {
 
   const connected = useConnectionStore((state) => state.connected);
   const capturing = useStatusStore((state) => state.status?.capture.state === 'recording');
-  const listeners = useStatusStore((state) => state.status?.listeners ?? 0);
   const playing = useTransportStore((state) => state.playing);
   const mode = useTransportStore((state) => state.mode);
 
@@ -102,9 +102,7 @@ export function AppShell() {
               {connected ? <Wifi className="size-3" /> : <WifiOff className="size-3" />}
               {connected ? 'Stream connected' : 'Stream offline'}
             </Badge>
-            <Badge variant="outline" className="font-normal">
-              {listeners} {listeners === 1 ? 'listener' : 'listeners'}
-            </Badge>
+            <ListenersBadge />
             <Button
               size="icon-sm"
               variant="ghost"

@@ -15,7 +15,7 @@ use crate::repositories::{
 };
 use crate::services::{
     AuthService, BookmarkService, BroadcastHub, CaptureService, DeviceService, ExportService,
-    PlaybackService, RetentionService, SettingsService, TimelineService,
+    ListenerRegistry, PlaybackService, RetentionService, SettingsService, TimelineService,
 };
 use crate::util::time::now_ms;
 
@@ -29,6 +29,8 @@ pub struct AppState {
     pub timeline: Arc<TimelineService>,
     pub retention: Arc<RetentionService>,
     pub hub: Arc<BroadcastHub>,
+    /// Every open audio stream, for the listener count and the admin's list of who is listening.
+    pub listeners: Arc<ListenerRegistry>,
     pub bookmarks: Arc<BookmarkService>,
     pub export: Arc<ExportService>,
     pub sessions: Arc<SessionRepository>,
@@ -96,6 +98,7 @@ impl AppState {
             timeline,
             retention,
             hub,
+            listeners: Arc::new(ListenerRegistry::new()),
             bookmarks,
             export,
             sessions,

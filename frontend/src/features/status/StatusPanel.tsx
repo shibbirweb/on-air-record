@@ -9,6 +9,7 @@ import { LevelMeter } from '@/features/broadcast/LevelMeter';
 import { formatDuration } from '@/lib/format';
 import { useCanAdminister } from '@/store/useAuthStore';
 import { useConnectionStore } from '@/store/useConnectionStore';
+import { useListenerCount } from '@/store/useListenersStore';
 import { useStatusStore } from '@/store/useStatusStore';
 
 export function StatusPanel() {
@@ -23,6 +24,7 @@ export function StatusPanel() {
 
   const levels = useConnectionStore((state) => state.levels);
   const connected = useConnectionStore((state) => state.connected);
+  const listenerCount = useListenerCount();
 
   const capture = status?.capture;
   const recording = capture?.state === 'recording';
@@ -84,7 +86,7 @@ export function StatusPanel() {
         </dd>
 
         <dt className="text-muted-foreground">Listeners</dt>
-        <dd className="tabular">{status?.listeners ?? 0}</dd>
+        <dd className="tabular">{listenerCount}</dd>
 
         <dt className="text-muted-foreground">Session</dt>
         <dd className="tabular">{capture?.sessionId ?? 'none'}</dd>

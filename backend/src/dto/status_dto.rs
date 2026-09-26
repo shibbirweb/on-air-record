@@ -87,7 +87,7 @@ impl StatusResponse {
         Self {
             capture: state.capture.snapshot().into(),
             levels: state.hub.levels().into(),
-            listeners: state.hub.listener_count(),
+            listeners: state.listeners.count(),
             server_time_ms: crate::util::time::now_ms(),
             live_edge_ms: state.live_edge_ms(),
         }

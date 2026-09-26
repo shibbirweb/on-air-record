@@ -22,12 +22,13 @@
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 
 use crate::app::AppState;
-use crate::models::AudioFrame;
+use crate::models::{AudioFrame, ListenerAccount, ListenerActivity};
 use crate::services::{CursorOutput, PlaybackCursor};
 use crate::util::time::now_ms;
 use crate::ws::messages::{ClientMessage, ServerMessage, StreamMode};
@@ -56,6 +57,28 @@ const MIN_TICK: std::time::Duration = std::time::Duration::from_millis(5);
 /// would keep hearing the microphone for as long as the tab stayed open. Fifteen seconds bounds that
 /// without adding a database lookup per frame.
 const ACCESS_RECHECK: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How long a client may go without being heard from before its session is closed.
+///
+/// A tab that closes says so and leaves at once, but a device that vanishes (a phone losing Wi-Fi, a laptop
+/// shut mid stream) says nothing, and TCP can take many minutes to give up on it, leaving a ghost in the
+/// listener list and a task streaming into the void. The server pings on every [`ACCESS_RECHECK`] and every
+/// browser and WebSocket library answers a ping by itself, below JavaScript, so a live client is heard at
+/// least that often even from a throttled background tab. Three missed rounds is gone, not slow.
+const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// How long one send may wait for the network before the client is treated as gone.
+///
+/// The idle check alone is not enough: a vanished client stops draining the socket, the send buffer fills
+/// within seconds of live audio, and the next send then waits forever inside a branch of the loop, where
+/// no timer can reach it. A healthy client drains 100 ms of audio in far less than this, so a send stuck
+/// this long is a connection that is not coming back.
+const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Whether a client last heard from at `last_heard` has been silent too long by `now`.
+fn is_silent(last_heard: tokio::time::Instant, now: tokio::time::Instant) -> bool {
+    now.saturating_duration_since(last_heard) >= IDLE_TIMEOUT
+}
 
 /// Snap a requested speed onto the nearest offered one.
 fn clamp_speed(value: f32) -> f32 {
@@ -98,15 +121,28 @@ enum PlaybackStep {
     SocketClosed,
 }
 
+/// Who is on the other end of a socket, for the listener list.
+pub struct ListenerIdentity {
+    /// `None` for a guest on an open recorder.
+    pub account: Option<ListenerAccount>,
+    pub address: IpAddr,
+    pub user_agent: Option<String>,
+}
+
 pub struct StreamSession {
     state: Arc<AppState>,
     /// The session cookie the socket was opened with, re-checked every [`ACCESS_RECHECK`].
     token: Option<String>,
+    identity: ListenerIdentity,
 }
 
 impl StreamSession {
-    pub fn new(state: Arc<AppState>, token: Option<String>) -> Self {
-        Self { state, token }
+    pub fn new(state: Arc<AppState>, token: Option<String>, identity: ListenerIdentity) -> Self {
+        Self {
+            state,
+            token,
+            identity,
+        }
     }
 
     /// Drive the connection until the client disconnects or loses access.
@@ -118,6 +154,20 @@ impl StreamSession {
         let mut access_check = tokio::time::interval(ACCESS_RECHECK);
         // The first tick of an interval fires at once; the handshake has only just been checked.
         access_check.tick().await;
+
+        // On the list for exactly as long as this function runs: the handle removes the entry when it is
+        // dropped, however the session ends.
+        let registered = state.listeners.register(
+            self.identity.account,
+            self.identity.address,
+            self.identity.user_agent,
+        );
+        let mut reported = ListenerActivity::Live;
+        // Set by a seek, so a jump within history is reported even though the mode stayed the same.
+        let mut repositioned = false;
+        let mut presence = state.listeners.subscribe();
+        let mut may_watch = may_watch_listeners(&state, token.as_deref());
+        let mut last_heard = tokio::time::Instant::now();
 
         let mut mode = StreamMode::Live;
         // Where a resume should return to. A listener who paused during playback wants their position
@@ -136,25 +186,71 @@ impl StreamSession {
         if !send_message(&mut sink, stream_info(&state, mode)).await {
             return;
         }
+        if may_watch && !send_message(&mut sink, listeners_message(&state)).await {
+            return;
+        }
 
-        tracing::debug!(
-            listeners = state.hub.listener_count(),
-            "stream session opened"
-        );
+        tracing::debug!(listeners = state.listeners.count(), "stream session opened");
 
         loop {
+            // Report what the previous turn changed before waiting again. Up here rather than at the end
+            // of the loop, because several branches below `continue`, and a change they made must not be
+            // missed. Only the kind of activity is compared: a playhead moves every frame.
+            let activity = activity_of(mode, cursor.as_ref());
+            if std::mem::discriminant(&activity) != std::mem::discriminant(&reported)
+                || repositioned
+            {
+                registered.set_activity(activity);
+                reported = activity;
+                repositioned = false;
+            }
+
             let event = tokio::select! {
                 incoming = source.next() => Event::Incoming(incoming),
                 frame = receive_live(&mut live_rx), if mode == StreamMode::Live => Event::Live(frame),
                 _ = ticker.tick(), if mode == StreamMode::Playback => Event::Tick,
                 _ = access_check.tick() => Event::AccessCheck,
+                _ = presence.changed(), if may_watch => Event::Presence,
             };
 
             match event {
                 Event::AccessCheck => {
                     if !still_allowed(&state, token.as_deref()) {
                         tracing::debug!("closing a stream whose listener is no longer signed in");
-                        let _ = sink.send(Message::Close(None)).await;
+                        deliver(&mut sink, Message::Close(None)).await;
+                        break;
+                    }
+
+                    if is_silent(last_heard, tokio::time::Instant::now()) {
+                        // No close frame: nobody is reading, and it would only queue behind whatever is
+                        // already stuck in the send buffer. Dropping the socket is the goodbye.
+                        tracing::debug!("dropping a stream whose client has gone silent");
+                        break;
+                    }
+                    // Answered by the client's WebSocket stack itself; the pong is what keeps it heard.
+                    if !deliver(&mut sink, Message::Ping(Default::default())).await {
+                        break;
+                    }
+
+                    // An admin made a listener, or accounts switched on, takes the list away; the reverse
+                    // hands it over. Checked on the same beat as access itself.
+                    let now_may_watch = may_watch_listeners(&state, token.as_deref());
+                    if now_may_watch != may_watch {
+                        may_watch = now_may_watch;
+                        let update = if may_watch {
+                            presence.borrow_and_update();
+                            listeners_message(&state)
+                        } else {
+                            ServerMessage::ListenersHidden
+                        };
+                        if !send_message(&mut sink, update).await {
+                            break;
+                        }
+                    }
+                }
+                Event::Presence => {
+                    presence.borrow_and_update();
+                    if !send_message(&mut sink, listeners_message(&state)).await {
                         break;
                     }
                 }
@@ -164,6 +260,8 @@ impl StreamSession {
                     break;
                 }
                 Event::Incoming(Some(Ok(message))) => {
+                    // Anything at all counts, pongs to the server's pings included.
+                    last_heard = tokio::time::Instant::now();
                     match message {
                         Message::Close(_) => break,
                         Message::Text(text) => {
@@ -183,6 +281,15 @@ impl StreamSession {
                                     continue;
                                 }
                             };
+
+                            if matches!(command, ClientMessage::Seek { .. }) {
+                                repositioned = true;
+                            }
+                            // Only the listener list cares, so it never reaches the transport.
+                            if let ClientMessage::Player { state: player } = command {
+                                registered.set_player(player);
+                                continue;
+                            }
 
                             let outcome = handle_command(
                                 command,
@@ -304,6 +411,45 @@ enum Event {
     Live(Option<Result<AudioFrame, RecvError>>),
     Tick,
     AccessCheck,
+    /// Somebody arrived, left, or changed what they are doing.
+    Presence,
+}
+
+/// What a session is doing, for the listener list.
+fn activity_of(mode: StreamMode, cursor: Option<&PlaybackCursor>) -> ListenerActivity {
+    match (mode, cursor) {
+        (StreamMode::Playback, Some(active)) => ListenerActivity::Playback {
+            from_ms: active.position_ms(),
+        },
+        (StreamMode::Paused, _) => ListenerActivity::Paused,
+        _ => ListenerActivity::Live,
+    }
+}
+
+/// Whether a socket's user may see who else is listening: anybody on an open recorder, where everybody has
+/// admin powers anyway, and only admins once there are accounts. Anything that cannot be worked out, such
+/// as a database hiccup, answers no, because the list names people and says where they connect from.
+fn may_watch_listeners(state: &AppState, token: Option<&str>) -> bool {
+    let needed = crate::models::Access::Administer;
+    match state.auth.mode() {
+        Ok(mode) if mode.requires_login() => match state.auth.resolve(token) {
+            Ok(user) => crate::models::authorize(mode, user.as_ref(), needed).is_ok(),
+            Err(_) => false,
+        },
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+fn listeners_message(state: &AppState) -> ServerMessage {
+    ServerMessage::Listeners {
+        listeners: state
+            .listeners
+            .snapshot()
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+    }
 }
 
 /// Whether the listener behind a socket may still hear it: always without accounts, and with accounts
@@ -448,6 +594,10 @@ async fn handle_command(
             )
             .await
         }
+
+        // Taken by the session loop before it gets here, since it touches the listener list and not the
+        // transport. Kept as a no op rather than unreachable, so a future caller cannot panic the task.
+        ClientMessage::Player { .. } => true,
     }
 }
 
@@ -512,14 +662,26 @@ async fn receive_live(
     }
 }
 
+/// Every write to the socket goes through here, so none can wait on a dead connection for longer than
+/// [`SEND_TIMEOUT`]. False means the socket is finished and the session should end.
+async fn deliver(sink: &mut Sink, message: Message) -> bool {
+    match tokio::time::timeout(SEND_TIMEOUT, sink.send(message)).await {
+        Ok(sent) => sent.is_ok(),
+        Err(_) => {
+            tracing::debug!("closing a stream whose client stopped reading");
+            false
+        }
+    }
+}
+
 async fn send_audio(sink: &mut Sink, state: &Arc<AppState>, frame: &AudioFrame) -> bool {
     let encoded = encode_audio_frame(frame, state.encoder.as_ref());
-    sink.send(Message::Binary(encoded.into())).await.is_ok()
+    deliver(sink, Message::Binary(encoded.into())).await
 }
 
 async fn send_message(sink: &mut Sink, message: ServerMessage) -> bool {
     match serde_json::to_string(&message) {
-        Ok(json) => sink.send(Message::Text(json.into())).await.is_ok(),
+        Ok(json) => deliver(sink, Message::Text(json.into())).await,
         Err(error) => {
             tracing::error!(%error, "could not serialise a control message");
             true
@@ -655,6 +817,76 @@ mod tests {
 
         auth.delete_user(listener.id).expect("remove");
         assert!(!still_allowed(temp.state(), Some(&again.token)));
+    }
+
+    #[test]
+    fn everybody_sees_the_listener_list_on_an_open_recorder() {
+        let temp = temp_state("watch-open");
+        assert!(may_watch_listeners(temp.state(), None));
+
+        temp.state().auth.choose_open().expect("open");
+        assert!(may_watch_listeners(temp.state(), None));
+    }
+
+    #[test]
+    fn with_accounts_only_admins_see_the_listener_list() {
+        let temp = temp_state("watch-accounts");
+        let auth = &temp.state().auth;
+        let owner = auth
+            .set_up("owner@example.com", "a long password")
+            .expect("setup");
+        let listener = auth
+            .create_user("kitchen@example.com", "listen only", Role::Listener)
+            .expect("listener");
+        let client = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+        let kitchen = auth
+            .log_in(client, "kitchen@example.com", "listen only")
+            .expect("login")
+            .signed_in()
+            .expect("no second factor on this account");
+
+        assert!(!may_watch_listeners(temp.state(), None));
+        assert!(may_watch_listeners(temp.state(), Some(&owner.token)));
+        assert!(!may_watch_listeners(temp.state(), Some(&kitchen.token)));
+
+        // Promotion hands the list over on the next access check, and demotion takes it away again.
+        auth.update_role(listener.id, Role::Admin).expect("promote");
+        assert!(may_watch_listeners(temp.state(), Some(&kitchen.token)));
+        auth.update_role(listener.id, Role::Listener)
+            .expect("demote");
+        assert!(!may_watch_listeners(temp.state(), Some(&kitchen.token)));
+    }
+
+    #[test]
+    fn activity_reports_where_playback_is_and_nothing_finer() {
+        assert_eq!(activity_of(StreamMode::Live, None), ListenerActivity::Live);
+        assert_eq!(
+            activity_of(StreamMode::Paused, None),
+            ListenerActivity::Paused
+        );
+        // Playback without a cursor cannot happen, and reads as live rather than inventing a position.
+        assert_eq!(
+            activity_of(StreamMode::Playback, None),
+            ListenerActivity::Live
+        );
+    }
+
+    #[test]
+    fn a_client_is_silent_only_after_three_missed_ping_rounds() {
+        let heard = tokio::time::Instant::now();
+        assert!(!is_silent(heard, heard));
+        assert!(!is_silent(heard, heard + ACCESS_RECHECK));
+        assert!(!is_silent(heard, heard + ACCESS_RECHECK * 2));
+        assert!(is_silent(heard, heard + IDLE_TIMEOUT));
+        // A clock that looks backwards is not silence.
+        assert!(!is_silent(heard + ACCESS_RECHECK, heard));
+    }
+
+    #[test]
+    fn a_stuck_send_gives_up_before_the_idle_timeout_would_notice() {
+        // The idle check runs between events, so a send stuck inside one must end on its own, and soon
+        // enough that a vanished client leaves the list in about as long as a silent one.
+        assert!(SEND_TIMEOUT < IDLE_TIMEOUT);
     }
 
     #[test]

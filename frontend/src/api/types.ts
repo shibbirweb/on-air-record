@@ -162,7 +162,35 @@ export type ServerMessage =
   | { type: 'level'; rms: number; peak: number }
   | { type: 'speed'; value: number }
   | { type: 'pong'; clientTimeMs: number; serverTimeMs: number }
-  | { type: 'error'; code: string; message: string };
+  | { type: 'error'; code: string; message: string }
+  | { type: 'listeners'; listeners: ListenerView[] }
+  | { type: 'listeners-hidden' };
+
+/**
+ * One open audio stream, as the admin's listener list shows it. Pushed over the stream socket, and only to
+ * a session that may see it: an admin, or anybody on an open recorder.
+ */
+export type ListenerView = {
+  /** Stable for the life of the connection. */
+  id: number;
+  /** Absent for a guest on an open recorder. */
+  email: string | null;
+  role: Role | null;
+  address: string;
+  userAgent: string | null;
+  connectedAtMs: number;
+  activity: StreamMode;
+  /** Where a listener in history started or last jumped to. Set only while the activity is playback. */
+  fromMs: number | null;
+  /** Whether the person is hearing it, as their browser reports. */
+  player: PlayerState;
+};
+
+/**
+ * What the person at a browser is doing with the stream: not pressed play yet, playing, or paused. Reported
+ * to the server only for the listener list; the stream flows the same either way.
+ */
+export type PlayerState = 'idle' | 'playing' | 'paused';
 
 export type ClientMessage =
   | { type: 'live' }
@@ -170,7 +198,8 @@ export type ClientMessage =
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'speed'; value: number }
-  | { type: 'ping'; clientTimeMs: number };
+  | { type: 'ping'; clientTimeMs: number }
+  | { type: 'player'; state: PlayerState };
 
 /** One decoded audio frame off the wire. */
 export type AudioFrame = {
