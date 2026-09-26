@@ -22,6 +22,8 @@ pub struct SettingsDto {
     /// Where segments are actually written right now, resolved from the setting. Always absolute, so the
     /// UI can show the effective path rather than an empty box when the default is in force.
     pub effective_recordings_dir: String,
+    /// Whether the service asks GitHub every few hours for a newer release.
+    pub check_for_updates: bool,
 }
 
 impl SettingsDto {
@@ -43,6 +45,7 @@ impl SettingsDto {
             recording_sample_rate: settings.recording_sample_rate,
             recordings_dir: settings.recordings_dir,
             effective_recordings_dir,
+            check_for_updates: settings.check_for_updates,
         }
     }
 }
@@ -73,6 +76,8 @@ pub struct SettingsPatchRequest {
     /// Present and null returns to the default location.
     #[serde(default, deserialize_with = "deserialize_nested_option")]
     pub recordings_dir: Option<Option<String>>,
+    #[serde(default)]
+    pub check_for_updates: Option<bool>,
 }
 
 impl From<SettingsPatchRequest> for SettingsPatch {
@@ -87,6 +92,7 @@ impl From<SettingsPatchRequest> for SettingsPatch {
             frame_ms: request.frame_ms,
             recording_sample_rate: request.recording_sample_rate,
             recordings_dir: request.recordings_dir,
+            check_for_updates: request.check_for_updates,
         }
     }
 }

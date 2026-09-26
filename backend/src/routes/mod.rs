@@ -24,7 +24,7 @@ use crate::app::AppState;
 use crate::controllers::{
     auth_controller, bookmark_controller, capture_controller, device_controller, export_controller,
     session_controller, settings_controller, status_controller, stream_controller,
-    timeline_controller, user_controller,
+    timeline_controller, update_controller, user_controller,
 };
 
 /// Build the complete application router.
@@ -82,6 +82,8 @@ pub fn build(state: Arc<AppState>) -> Router {
         )
         .route("/settings/defaults", get(settings_controller::defaults))
         .route("/settings/reset", post(settings_controller::reset))
+        .route("/updates", get(update_controller::status))
+        .route("/updates/check", post(update_controller::check))
         .route(
             "/settings/test-recordings-dir",
             post(settings_controller::test_recordings_dir),

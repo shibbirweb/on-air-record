@@ -832,9 +832,29 @@ tested to face the open internet. If you need access from elsewhere, use a VPN i
 
 ## Upgrading
 
+The control room tells admins when a new version is out, with what changed and the commands to update for
+the way this copy was installed; see the user guide's Updates section. To do it by hand:
+
 1. Stop the service.
 2. Replace the program file with the new one.
 3. Start it again.
+
+For a folder made by the installer, those three steps are two commands, run as the account that owns the
+folder:
+
+```sh
+./on-air-record/stop.sh
+curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh -s -- --update
+```
+
+Stop it first: `--update` replaces the program and starts it again, and a copy still running would hold
+the port.
+
+**The update check.** Every six hours, and a minute after it starts, the service asks
+`api.github.com` for the list of releases. That is the only request it ever makes to the internet. It
+sends nothing about the recorder beyond its version in the user agent, and it never downloads or installs
+anything. Turn it off under Settings, Updates, **Check for updates automatically**. A machine with no
+internet access needs no change: the check fails quietly and tries again later.
 
 Leave the data directory alone. Recordings, settings and bookmarks all live there and carry over. The
 database upgrades itself on first start if the new version needs it.

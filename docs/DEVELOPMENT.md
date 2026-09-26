@@ -437,6 +437,34 @@ system draws. That needs real devices:
 `chrome://media-internals` lists every player a page has. With playback running Chrome should show two for
 this page: the stream and the silent clip.
 
+## Working on the update notice
+
+The service reads GitHub's public releases list, so a development build, which is usually the newest
+version, finds nothing newer and shows no banner. To see the banner against the real releases, build a copy
+that believes it is older, into its own target folder, and put the version straight back:
+
+```sh
+node scripts/version.mjs set 0.5.0
+(cd backend && CARGO_TARGET_DIR=/tmp/oar-older cargo build)
+node scripts/version.mjs set 0.6.0          # whatever it was; never commit the pretend version
+```
+
+Run `/tmp/oar-older/debug/on-air-record` and press **Check now** under Settings, Updates. To see the
+installer steps rather than the manual ones, copy the binary into a folder with an empty `start.sh` and a
+`config` file beside it, which is how the service recognises an installer folder; add `OAR_CHANNEL=beta`
+to that file to follow betas.
+
+Things worth knowing:
+
+- **GitHub allows 60 unauthenticated requests an hour per address**, shared by everything behind it. The
+  service asks every six hours; pressing Check now repeatedly is what runs it out, and a 403 then reads as
+  "try again later" rather than a fault.
+- **`GET /api/updates` never touches the network.** Only the scheduled check and `POST /api/updates/check`
+  do, which is why the router tests exercise only the first.
+- **The notes are whatever is written on the GitHub release.** Betas get the changelog section
+  automatically; for a stable release, paste the changelog section into the release notes, or users see
+  GitHub's generated list of pull requests instead.
+
 ## Troubleshooting
 
 **No devices are listed.** On Linux check that the user is in the `audio` group and that `arecord -l` sees the

@@ -15,4 +15,5 @@ pub mod settings_controller;
 pub mod status_controller;
 pub mod stream_controller;
 pub mod timeline_controller;
+pub mod update_controller;
 pub mod user_controller;

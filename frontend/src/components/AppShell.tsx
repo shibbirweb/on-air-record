@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { UserMenu } from '@/features/auth/UserMenu';
 import { ListenersBadge } from '@/features/status/ListenersBadge';
+import { UpdateBanner } from '@/features/updates/UpdateBanner';
 import { usePolling } from '@/hooks/usePolling';
 import { useStreamEngine } from '@/hooks/useStreamEngine';
 import { useTheme } from '@/hooks/useTheme';
@@ -24,9 +25,12 @@ import { useCanAdminister } from '@/store/useAuthStore';
 import { useConnectionStore } from '@/store/useConnectionStore';
 import { useStatusStore } from '@/store/useStatusStore';
 import { useTransportStore } from '@/store/useTransportStore';
+import { useUpdateStore } from '@/store/useUpdateStore';
 import { Moon, Sun } from 'lucide-react';
 
 const STATUS_POLL_MS = 1000;
+/** The service checks GitHub every few hours by itself; this only reads its answer, so it can be lazy. */
+const UPDATE_POLL_MS = 15 * 60 * 1000;
 
 export type AppOutletContext = {
   engine: AudioEngine;
@@ -59,6 +63,10 @@ export function AppShell() {
   const onAir = capturing && playing && mode === 'live';
   // Listeners have nothing to change on the settings page, so it is not offered to them at all.
   const mayAdminister = useCanAdminister();
+
+  // Only admins can act on an update, and only they are allowed to read the notice.
+  const refreshUpdates = useUpdateStore((state) => state.refresh);
+  usePolling(() => (mayAdminister ? refreshUpdates() : undefined), UPDATE_POLL_MS);
 
   return (
     <div className="bg-background flex min-h-screen flex-col">
@@ -115,6 +123,8 @@ export function AppShell() {
           </div>
         </div>
       </header>
+
+      {mayAdminister && <UpdateBanner />}
 
       {/* The shell is a column and the page grows, so the footer sits at the bottom of a short page
           rather than floating half way up it. */}

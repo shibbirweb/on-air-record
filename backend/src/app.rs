@@ -16,6 +16,7 @@ use crate::repositories::{
 use crate::services::{
     AuthService, BookmarkService, BroadcastHub, CaptureService, DeviceService, ExportService,
     ListenerRegistry, PlaybackService, RetentionService, SettingsService, TimelineService,
+    UpdateService,
 };
 use crate::util::time::now_ms;
 
@@ -32,6 +33,8 @@ pub struct AppState {
     /// Every open audio stream, for the listener count and the admin's list of who is listening.
     pub listeners: Arc<ListenerRegistry>,
     pub bookmarks: Arc<BookmarkService>,
+    /// Whether a newer release exists, checked every few hours for the admin's update notice.
+    pub updates: Arc<UpdateService>,
     pub export: Arc<ExportService>,
     pub sessions: Arc<SessionRepository>,
     pub segments: Arc<SegmentRepository>,
@@ -76,6 +79,7 @@ impl AppState {
         ));
 
         let bookmarks = Arc::new(BookmarkService::new(bookmark_repository.clone()));
+        let updates = Arc::new(UpdateService::new(settings.clone()));
         let devices = Arc::new(DeviceService::new(settings.clone(), capture.clone()));
         let playback = Arc::new(PlaybackService::new(config.clone(), segments.clone()));
         let timeline = Arc::new(TimelineService::new(segments.clone(), hub.clone()));
@@ -100,6 +104,7 @@ impl AppState {
             hub,
             listeners: Arc::new(ListenerRegistry::new()),
             bookmarks,
+            updates,
             export,
             sessions,
             segments,

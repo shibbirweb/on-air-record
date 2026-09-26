@@ -66,6 +66,8 @@ export type Settings = {
   recordingsDir: string | null;
   /** Where segments are written right now, always absolute. Read only. */
   effectiveRecordingsDir: string;
+  /** Whether the service asks GitHub every few hours for a newer release. */
+  checkForUpdates: boolean;
 };
 
 /**
@@ -74,6 +76,44 @@ export type Settings = {
  * default directory.
  */
 export type SettingsPatch = Partial<Omit<Settings, 'effectiveRecordingsDir'>>;
+
+/** One published release newer than the running one. */
+export type ReleaseInfo = {
+  /** Without the leading v, like the service's own version. */
+  version: string;
+  tag: string;
+  prerelease: boolean;
+  publishedAtMs: number | null;
+  /** The release notes, in Markdown as written on the release. */
+  notes: string;
+  url: string;
+};
+
+/** How this copy was installed, which decides how it is updated. */
+export type InstallInfo = {
+  kind: 'installer' | 'systemd' | 'manual';
+  /** The installer folder, when there is one. */
+  dir: string | null;
+  os: string;
+  /** The target triple the program was built for, which names its download. */
+  target: string;
+};
+
+/** Whether a newer release exists, from the service's last check. */
+export type UpdateStatus = {
+  currentVersion: string;
+  channel: 'stable' | 'beta';
+  /** Whether the service checks by itself every few hours. */
+  automatic: boolean;
+  checkedAtMs: number | null;
+  error: string | null;
+  /** The newest release on this channel, when one is newer than what is running. */
+  available: ReleaseInfo | null;
+  /** Every newer release, newest first. */
+  releases: ReleaseInfo[];
+  install: InstallInfo;
+  releasesUrl: string;
+};
 
 export type CoverageBand = {
   startMs: number;

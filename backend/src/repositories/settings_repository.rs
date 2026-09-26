@@ -110,6 +110,7 @@ mod tests {
             frame_ms: 60,
             recording_sample_rate: None,
             recordings_dir: None,
+            check_for_updates: false,
         };
         repository.save(&settings).expect("save");
         assert_eq!(repository.load().expect("load"), settings);

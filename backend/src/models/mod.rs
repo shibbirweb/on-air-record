@@ -11,6 +11,7 @@ pub mod listener;
 pub mod segment;
 pub mod session;
 pub mod settings;
+pub mod update;
 pub mod user;
 
 pub use audio_frame::AudioFrame;
