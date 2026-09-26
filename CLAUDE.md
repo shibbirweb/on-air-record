@@ -186,6 +186,12 @@ Two rules that the audio path depends on:
 - **The Web Audio graph never enters the render cycle.** `AudioEngine` is built once via lazy `useState`
   in `useStreamEngine` and lives in that hook. Rebuilding an `AudioContext` on a render clicks audibly and
   loses the scheduling clock.
+- **Output goes through a hidden `<audio>` element**, fed by a `MediaStreamAudioDestinationNode`, because
+  phones suspend pure Web Audio when the screen locks. Its `play()` must be called synchronously in the
+  Play gesture, before any `await`, or phones refuse it. If it is refused, the graph falls back to
+  `context.destination`; keep that fallback. Everywhere but WebKit a looping silent clip
+  (`lib/audio/silence.ts`) plays alongside, because Chrome shows no media controls for a MediaStream
+  element; it must stay unmuted and at least five seconds long. Screen off playback can only be verified on a real phone.
 - **High frequency data bypasses React.** Frames, meters, and the 60 fps playhead go through refs and
   imperative canvas drawing. Only low frequency state goes through Zustand. The timeline and waveform read
   the playhead through a `getPlayheadMs()` callback so a moving playhead triggers no renders.

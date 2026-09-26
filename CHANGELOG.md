@@ -5,6 +5,15 @@ Every release of On Air Record, newest first. The format follows
 [Semantic Versioning](https://semver.org/). Each release's section is also used as its notes on the
 [releases page](https://github.com/shibbirweb/on-air-record/releases).
 
+## [Unreleased]
+
+### Added
+
+- **Keeps playing with the screen off.** On a phone, the broadcast now carries on when the screen turns off
+  or you switch apps, like a radio app, and shows on the lock screen with play and pause buttons. Before,
+  locking the phone stopped the sound. On a computer it now shows in the browser's media controls and the
+  system's Now Playing, and the keyboard's play and pause key works. (OAR-84)
+
 ## [0.5.0] - 2026-09-26
 
 ### Added
@@ -156,6 +165,7 @@ The first release.
 - There is no authentication, by design. Anyone who can reach the port can listen, so keep it on a network
   you trust.
 
+[Unreleased]: https://github.com/shibbirweb/on-air-record/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/shibbirweb/on-air-record/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/shibbirweb/on-air-record/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/shibbirweb/on-air-record/compare/v0.2.0...v0.3.0
