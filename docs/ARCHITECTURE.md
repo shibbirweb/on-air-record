@@ -200,6 +200,9 @@ Rules:
 - Components never call `fetch` directly. They call a store action, which calls the API client.
 - The Web Audio graph is never rebuilt by React rendering. It lives in `lib/audio` and is owned by a hook
   that mounts it once, because tearing an `AudioContext` down on every render causes clicks and drift.
+- The graph plays through a hidden `<audio>` element rather than straight to the speakers, so phones treat
+  the page as media and keep it playing with the screen off, with lock screen controls from the Media
+  Session API. See [AUDIO_PIPELINE.md](AUDIO_PIPELINE.md#6-browser-playback).
 - Zustand stores are sliced by concern so that a waveform repaint does not re render the settings panel:
 
   | Store | Owns |

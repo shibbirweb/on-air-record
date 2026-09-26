@@ -378,6 +378,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Volume slider and mute
 - [x] On air indicator and live listener count
 - [x] Realtime listener list for admins: account, activity, browser, address and time connected
+- [x] Keeps playing with a phone's screen off, with lock screen play and pause, through a media element
 - [x] Input device selector marking the system default and any unplugged device
 - [x] Recorder panel: state, elapsed time, format, session, dropped frames, link health
 - [x] Storage panel with disk usage, history depth, retention, and recent sessions

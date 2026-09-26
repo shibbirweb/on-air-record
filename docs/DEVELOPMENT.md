@@ -383,6 +383,60 @@ The access check runs every 15 seconds, so changing someone's role takes up to t
 their list. The shape of every message is in [API.md](API.md#the-listener-list), and the design in
 [ARCHITECTURE.md](ARCHITECTURE.md#watching-who-is-listening).
 
+## Working on background playback
+
+Phones stop a page's sound when the screen locks unless the page plays media through an element, and
+browsers only show media controls (lock screen, notification, toolbar, Now Playing, media keys) for media
+they consider real. So the audio engine does three things beyond scheduling buffers, all in
+`frontend/src/lib/audio`:
+
+| Piece | Where | Why |
+| --- | --- | --- |
+| Output through a hidden `<audio>` element | `audioEngine.ts`, `routeOutput` | Phones keep media elements playing with the screen off; plain Web Audio is suspended |
+| Looping ten second silent WAV | `silence.ts`, `createKeeper` in `audioEngine.ts` | Chrome gives no media controls to an element playing a MediaStream, only to one with a known duration of five seconds or more |
+| Media Session metadata and buttons | `mediaSession.ts`, wired in `useStreamEngine.ts` | What the controls show, and play and pause that drive the transport |
+
+Which browsers get the silent clip:
+
+| Browser | Silent clip | Why |
+| --- | --- | --- |
+| Chrome, Edge, Firefox on a computer | Yes | Otherwise no toolbar media button, Now Playing or media keys |
+| Chrome and others on Android | Yes | Otherwise no notification or lock screen controls |
+| Any browser on an iPhone or iPad | No | All are WebKit, which shows controls for the stream element itself |
+| Safari on a Mac | No | WebKit, as above |
+
+Rules that break it silently if forgotten:
+
+- **`play()` is called synchronously inside the Play gesture**, before any `await` in `start`. Phones allow
+  media to start only while the tap is still being handled, and an `await` hands control back first.
+- **The silent clip stays unmuted and at least five seconds long.** Chrome ignores muted and short media
+  for its controls, which is also why it is WAV silence rather than `muted = true`.
+- **Keep the fallback.** If the element refuses to play, the graph connects to `context.destination` as it
+  always did. Sound in the foreground beats no sound.
+- **A pause that nobody asked for pauses the transport.** `wantsToPlay` tells the two apart: `suspend`
+  clears it before pausing the elements, so any other pause is the phone's doing.
+
+### Testing it
+
+What an automated browser (Playwright driving Chrome) can prove: the elements are created from the tap,
+sound actually comes out of the stream element (measure it with a second `AudioContext` reading its
+`srcObject`), the Media Session metadata and handlers, and the fallback. Launch Chrome with
+`--autoplay-policy=user-gesture-required` so it demands a tap the way a phone does; an automated browser
+that allows audio without one hides the mistake that matters most.
+
+What it cannot prove is the point of the feature: the screen turning off, and the controls the operating
+system draws. That needs real devices:
+
+1. Run the backend on the machine (`cargo run` listens on every interface) and open
+   `http://<the machine's LAN address>:8080` on the phone.
+2. Press Play, lock the phone, and wait a minute. It should keep playing.
+3. Check the lock screen, and on Android the notification shade, for On Air Record with the icon and
+   working play and pause.
+4. On a computer, check Chrome's toolbar media button, Now Playing on a Mac, and the keyboard's play key.
+
+`chrome://media-internals` lists every player a page has. With playback running Chrome should show two for
+this page: the stream and the silent clip.
+
 ## Troubleshooting
 
 **No devices are listed.** On Linux check that the user is in the `audio` group and that `arecord -l` sees the
@@ -423,6 +477,15 @@ kill -STOP <that pid>      # the entry leaves within a minute; kill -CONT does n
 
 That works on an open recorder; with accounts the socket needs a session cookie, so use a browser tab and
 suspend the whole browser process instead.
+
+**Sound stops when a phone's screen locks.** The output element was refused and the engine fell back to
+plain Web Audio, which phones suspend. The usual cause is a `play()` call that moved after an `await` in
+`AudioEngine.start`. Also rule out the phone: battery savers that close background pages, and pages opened
+inside another app's built in browser.
+
+**No media controls on Android or a computer.** The silent clip is not playing. Check
+`needsNotificationKeeper` against that browser's user agent, and that nothing mutes or shortens the clip.
+`chrome://media-internals` shows whether a second player exists.
 
 **The timeline is empty although recording is running.** Only closed segments are indexed. Wait one segment
 length, 10 seconds by default, or stop capture to flush the open segment.
