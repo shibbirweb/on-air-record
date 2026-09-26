@@ -34,7 +34,7 @@ The underlying commands:
 ```sh
 # Backend, from backend/
 cargo run                                    # API on :8080, reads ../frontend/dist
-cargo test                                   # ~282 unit and router tests
+cargo test                                   # ~290 unit and router tests
 cargo test day_bounds                        # single test by name substring
 cargo test --lib services::playback_service  # one module
 cargo clippy --all-targets -- -D warnings    # must be clean
@@ -43,7 +43,7 @@ cargo fmt
 # Frontend, from frontend/
 npm run dev      # Vite on :5173, proxies /api and the WebSocket to :8080
 npm run build    # tsc -b then vite build, writes dist/, which a release backend embeds
-npm test         # Vitest, ~101 tests
+npm test         # Vitest, ~126 tests
 npm run lint     # oxlint
 ```
 
@@ -92,6 +92,24 @@ rejoins the hub.
 `ws/session.rs` is a three state machine (`Live`, `Playback`, `Paused`). Keep transitions in the enum.
 DVR code tracked with booleans always grows a state nobody meant to allow.
 
+### Who is listening
+
+`services/listener_registry.rs` holds every open stream session; admin sessions (anyone, on an open
+recorder) watch it and push the whole list to their browser on every change. Rules that keep it honest:
+
+- **Entries leave by `Drop`.** A session holds its `ListenerHandle` for the whole of `run`, so every way it
+  ends removes it. Never add an explicit unregister path that could be skipped.
+- **Report at the top of the session loop**, before `select!`, because several branches `continue`. Compare
+  only the kind of activity plus the `repositioned` flag a seek sets, or a moving playhead republishes the
+  list every frame.
+- **`player` is informational.** The UI tells the server `idle`, `playing` or `paused` because its pause
+  button never reaches the server. It is taken off before `handle_command` and must never change what is
+  streamed.
+- **Who may see the list is `may_watch_listeners`**, re-evaluated on the 15 second access check. A
+  listener session never subscribes; do not rely on the frontend to hide it.
+- The registry is also the listener count in `GET /api/status`; `BroadcastHub::listener_count` only counts
+  sessions on the live feed.
+
 ### Storage invariants
 
 ```
@@ -137,7 +155,10 @@ HTTP so it is tested exhaustively.
   runs with `changeOrigin: false` for the same reason.
 - **Sessions are checked on every request**, by SHA-256 of the cookie, so revocation is immediate. A
   WebSocket is only checked at the handshake by the guard, so `ws/session.rs` re-checks every 15 seconds
-  and closes the socket; keep that if the session loop is restructured.
+  and closes the socket; keep that if the session loop is restructured. The same tick pings the client and
+  drops a socket silent for `IDLE_TIMEOUT`, and **every write goes through `deliver`**, which gives up after
+  `SEND_TIMEOUT`. A bare `sink.send` can wait forever on a vanished client whose buffer is full, inside a
+  branch where no timer can reach it.
 - **Argon2 runs off the runtime.** Hashing takes tens of milliseconds by design; controllers call it
   through `auth_controller::blocking`. Debug builds optimise `argon2` and `blake2` via `[profile.dev]` so
   tests and `cargo run` logins stay fast.

@@ -9,4 +9,4 @@ pub mod session;
 
 pub use messages::{ClientMessage, ServerMessage, StreamMode};
 pub use protocol::{encode_audio_frame, FrameHeader, HEADER_LEN, MAGIC, PROTOCOL_VERSION};
-pub use session::StreamSession;
+pub use session::{ListenerIdentity, StreamSession};

@@ -60,6 +60,62 @@ pub enum ServerMessage {
     /// drop a listener who is otherwise happily connected.
     #[serde(rename_all = "camelCase")]
     Error { code: String, message: String },
+
+    /// Everybody connected right now. Sent only to a session that may see it (an admin, or anybody on an
+    /// open recorder): once on connect, then whenever somebody arrives, leaves, or moves between live,
+    /// history and paused.
+    #[serde(rename_all = "camelCase")]
+    Listeners { listeners: Vec<ListenerView> },
+
+    /// The session may no longer see the list, because its account stopped being an admin or accounts were
+    /// switched on. The client drops the copy it has.
+    ListenersHidden,
+}
+
+/// One connection, as the admin's listener list shows it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListenerView {
+    pub id: u64,
+    /// `None` for a guest, on an open recorder.
+    pub email: Option<String>,
+    pub role: Option<crate::models::Role>,
+    pub address: String,
+    pub user_agent: Option<String>,
+    pub connected_at_ms: i64,
+    /// `live`, `playback` or `paused`.
+    pub activity: StreamMode,
+    /// Where a listener in history started or last jumped to. `None` unless the activity is `playback`.
+    pub from_ms: Option<i64>,
+    /// `idle`, `playing` or `paused`: whether the person is hearing it, as their browser reports.
+    pub player: crate::models::PlayerState,
+}
+
+impl From<crate::models::ListenerEntry> for ListenerView {
+    fn from(entry: crate::models::ListenerEntry) -> Self {
+        use crate::models::ListenerActivity;
+
+        let (activity, from_ms) = match entry.activity {
+            ListenerActivity::Live => (StreamMode::Live, None),
+            ListenerActivity::Playback { from_ms } => (StreamMode::Playback, Some(from_ms)),
+            ListenerActivity::Paused => (StreamMode::Paused, None),
+        };
+        let (email, role) = match entry.account {
+            Some(account) => (Some(account.email), Some(account.role)),
+            None => (None, None),
+        };
+        Self {
+            id: entry.id,
+            email,
+            role,
+            address: entry.address.to_string(),
+            user_agent: entry.user_agent,
+            connected_at_ms: entry.connected_at_ms,
+            activity,
+            from_ms,
+            player: entry.player,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -86,6 +142,12 @@ pub enum ClientMessage {
     #[serde(rename_all = "camelCase")]
     Ping {
         client_time_ms: i64,
+    },
+
+    /// Whether the person is hearing the stream: sent by the UI when its socket opens and whenever play or
+    /// pause is pressed. Changes nothing about what is streamed; it only feeds the admin listener list.
+    Player {
+        state: crate::models::PlayerState,
     },
 }
 
@@ -143,6 +205,18 @@ mod tests {
         let ping: ClientMessage =
             serde_json::from_str(r#"{"type":"ping","clientTimeMs":5}"#).expect("parse");
         assert!(matches!(ping, ClientMessage::Ping { client_time_ms: 5 }));
+
+        let player: ClientMessage =
+            serde_json::from_str(r#"{"type":"player","state":"idle"}"#).expect("parse");
+        assert!(matches!(
+            player,
+            ClientMessage::Player {
+                state: crate::models::PlayerState::Idle
+            }
+        ));
+        assert!(
+            serde_json::from_str::<ClientMessage>(r#"{"type":"player","state":"loud"}"#).is_err()
+        );
     }
 
     #[test]

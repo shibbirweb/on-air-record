@@ -1,9 +1,10 @@
 /**
  * Who can use the recorder: switch accounts on, or manage them once they are.
  *
- * Unlike the rest of the settings page, nothing here waits for the Save bar. Adding an account or
- * changing a role applies the moment it is confirmed, because a half saved account list is not a draft
- * anybody wants to review.
+ * A role change is staged like every other setting on the page and applied by the Save bar, so the menu
+ * can be changed back without anybody losing access in between. Adding and removing an account, setting
+ * a password and removing a second factor happen when their own dialog or confirm button is pressed:
+ * that press is already the deliberate step, and a half created account is not a draft worth holding.
  */
 
 import { KeyRound, Loader2, ShieldCheck, ShieldOff, Trash2, UserPlus } from 'lucide-react';
@@ -149,7 +150,8 @@ function AccountsManager() {
 }
 
 function AccountRow({ user, isMe }: { user: User; isMe: boolean }) {
-  const updateRole = useAccountsStore((state) => state.updateRole);
+  const stagedRole = useAccountsStore((state) => state.roleDraft[user.id]);
+  const stageRole = useAccountsStore((state) => state.stageRole);
   const remove = useAccountsStore((state) => state.remove);
   const resetTwoFactor = useAccountsStore((state) => state.resetTwoFactor);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -183,8 +185,17 @@ function AccountRow({ user, isMe }: { user: User; isMe: boolean }) {
         </Badge>
       ) : (
         <>
+          {stagedRole && (
+            <Badge
+              variant="outline"
+              className="border-amber-500/60 font-normal text-amber-700 dark:text-amber-400"
+              title={`Now ${user.role === 'admin' ? 'an admin' : 'a listener'}. Save changes to apply.`}
+            >
+              Unsaved
+            </Badge>
+          )}
           <div className="w-32">
-            <RolePicker value={user.role} onChange={(role) => void updateRole(user.id, role)} />
+            <RolePicker value={stagedRole ?? user.role} onChange={(role) => stageRole(user.id, role)} />
           </div>
           <Button
             size="icon-sm"

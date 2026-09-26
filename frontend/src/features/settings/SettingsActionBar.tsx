@@ -6,6 +6,10 @@
  *
  * Shrinking the retention window is the only genuinely destructive change here, so that is the only one
  * that asks twice. Everything else saves on the first click.
+ *
+ * Staged account roles ride along: they are counted, saved and discarded with the settings draft, so the
+ * page has one Save however many sections were touched. They are two requests to two endpoints, not one
+ * transaction, and each side keeps whatever it failed to save still staged.
  */
 
 import { RotateCcw, Save, TriangleAlert, Undo2 } from 'lucide-react';
@@ -15,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { Settings } from '@/api/types';
+import { useAccountsStore } from '@/store/useAccountsStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 
 /** Describe a retention window the way the panel above does. */
@@ -47,13 +52,35 @@ export function SettingsActionBar() {
   const saving = useSettingsStore((state) => state.saving);
   const error = useSettingsStore((state) => state.error);
   const stageDefaults = useSettingsStore((state) => state.stageDefaults);
-  const discard = useSettingsStore((state) => state.discard);
-  const save = useSettingsStore((state) => state.save);
+  const discardSettings = useSettingsStore((state) => state.discard);
+  const saveSettings = useSettingsStore((state) => state.save);
+  const roleDraft = useAccountsStore((state) => state.roleDraft);
+  const savingRoles = useAccountsStore((state) => state.savingRoles);
+  const roleError = useAccountsStore((state) => state.roleError);
+  const discardRoles = useAccountsStore((state) => state.discardRoles);
+  const saveRoles = useAccountsStore((state) => state.saveRoles);
 
   const [confirming, setConfirming] = useState(false);
 
-  const changeCount = Object.keys(draft).length;
+  const settingsChanges = Object.keys(draft).length;
+  const roleChanges = Object.keys(roleDraft).length;
+  const changeCount = settingsChanges + roleChanges;
   const dirty = changeCount > 0;
+  const busy = saving || savingRoles;
+
+  const save = async () => {
+    if (settingsChanges > 0) {
+      await saveSettings();
+    }
+    if (roleChanges > 0) {
+      await saveRoles();
+    }
+  };
+
+  const discard = () => {
+    discardSettings();
+    discardRoles();
+  };
   const pending = settings ? { ...settings, ...draft } : null;
   const destructive = shortensRetention(settings, pending);
 
@@ -93,14 +120,14 @@ export function SettingsActionBar() {
           <Button
             size="sm"
             variant="ghost"
-            disabled={saving || atDefaults}
+            disabled={busy || atDefaults}
             onClick={stageDefaults}
           >
             <RotateCcw />
             Restore defaults
           </Button>
 
-          <Button size="sm" variant="outline" disabled={!dirty || saving} onClick={discard}>
+          <Button size="sm" variant="outline" disabled={!dirty || busy} onClick={discard}>
             <Undo2 />
             Discard
           </Button>
@@ -108,7 +135,7 @@ export function SettingsActionBar() {
           {destructive ? (
             <Popover open={confirming} onOpenChange={setConfirming}>
               <PopoverTrigger asChild>
-                <Button size="sm" disabled={!dirty || saving}>
+                <Button size="sm" disabled={!dirty || busy}>
                   <Save />
                   Save changes
                 </Button>
@@ -128,7 +155,7 @@ export function SettingsActionBar() {
                   <Button
                     size="sm"
                     variant="destructive"
-                    disabled={saving}
+                    disabled={busy}
                     onClick={() => {
                       void save();
                       setConfirming(false);
@@ -140,14 +167,19 @@ export function SettingsActionBar() {
               </PopoverContent>
             </Popover>
           ) : (
-            <Button size="sm" disabled={!dirty || saving} onClick={() => void save()}>
+            <Button size="sm" disabled={!dirty || busy} onClick={() => void save()}>
               <Save />
-              {saving ? 'Saving...' : 'Save changes'}
+              {busy ? 'Saving...' : 'Save changes'}
             </Button>
           )}
         </div>
 
         {error && <p className="text-destructive w-full text-xs">{error}</p>}
+        {roleError && (
+          <p className="text-destructive w-full text-xs">
+            A role change was not saved: {roleError}. It is still marked unsaved under Access.
+          </p>
+        )}
       </div>
     </div>
   );

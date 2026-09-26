@@ -56,8 +56,8 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle>History and storage</CardTitle>
           <CardDescription>
-            The bit rate recordings are kept at, how far back the timeline reaches, and how much disk
-            that needs.
+            The bit rate recordings are kept at, how far back the timeline reaches, and how much disk that
+            needs.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -89,7 +89,10 @@ export function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Access</CardTitle>
-          <CardDescription>Who can use the recorder. Changes here apply at once, not on Save.</CardDescription>
+          <CardDescription>
+            Who can use the recorder. Role changes wait for Save; adding, removing and setting passwords
+            happen as soon as you confirm them.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <AccessSettings />

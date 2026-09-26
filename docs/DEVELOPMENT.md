@@ -345,6 +345,44 @@ recorder being stopped and restarted several times within one day.
 Deleting `data/` resets the service completely. Deleting only `recordings/` while keeping the database leaves
 orphaned index rows, which the janitor cleans up on the next pass.
 
+## Working on the listener list
+
+The admin's list of who is listening needs more than one browser connected to be worth looking at. On one
+machine:
+
+1. Build the UI and run the backend as usual, and open `http://localhost:8080` in your normal browser. Set up
+   accounts, and add a listener under Settings, Access.
+2. Open a private window, or a second browser profile, and sign in there as the listener. It needs its own
+   cookie jar, which is why a second ordinary tab of the same browser is not enough: it would share the
+   admin's session.
+3. Point at the listener count in the first window. Press play, pause, rewind and reload in the second and
+   watch its line change.
+
+A phone on the same network is the quickest way to see a second real device and address. Open
+`http://<your machine's LAN address>:8080`.
+
+Two things look like bugs and are not:
+
+- **Under `npm run dev` every tab shows `127.0.0.1`.** Vite proxies the WebSocket, so the backend sees the
+  proxy. Use `:8080` to see real addresses.
+- **A fresh tab shows Not playing.** Browsers allow audio only after a click, and the list says so.
+
+To see exactly what the server sends, open the browser console on the page and attach a second socket. It
+carries your session cookie, so it sees what your account may see, and appears in the list itself as a tab
+that never reported, shown by what it streams:
+
+```js
+const ws = new WebSocket(`ws://${location.host}/api/ws/stream`);
+ws.onmessage = (e) => { if (typeof e.data === 'string') console.log(JSON.parse(e.data)); };
+// Then drive it like any client:
+ws.send(JSON.stringify({ type: 'player', state: 'paused' }));
+ws.send(JSON.stringify({ type: 'seek', timestampMs: Date.now() - 60_000 }));
+```
+
+The access check runs every 15 seconds, so changing someone's role takes up to that long to add or remove
+their list. The shape of every message is in [API.md](API.md#the-listener-list), and the design in
+[ARCHITECTURE.md](ARCHITECTURE.md#watching-who-is-listening).
+
 ## Troubleshooting
 
 **No devices are listed.** On Linux check that the user is in the `audio` group and that `arecord -l` sees the
@@ -362,6 +400,29 @@ the problem is capture side or playback side.
 in `frontend/src/lib/audio/audioEngine.ts`. Raising it to 300 ms is comfortable on a congested network at
 the cost of the same amount of extra latency. The engine also counts every resynchronisation, so a rising
 `resyncs` in `AudioEngine.stats()` is the signal that the buffer is too small for the link.
+
+**The listener count is a plain badge for an admin.** The list arrives over the stream socket, so it is
+missing while the socket is down or reconnecting, and the badge falls back to the polled count. If the socket
+is connected and it stays plain, check the role: `may_watch_listeners` in `backend/src/ws/session.rs`
+decides, and a listener session is never sent the list.
+
+**Someone stays in the listener list after leaving.** Closing a tab, reloading or navigating away closes the
+socket properly and the entry goes at once. A device that vanishes without closing it, a phone losing Wi-Fi
+or a laptop lid shut mid stream, is dropped by the session's own limits instead: within about 30 seconds
+while it was being sent live audio (`SEND_TIMEOUT`), and within about a minute otherwise (`IDLE_TIMEOUT`
+plus up to one 15 second check). Run with `--log-level debug` and the server logs which one fired,
+"client stopped reading" or "client has gone silent". An entry that outlives both means something is
+holding the `ListenerHandle`.
+
+To reproduce a vanished client without a second device, connect a bare client from Node and freeze it:
+
+```sh
+node -e "new WebSocket('ws://127.0.0.1:8080/api/ws/stream').onopen = () => console.log(process.pid)" &
+kill -STOP <that pid>      # the entry leaves within a minute; kill -CONT does not bring it back
+```
+
+That works on an open recorder; with accounts the socket needs a session cookie, so use a browser tab and
+suspend the whole browser process instead.
 
 **The timeline is empty although recording is running.** Only closed segments are indexed. Wait one segment
 length, 10 seconds by default, or stop capture to flush the open segment.

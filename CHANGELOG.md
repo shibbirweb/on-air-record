@@ -5,6 +5,26 @@ Every release of On Air Record, newest first. The format follows
 [Semantic Versioning](https://semver.org/). Each release's section is also used as its notes on the
 [releases page](https://github.com/shibbirweb/on-air-record/releases).
 
+## [0.5.0] - 2026-09-26
+
+### Added
+
+- **See who is listening.** Point at the listener count in the top bar, or tap it on a phone, to see
+  everyone connected right now: their account, what each browser tab is doing (not playing yet, live,
+  paused, or listening back from a given time), the browser and device, the network address, and how long
+  it has been connected. The list updates as people come and go, and a device that drops off the network
+  without closing the page leaves it within about a minute. Only admins see it; without logins, everyone
+  does, and people show as guests. (OAR-80)
+
+### Changed
+
+- **Changing someone's role on the settings page now waits for Save changes,** like every other setting
+  there, instead of applying the moment it was picked from the menu. The account is marked Unsaved until you
+  save, and Discard puts it back. Adding and removing accounts and setting passwords still happen as soon
+  as you confirm them. (OAR-81)
+- **The listener count includes people listening back through history,** not only those on the live feed,
+  as the user guide always said it did. (OAR-80)
+
 ## [0.4.0] - 2026-09-26
 
 ### Added
@@ -136,6 +156,7 @@ The first release.
 - There is no authentication, by design. Anyone who can reach the port can listen, so keep it on a network
   you trust.
 
+[0.5.0]: https://github.com/shibbirweb/on-air-record/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/shibbirweb/on-air-record/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/shibbirweb/on-air-record/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shibbirweb/on-air-record/compare/v0.1.0...v0.2.0
