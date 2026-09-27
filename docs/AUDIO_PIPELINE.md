@@ -25,7 +25,9 @@ flowchart TD
 ```
 
 Two properties of that picture are load bearing. The recorder is the **only** publisher into the hub, so a
-live listener hears exactly what reached the disk, in the same order. And the envelope is computed during
+live listener hears frames in capture order, the order they reach the disk; and it never waits on the disk,
+whose writes and index inserts run on a thread of their own behind a minute of queue, so storage trouble
+can cost the recording but never pause the broadcast. And the envelope is computed during
 recording, while the samples are still in cache, rather than by re reading the file later.
 
 ## 1. Capture

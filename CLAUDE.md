@@ -70,14 +70,19 @@ them to axum as `AppState`, which is the facade handlers see.
 `src/audio` is the only place that knows `cpal` exists. Everything above it works with `AudioFrame`
 values, which is what keeps the rest testable without hardware.
 
-### The three threads that matter
+### The threads that matter
 
 1. **The cpal callback**, owned by the OS audio thread. Downmixes to mono, applies gain, converts to i16,
    and does one non blocking send. It must never block, allocate in a loop, or panic.
-2. **The recorder** (`services/recorder_service.rs`), its own OS thread, not tokio. Every step it takes is
-   blocking: channel receive, file write, SQLite insert. It is also the *single* publisher into
-   `BroadcastHub`, which is why live listeners hear exactly what is written to disk, in order.
-3. **Tokio**, serving HTTP and one task per WebSocket connection.
+2. **The recorder** (`services/recorder_service.rs`), its own OS thread, not tokio. It is the *single*
+   publisher into `BroadcastHub`, so listeners hear frames in capture order, and it hands each frame to the
+   disk thread with a `try_send`. **It must never wait on storage**: once it also wrote and indexed, and a
+   database another program held locked paused live audio for everyone at each segment close.
+3. **The recorder's disk thread**, beside it: segment files, rollover and the index, every step blocking.
+   Its queue holds a minute of audio. Past that, frames leave the recording (never the broadcast), counted
+   in `RecorderHealth`, and their missing timestamps start a new segment so no file holds a hole. Shutdown
+   joins the recorder, then the disk thread, which writes what is queued and indexes the open segment.
+4. **Tokio**, serving HTTP and one task per WebSocket connection.
 
 `cpal::Stream` is not `Send` on every backend, so it lives on a dedicated thread for its whole life
 (`audio/capture.rs`).
@@ -85,7 +90,8 @@ values, which is what keeps the rest testable without hardware.
 ### How audio reaches a browser
 
 Capture -> `FrameBuilder` cuts fixed 100 ms frames -> recorder publishes to `BroadcastHub` (a tokio
-broadcast channel, observer pattern) and appends to a `SegmentWriter`. Each WebSocket session subscribes
+broadcast channel, observer pattern) and queues the frame for the disk thread, which appends it to a
+`SegmentWriter`. Each WebSocket session subscribes
 to the hub. A slow listener lags its own receiver and is resynchronised; it cannot stall the recorder or
 other listeners.
 

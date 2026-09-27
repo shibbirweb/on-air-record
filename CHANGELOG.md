@@ -51,6 +51,11 @@ Every release of On Air Record, newest first. The format follows
   background. (OAR-108)
 - Screen readers now announce the volume, gain, segment length and start up delay sliders, the on air
   sign and the bookmark count by name. (OAR-108)
+- **Live audio no longer pauses when storage is slow.** Another program holding the database, such as a
+  backup, used to pause live audio for everyone for up to five seconds each time a recording segment
+  finished, and a disk that stopped responding could stop it altogether. Saving now runs on its own, with
+  a minute of room to catch up, so listeners hear the live feed without a break; if storage stays stuck
+  longer than that, only the recording misses audio, and the recorder panel says so. (OAR-108)
 - **The recorder panel says when recordings stop reaching the disk.** If the recordings folder cannot be
   written, the disk is full, or the database will not take new recordings, the live feed carries on as
   before and the panel now says why nothing is being saved, clearing by itself once the problem is fixed.

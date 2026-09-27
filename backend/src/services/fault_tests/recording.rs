@@ -412,3 +412,138 @@ async fn status_json(state: &Arc<AppState>) -> serde_json::Value {
         .expect("body");
     serde_json::from_slice(&body).expect("json")
 }
+
+/// Give the index's own connection a busy timeout long enough to see a stall, where the other fault tests
+/// keep it short so a locked database costs them little time.
+fn slow_to_give_up_on_a_lock(store: &Store) {
+    store
+        .segments
+        .database()
+        .with_connection(|conn| Ok(conn.busy_timeout(std::time::Duration::from_secs(1))?))
+        .expect("busy timeout");
+}
+
+#[test]
+fn a_database_held_locked_at_a_segment_close_never_pauses_the_live_feed() {
+    let store = Store::new("record-db-locked-live");
+    slow_to_give_up_on_a_lock(&store);
+    let wiring = Wiring::from_store(&store);
+    let mut listener = wiring.hub.subscribe();
+    let mut recorder = Recorder::start(&wiring);
+
+    let locker = store.second_connection();
+    locker.execute_batch("BEGIN EXCLUSIVE;").expect("lock");
+
+    // Twelve seconds of capture, so the first segment closes, and its insert waits out the lock, part way.
+    // Each frame must reach a listener promptly all the same.
+    let sender = recorder.sender.clone().expect("capturing");
+    let mut slowest = std::time::Duration::ZERO;
+    for index in 0..120 {
+        let sent_at = std::time::Instant::now();
+        sender
+            .send(frame_at(T0 + index * FRAME_MS, 100))
+            .expect("the recorder is taking frames");
+        let heard = loop {
+            match listener.try_recv() {
+                Ok(frame) => break frame,
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
+                    assert!(
+                        sent_at.elapsed() < std::time::Duration::from_secs(5),
+                        "frame {index} never reached the listener"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(other) => panic!("the listener fell behind: {other:?}"),
+            }
+        };
+        assert_eq!(heard.timestamp_ms, T0 + index * FRAME_MS);
+        slowest = slowest.max(sent_at.elapsed());
+    }
+    assert!(
+        slowest < std::time::Duration::from_millis(600),
+        "a live frame waited {slowest:?} behind the locked database"
+    );
+
+    locker.execute_batch("COMMIT;").expect("unlock");
+    recorder.sent = 120;
+    recorder.next_ms = T0 + 120 * FRAME_MS;
+    recorder.capture(9_900);
+    recorder.stop();
+    assert_eq!(
+        indexed(&store.segments),
+        vec![(0, 10_000), (10_000, 20_000), (20_000, 21_900)],
+        "and the recording lost nothing to the wait"
+    );
+}
+
+#[test]
+fn storage_a_whole_queue_behind_costs_the_recording_frames_never_the_broadcast() {
+    let store = Store::new("record-queue-full");
+    slow_to_give_up_on_a_lock(&store);
+    let wiring = Wiring::from_store(&store);
+    let recorder = Recorder::start(&wiring);
+    let locker = store.second_connection();
+    locker.execute_batch("BEGIN EXCLUSIVE;").expect("lock");
+
+    // The first segment's close stalls the disk thread for a second, while 85 seconds of audio arrive at
+    // once: far more than the minute the queue holds.
+    let sender = recorder.sender.clone().expect("capturing");
+    for index in 0..850 {
+        sender
+            .send(frame_at(T0 + index * FRAME_MS, 100))
+            .expect("the recorder is taking frames");
+    }
+    let hub = recorder.hub.clone();
+    wait_until("every frame is broadcast", move || {
+        hub.frames_published() == 850
+    });
+    let health = recorder.health.clone();
+    wait_until("the recorder says frames are being left out", move || {
+        health
+            .problem()
+            .is_some_and(|problem| problem.contains("left out of the recording"))
+    });
+
+    locker.execute_batch("COMMIT;").expect("unlock");
+    let health = recorder.health.clone();
+    wait_until("the queue has drained to disk", move || {
+        health.frames_written() + health.frames_not_written() == 850
+    });
+    let dropped = recorder.health.frames_not_written();
+    assert!(
+        (100..=300).contains(&dropped),
+        "about the frames past the minute's queue were dropped, not {dropped}"
+    );
+
+    // Storage is back. Capture carries on at its true time, after the frames that never reached the disk.
+    let resume_ms = T0 + 850 * FRAME_MS;
+    for index in 0..30 {
+        sender
+            .send(frame_at(resume_ms + index * FRAME_MS, 100))
+            .expect("the recorder is taking frames");
+    }
+    drop(sender);
+    let mut recorder = recorder;
+    recorder.sent = 880;
+    recorder.stop();
+
+    let segments = indexed(&store.segments);
+    let recorded_ms: i64 = segments.iter().map(|(start, end)| end - start).sum();
+    assert_eq!(
+        recorded_ms + dropped as i64 * FRAME_MS,
+        88_000,
+        "every frame is either recorded or counted as left out: {segments:?}"
+    );
+    for pair in segments.windows(2) {
+        assert!(
+            pair[0].1 <= pair[1].0,
+            "segments never overlap: {segments:?}"
+        );
+    }
+    let last = segments.last().expect("a segment after storage came back");
+    assert_eq!(
+        *last,
+        (85_000, 88_000),
+        "recording resumed in a new segment at its true time, not spliced onto the one before the hole"
+    );
+}

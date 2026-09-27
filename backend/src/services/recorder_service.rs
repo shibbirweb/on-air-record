@@ -1,13 +1,17 @@
 //! The always on recorder.
 //!
-//! Runs on its own OS thread rather than on the tokio runtime, because every step it takes is blocking
-//! work: a channel receive, a file write, and a SQLite insert. Keeping it off the runtime means a slow
-//! disk delays recording and nothing else, and it lets the audio callback hand frames over through a
-//! plain channel with no async machinery in the hot path.
+//! Two OS threads rather than tokio tasks, because every step is blocking work: a channel receive, a
+//! file write, a SQLite insert. That also lets the audio callback hand frames over through a plain
+//! channel with no async machinery in the hot path.
 //!
-//! The thread is also the single publisher into [`BroadcastHub`]. Live listeners therefore hear exactly
-//! what is being written to disk, in the same order, which is what makes the handoff from playback back
-//! to live seamless.
+//! The recorder thread is the single publisher into [`BroadcastHub`], so live listeners hear frames in
+//! capture order, the same order they are written to disk. It publishes and hands each frame to the disk
+//! thread without waiting on it. The disk thread owns the segment files and the index. Once they were one
+//! thread, and a database another program held locked, or a disk that hung, paused live audio for every
+//! listener at each segment close: the broadcast must never wait on storage. The queue between them holds
+//! [`DISK_QUEUE`] of audio, so a hiccup shorter than that costs nothing at all; a longer one drops frames
+//! from the recording only, counted and shown in the capture status, and the gap in their timestamps
+//! makes the disk thread start a new segment rather than splice across the hole.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -15,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crossbeam_channel::{Receiver, RecvTimeoutError};
+use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender, TrySendError};
 
 use crate::audio::{FrameEncoder, SegmentLayout, SegmentLocation, SegmentWriter};
 use crate::config::AppConfig;
@@ -26,6 +30,11 @@ use crate::services::{BroadcastHub, SettingsService};
 
 /// How long the loop waits for a frame before re checking the stop flag.
 const RECEIVE_TIMEOUT: Duration = Duration::from_millis(200);
+
+/// Audio the disk thread may fall behind by before frames are dropped from the recording: long enough to
+/// ride out a backup holding the database or a network share catching its breath, and at 48 kHz mono a
+/// few megabytes of memory.
+const DISK_QUEUE: Duration = Duration::from_secs(60);
 
 /// Finished segments the index refused, held to try again at the next close.
 ///
@@ -136,11 +145,12 @@ fn report_recovery(slot: &Mutex<Option<String>>, what: &str) {
     }
 }
 
-/// Live handle on the recorder thread.
+/// Live handle on the recorder and disk threads.
 pub struct RecorderHandle {
     stop: Arc<AtomicBool>,
     segments_written: Arc<AtomicU64>,
     thread: Option<JoinHandle<()>>,
+    disk: Option<JoinHandle<()>>,
 }
 
 impl RecorderHandle {
@@ -153,11 +163,19 @@ impl RecorderHandle {
         self.shutdown();
     }
 
+    /// The recorder thread first; when it ends it drops its side of the disk queue, and the disk thread
+    /// writes what is still queued, closes and indexes the open segment, then ends too. That is what the
+    /// stop scripts wait for, so a stop never loses the last seconds.
     fn shutdown(&mut self) {
         self.stop.store(true, Ordering::Release);
         if let Some(thread) = self.thread.take() {
             if thread.join().is_err() {
                 tracing::error!("recorder thread panicked while shutting down");
+            }
+        }
+        if let Some(disk) = self.disk.take() {
+            if disk.join().is_err() {
+                tracing::error!("recorder disk thread panicked while shutting down");
             }
         }
     }
@@ -178,14 +196,28 @@ impl RecorderService {
     ) -> AppResult<RecorderHandle> {
         let stop = Arc::new(AtomicBool::new(false));
         let segments_written = Arc::new(AtomicU64::new(0));
+        let context = Arc::new(context);
+
+        let frame_ms = u128::from(context.settings.current().frame_ms.max(1));
+        let queue_frames = (DISK_QUEUE.as_millis() / frame_ms).max(16) as usize;
+        let (to_disk, from_recorder) = bounded(queue_frames);
+
+        let disk_context = context.clone();
+        let disk_counter = segments_written.clone();
+        let disk = std::thread::Builder::new()
+            .name("oar-recorder-disk".to_string())
+            .spawn(move || {
+                write_to_disk(&disk_context, from_recorder, &disk_counter);
+            })
+            .map_err(|error| {
+                AppError::internal(format!("could not start the recorder disk thread: {error}"))
+            })?;
 
         let thread_stop = stop.clone();
-        let thread_counter = segments_written.clone();
-
         let thread = std::thread::Builder::new()
             .name("oar-recorder".to_string())
             .spawn(move || {
-                run(context, receiver, thread_stop, thread_counter);
+                run(&context, receiver, to_disk, &thread_stop);
             })
             .map_err(|error| {
                 AppError::internal(format!("could not start recorder thread: {error}"))
@@ -195,69 +227,54 @@ impl RecorderService {
             stop,
             segments_written,
             thread: Some(thread),
+            disk: Some(disk),
         })
     }
 }
 
+/// The recorder thread: publish every frame, then hand it to the disk thread without waiting.
 fn run(
-    context: RecorderContext,
+    context: &RecorderContext,
     receiver: Receiver<AudioFrame>,
-    stop: Arc<AtomicBool>,
-    segments_written: Arc<AtomicU64>,
+    to_disk: Sender<AudioFrame>,
+    stop: &AtomicBool,
 ) {
-    let mut writer: Option<SegmentWriter> = None;
-    let mut sequence: i64 = 0;
-    let mut waiting: VecDeque<SegmentDraft> = VecDeque::new();
-
     tracing::info!(session_id = context.session_id, "recorder started");
+    let mut behind = false;
 
     loop {
         match receiver.recv_timeout(RECEIVE_TIMEOUT) {
             Ok(frame) => {
-                // Listeners first: a disk hiccup should not add latency to the live broadcast.
+                // Listeners first, and nothing below may wait: this thread must keep pace with capture.
                 context.hub.publish(frame.clone());
 
-                let segment_ms = context.settings.current().segment_seconds as i64 * 1000;
-                if should_roll_over(writer.as_ref(), &frame, segment_ms) {
-                    close_segment(&context, writer.take(), &segments_written, &mut waiting);
-                }
-
-                if writer.is_none() {
-                    match open_segment(&context, sequence, &frame) {
-                        Ok(opened) => {
-                            writer = Some(opened);
-                            sequence += 1;
-                        }
-                        Err(error) => {
-                            // Losing the disk should not stop the broadcast, so keep publishing and retry
-                            // on the next frame rather than tearing the recorder down.
-                            context.health.frame_not_written();
-                            report_failure(
-                                &context.health.writing,
-                                format!("could not open a segment file: {error}"),
-                            );
-                            continue;
+                match to_disk.try_send(frame) {
+                    Ok(()) => {
+                        if behind {
+                            behind = false;
+                            tracing::info!("the disk has caught up, frames are recorded again");
                         }
                     }
-                }
-
-                if let Some(active) = writer.as_mut() {
-                    match active.append(&frame, context.encoder.as_ref()) {
-                        Ok(()) => {
-                            context.health.frame_written();
-                            report_recovery(&context.health.writing, "writing segments");
-                        }
-                        Err(error) => {
-                            context.health.frame_not_written();
+                    Err(TrySendError::Full(_)) => {
+                        // Storage has been stuck for the whole queue. This frame goes to listeners but
+                        // not the recording; its missing timestamp makes the disk thread start a new
+                        // segment when frames flow again, so no file holds a hole.
+                        context.health.frame_not_written();
+                        if !behind {
+                            behind = true;
                             report_failure(
                                 &context.health.writing,
-                                format!("could not write to the segment file: {error}"),
+                                "storage has not kept up for a minute, so frames are being left out of the recording".to_string(),
                             );
-                            // A segment must never hold a hole. Seeking is arithmetic on the byte offset,
-                            // so every frame appended after a lost one would play one frame early. Close
-                            // the segment here; the next frame starts a new one at its own timestamp.
-                            close_segment(&context, writer.take(), &segments_written, &mut waiting);
                         }
+                    }
+                    Err(TrySendError::Disconnected(_)) => {
+                        // The disk thread is gone, which only a panic there can cause. Keep the broadcast.
+                        context.health.frame_not_written();
+                        report_failure(
+                            &context.health.writing,
+                            "the recorder's disk thread stopped".to_string(),
+                        );
                     }
                 }
             }
@@ -273,18 +290,78 @@ fn run(
         }
     }
 
-    close_segment(&context, writer.take(), &segments_written, &mut waiting);
+    context.hub.reset_levels();
+    tracing::info!(session_id = context.session_id, "recorder stopped");
+}
+
+/// The disk thread: segment files and the index, at whatever pace storage allows, until the recorder
+/// thread hangs up; then whatever is still queued, and the open segment closed and indexed.
+fn write_to_disk(
+    context: &RecorderContext,
+    from_recorder: Receiver<AudioFrame>,
+    segments_written: &Arc<AtomicU64>,
+) {
+    let mut writer: Option<SegmentWriter> = None;
+    let mut sequence: i64 = 0;
+    let mut waiting: VecDeque<SegmentDraft> = VecDeque::new();
+
+    for frame in from_recorder.iter() {
+        let segment_ms = context.settings.current().segment_seconds as i64 * 1000;
+        if should_roll_over(writer.as_ref(), &frame, segment_ms) {
+            close_segment(context, writer.take(), segments_written, &mut waiting);
+        }
+
+        if writer.is_none() {
+            match open_segment(context, sequence, &frame) {
+                Ok(opened) => {
+                    writer = Some(opened);
+                    sequence += 1;
+                }
+                Err(error) => {
+                    // Losing the disk must not stop anything else, so retry on the next frame rather than
+                    // tearing the recorder down.
+                    context.health.frame_not_written();
+                    report_failure(
+                        &context.health.writing,
+                        format!("could not open a segment file: {error}"),
+                    );
+                    continue;
+                }
+            }
+        }
+
+        if let Some(active) = writer.as_mut() {
+            match active.append(&frame, context.encoder.as_ref()) {
+                Ok(()) => {
+                    context.health.frame_written();
+                    report_recovery(&context.health.writing, "writing segments");
+                }
+                Err(error) => {
+                    context.health.frame_not_written();
+                    report_failure(
+                        &context.health.writing,
+                        format!("could not write to the segment file: {error}"),
+                    );
+                    // A segment must never hold a hole. Seeking is arithmetic on the byte offset, so
+                    // every frame appended after a lost one would play one frame early. Close the segment
+                    // here; the next frame starts a new one at its own timestamp.
+                    close_segment(context, writer.take(), segments_written, &mut waiting);
+                }
+            }
+        }
+    }
+
+    close_segment(context, writer.take(), segments_written, &mut waiting);
     if !waiting.is_empty() {
         tracing::error!(
             segments = waiting.len(),
             "finished segments could not be indexed before the recorder stopped, their files remain on disk"
         );
     }
-    context.hub.reset_levels();
     tracing::info!(
         session_id = context.session_id,
         segments = segments_written.load(Ordering::Relaxed),
-        "recorder stopped"
+        "recorder disk thread stopped"
     );
 }
 
