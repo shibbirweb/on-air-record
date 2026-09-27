@@ -9,6 +9,7 @@ use crate::audio::SegmentLayout;
 use crate::config::AppConfig;
 use crate::models::{SegmentDraft, SessionDraft};
 use crate::repositories::BookmarkRepository;
+#[cfg(unix)]
 use crate::services::retention_service::BATCH_SIZE;
 use crate::services::{CursorOutput, RetentionService};
 
@@ -27,6 +28,7 @@ fn janitor(store: &Store) -> RetentionService {
 
 /// Index a row, with a small file, without going through the writer: several hundred of these have to
 /// be cheap. The file sits where the recorder would put it.
+#[cfg(unix)]
 fn row_with_file(
     store: &Store,
     session_id: i64,

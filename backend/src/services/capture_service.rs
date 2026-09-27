@@ -99,7 +99,7 @@ impl CaptureService {
     }
 
     /// The recorder's trouble with the disk and the index, for the fault tests.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn recorder_health(&self) -> &Arc<RecorderHealth> {
         &self.recorder_health
     }

@@ -8,16 +8,23 @@
 
 use std::sync::Arc;
 
+// For `status_json`, which only the permission tests need, and those are Unix only.
+#[cfg(unix)]
 use axum::body::{to_bytes, Body};
+#[cfg(unix)]
 use axum::http::{header, Request};
 use crossbeam_channel::{bounded, Sender};
+#[cfg(unix)]
 use tower::ServiceExt;
 
 use super::{frame_at, wait_until, Store, FRAME_MS, T0};
+#[cfg(unix)]
 use crate::app::AppState;
 use crate::audio::{build_encoder, FrameFormat, SegmentLayout};
 use crate::config::AppConfig;
-use crate::models::{AudioFrame, SegmentDraft, SessionDraft};
+#[cfg(unix)]
+use crate::models::SessionDraft;
+use crate::models::{AudioFrame, SegmentDraft};
 use crate::repositories::SegmentRepository;
 use crate::services::recorder_service::{RecorderContext, RecorderHealth, RecorderService};
 use crate::services::{BroadcastHub, RecorderHandle, SettingsService};
@@ -399,6 +406,7 @@ fn a_segment_the_database_can_never_accept_does_not_hold_up_the_ones_after_it() 
     );
 }
 
+#[cfg(unix)]
 async fn status_json(state: &Arc<AppState>) -> serde_json::Value {
     let router = crate::routes::build(state.clone());
     let request = Request::builder()

@@ -42,6 +42,8 @@ pub(super) const TEST_BUSY_TIMEOUT: Duration = Duration::from_millis(25);
 /// leave the fault behind for the next run.
 pub(super) struct Scratch {
     pub root: PathBuf,
+    /// Only Unix tests take permissions away; elsewhere there is nothing to give back.
+    #[cfg(unix)]
     locked: Vec<PathBuf>,
 }
 
@@ -50,6 +52,7 @@ impl Scratch {
         let root = std::env::temp_dir().join(format!("oar-fault-{name}-{}", std::process::id()));
         let scratch = Self {
             root,
+            #[cfg(unix)]
             locked: Vec::new(),
         };
         let _ = std::fs::remove_dir_all(&scratch.root);
