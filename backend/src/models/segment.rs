@@ -64,12 +64,16 @@ impl Segment {
     ///
     /// This arithmetic is the reason segments are stored as raw PCM: seeking anywhere inside an hour of
     /// audio costs one multiplication and one `seek`, with no index and no decoder warm up.
+    ///
+    /// Bounded with `max` and `min` rather than `clamp`, and multiplied saturating, because the row may be
+    /// damaged: `clamp` panics when a row ends before it starts or claims a negative length, and a panic
+    /// here takes a listener's connection down with it.
     pub fn byte_offset_for(&self, timestamp_ms: i64) -> i64 {
-        let clamped = timestamp_ms.clamp(self.started_at_ms, self.ended_at_ms);
+        let clamped = timestamp_ms.min(self.ended_at_ms).max(self.started_at_ms);
         let elapsed_ms = clamped - self.started_at_ms;
-        let sample_index = (elapsed_ms * self.sample_rate as i64) / 1000;
-        let offset = sample_index * self.bytes_per_sample_frame();
-        offset.clamp(0, self.byte_len)
+        let sample_index = elapsed_ms.saturating_mul(self.sample_rate as i64) / 1000;
+        let offset = sample_index.saturating_mul(self.bytes_per_sample_frame());
+        offset.min(self.byte_len).max(0)
     }
 
     /// Wall clock timestamp of a byte offset, the inverse of [`Segment::byte_offset_for`].

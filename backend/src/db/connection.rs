@@ -18,12 +18,32 @@ pub struct Database {
 
 impl Database {
     /// Open the database at `path`, apply the connection pragmas, and run pending migrations.
+    ///
+    /// Any failure names the file. SQLite's own messages ("file is not a database", "attempt to write a
+    /// readonly database") never say which file they mean, and this is what an operator reads when the
+    /// service will not start.
     pub fn open(path: &Path) -> AppResult<Self> {
+        Self::open_at(path).map_err(|error| {
+            AppError::internal(format!(
+                "could not open the database {}: {error}",
+                path.display()
+            ))
+        })
+    }
+
+    fn open_at(path: &Path) -> AppResult<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
         let connection = Connection::open(path)?;
+        // SQLite quietly falls back to read only when the file cannot be written. Carrying on would start
+        // a service that plays old audio but indexes nothing it records, so refuse here instead.
+        if connection.is_readonly(rusqlite::MAIN_DB)? {
+            return Err(AppError::internal(
+                "the file is read only, and the service has to write to it",
+            ));
+        }
         configure(&connection)?;
 
         let database = Self {

@@ -260,6 +260,11 @@ The one call the UI polls for the state of the world.
 `capture.state` is one of `idle`, `starting`, `recording`, or `error`. `listeners` counts every open stream
 socket, whether it is following the live feed, playing back history, or paused.
 
+`capture.error` is why capture failed when `state` is `error`. While `state` is `recording` it is set when
+recordings are not reaching the disk (the recordings folder cannot be written, the disk is full, or the
+database is refusing new segments) and starts `Recording to disk is failing, live audio continues`. The
+live feed is unaffected, and the field clears by itself once recording works again.
+
 ### `POST /api/capture/start`
 
 Starts capture on the currently selected device. Returns the same body as `GET /api/status`.
@@ -542,7 +547,8 @@ Streams a canonical 16 bit PCM WAV file with `Content-Length` and a
 Three things are worth knowing about what comes out:
 
 - **Gaps become silence** rather than being skipped, so the file's duration matches the requested range
-  and thirty seconds into the file is thirty seconds after `fromMs`.
+  and thirty seconds into the file is thirty seconds after `fromMs`. Audio whose file is missing or cut
+  short counts as a gap too.
 - **A range spanning several recording rates exports at the lowest of them**, downsampling the rest.
   Upsampling instead would invent detail the audio never had and make the file bigger for nothing. The
   plan reports this as `mixedRates`.
@@ -677,7 +683,7 @@ because its pongs keep it heard.
 | `stream-info` | `sampleRate`, `channels`, `frameMs`, `mode`, `serverTimeMs`, `liveEdgeMs`, `earliestMs`, `capturing` | Sent on connect, and again if capture stops while a listener is attached |
 | `mode` | `mode`, `positionMs` | The session changed between `live`, `playback`, and `paused` |
 | `switched-to-live` | `timestampMs` | Playback caught up with the live edge |
-| `gap` | `fromMs`, `toMs` | No recording exists in this range, playback skipped it |
+| `gap` | `fromMs`, `toMs` | No recording exists in this range, or its files are missing or cut short; playback skipped it |
 | `end-of-recording` | `timestampMs` | Playback reached the newest data while capture is stopped |
 | `level` | `rms`, `peak` | Input meter, emitted about ten times per second in live mode |
 | `speed` | `value` | The playback speed actually in force, after clamping, and whenever the server resets it |

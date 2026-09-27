@@ -118,6 +118,7 @@ fn record_scene(name: &str, gain: f64) -> Recorded {
             encoder: build_encoder(FrameFormat::PcmS16),
             session_id: session.id,
             layout: SegmentLayout::under_data_dir(&data_dir),
+            health: Default::default(),
         },
         receiver,
     )

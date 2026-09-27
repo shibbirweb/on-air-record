@@ -72,20 +72,26 @@ impl FrameBuilder {
         for sample in samples {
             self.buffer.push(*sample);
             if self.buffer.len() >= self.frame_samples {
-                self.flush_frame(now_ms, &mut emit);
+                self.flush_frame(&mut emit);
             }
         }
+        // Once per buffer, at its end, which is the moment `now_ms` describes. Checked per frame instead,
+        // the frames early in a long buffer would be compared with a clock that belongs to its end, and a
+        // buffer longer than the tolerance (some drivers deliver half a second or more) would reset the
+        // timestamps partway through and start a new segment for nothing.
+        self.correct_drift(now_ms);
     }
 
     /// Emit whatever is buffered, even if it is a short frame. Used when capture stops so the tail of the
     /// recording is not lost.
     pub fn flush(&mut self, now_ms: i64, mut emit: impl FnMut(AudioFrame)) {
         if !self.buffer.is_empty() {
-            self.flush_frame(now_ms, &mut emit);
+            self.flush_frame(&mut emit);
+            self.correct_drift(now_ms);
         }
     }
 
-    fn flush_frame(&mut self, now_ms: i64, emit: &mut impl FnMut(AudioFrame)) {
+    fn flush_frame(&mut self, emit: &mut impl FnMut(AudioFrame)) {
         let samples = std::mem::replace(&mut self.buffer, Vec::with_capacity(self.frame_samples));
         let emitted = samples.len() as u64;
         let timestamp_ms = self.anchor_ms + self.samples_to_ms(self.samples_since_anchor);
@@ -99,18 +105,23 @@ impl FrameBuilder {
         ));
 
         self.samples_since_anchor += emitted;
-        self.correct_drift(now_ms);
     }
 
     /// Re anchor when the sample derived clock and the wall clock have separated too far.
+    ///
+    /// `now_ms` is the end of the audio received so far, so it is compared with everything received,
+    /// including the samples still waiting to fill a frame. On a re anchor those waiting samples are dated
+    /// back from `now_ms` by their own length, since they were captured before it.
     fn correct_drift(&mut self, now_ms: i64) {
-        let derived_now_ms = self.anchor_ms + self.samples_to_ms(self.samples_since_anchor);
+        let pending = self.buffer.len() as u64;
+        let derived_now_ms =
+            self.anchor_ms + self.samples_to_ms(self.samples_since_anchor + pending);
         if (derived_now_ms - now_ms).abs() > MAX_DRIFT_MS {
             tracing::debug!(
                 drift_ms = derived_now_ms - now_ms,
                 "re anchoring capture clock to wall clock"
             );
-            self.anchor_ms = now_ms;
+            self.anchor_ms = now_ms - self.samples_to_ms(pending);
             self.samples_since_anchor = 0;
             self.drift_resets += 1;
         }
@@ -200,6 +211,43 @@ mod tests {
     }
 
     #[test]
+    fn a_driver_delivering_long_buffers_keeps_one_unbroken_clock() {
+        // 4096 samples at 8 kHz is 512 ms a buffer, past the drift tolerance on its own. Checked frame by
+        // frame against the buffer's arrival, this used to reset the clock in every buffer.
+        let mut builder = FrameBuilder::new(8_000, 1, 100);
+        let mut frames = Vec::new();
+        let start_ms = 1_000_000;
+        let mut fed = 0u64;
+        for _ in 0..20 {
+            fed += 4_096;
+            let arrived_ms = start_ms + (fed * 1000 / 8_000) as i64;
+            builder.push(&vec![0; 4_096], arrived_ms, |frame| frames.push(frame));
+        }
+
+        assert_eq!(builder.drift_resets(), 0);
+        for pair in frames.windows(2) {
+            assert_eq!(pair[1].timestamp_ms, pair[0].end_timestamp_ms());
+        }
+        assert_eq!(frames[0].timestamp_ms, start_ms);
+    }
+
+    #[test]
+    fn a_re_anchor_dates_the_samples_still_waiting_by_their_own_length() {
+        let mut builder = FrameBuilder::new(48_000, 1, 100);
+        let mut frames = Vec::new();
+        builder.push(&vec![0; 4_800], 1_000_000, |frame| frames.push(frame));
+        // A minute later, one and a half frames arrive: one is emitted on the old clock, and half a frame
+        // (50 ms) waits, which was captured in the 50 ms before this buffer arrived.
+        builder.push(&vec![0; 7_200], 1_060_000, |frame| frames.push(frame));
+        assert_eq!(builder.drift_resets(), 1);
+        builder.push(&vec![0; 2_400], 1_060_050, |frame| frames.push(frame));
+        assert_eq!(
+            frames.last().map(|frame| frame.timestamp_ms),
+            Some(1_059_950)
+        );
+    }
+
+    #[test]
     fn flush_emits_a_partial_frame() {
         let mut builder = FrameBuilder::new(48_000, 1, 100);
         let mut frames = Vec::new();
@@ -221,15 +269,22 @@ mod tests {
         /// stood when it began, and the buffers the driver delivered, each with how late the callback
         /// ran relative to the audio it carried, within ordinary scheduling jitter.
         ///
-        /// Buffers are at most 100 ms of audio, which is already generous for a driver. The drift check
-        /// compares the clock at the end of a buffer with the end of each frame cut from it, so buffers
-        /// approaching `MAX_DRIFT_MS` long would be re anchored mid buffer by design of that comparison.
+        /// Buffers run up to two seconds of audio, far past `MAX_DRIFT_MS`, because the drift check is
+        /// made once per buffer at its end; a buffer's length alone must never look like drift.
         fn session() -> impl Strategy<Value = (u32, u32, i64, Vec<(usize, i64)>)> {
             (
                 proptest::sample::select(RATES.to_vec()),
                 20u32..=500,
                 0i64..4_000_000_000_000,
-                proptest::collection::vec((1usize..=100, 0i64..100), 0..60),
+                // Mostly the short buffers drivers usually deliver, some very long ones, and few enough of
+                // them that a case stays quick at 96 kHz.
+                proptest::collection::vec(
+                    (
+                        prop_oneof![4 => 1usize..=100, 1 => 100usize..=2_000],
+                        0i64..100,
+                    ),
+                    0..24,
+                ),
             )
                 .prop_map(|(sample_rate, frame_ms, start_ms, buffers)| {
                     let buffers = buffers

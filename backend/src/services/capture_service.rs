@@ -17,7 +17,7 @@ use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
 use crate::models::{CaptureSnapshot, CaptureState, SessionDraft};
 use crate::repositories::{SegmentRepository, SessionRepository};
-use crate::services::recorder_service::RecorderContext;
+use crate::services::recorder_service::{RecorderContext, RecorderHealth};
 use crate::services::{BroadcastHub, RecorderHandle, RecorderService, SettingsService};
 use crate::util::time::now_ms;
 
@@ -43,6 +43,8 @@ pub struct CaptureService {
     hub: Arc<BroadcastHub>,
     encoder: Arc<dyn FrameEncoder>,
     dropped_frames: Arc<AtomicU64>,
+    /// Trouble the recorder has writing or indexing, which it reports while the live feed carries on.
+    recorder_health: Arc<RecorderHealth>,
     /// Guards the start and stop transitions. Async because a device open can take a moment and the HTTP
     /// handlers should queue behind it rather than spin.
     transition: tokio::sync::Mutex<Option<ActiveCapture>>,
@@ -68,6 +70,7 @@ impl CaptureService {
             hub,
             encoder,
             dropped_frames: Arc::new(AtomicU64::new(0)),
+            recorder_health: Arc::new(RecorderHealth::default()),
             transition: tokio::sync::Mutex::new(None),
             snapshot: RwLock::new(CaptureSnapshot::default()),
         }
@@ -75,14 +78,24 @@ impl CaptureService {
 
     /// Current capture state. Cheap, lock free enough to call per request.
     pub fn snapshot(&self) -> CaptureSnapshot {
-        let mut snapshot = match self.snapshot.read() {
-            Ok(guard) => guard.clone(),
-            Err(_) => CaptureSnapshot::default(),
-        };
+        let mut snapshot = self.stored_snapshot();
         snapshot.dropped_frames = self
             .dropped_frames
             .load(std::sync::atomic::Ordering::Relaxed);
+        // Still recording, since the live feed is, but not to disk: say so where the panel shows errors.
+        if snapshot.state == CaptureState::Recording && snapshot.error.is_none() {
+            snapshot.error = self.recorder_health.problem();
+        }
         snapshot
+    }
+
+    /// The snapshot as last written, without the live counters and the recorder's health folded in, so a
+    /// transition that rewrites it never bakes a passing disk error into the stored state.
+    fn stored_snapshot(&self) -> CaptureSnapshot {
+        match self.snapshot.read() {
+            Ok(guard) => guard.clone(),
+            Err(_) => CaptureSnapshot::default(),
+        }
     }
 
     pub fn is_active(&self) -> bool {
@@ -93,7 +106,7 @@ impl CaptureService {
     /// one would open whatever input the machine has, a developer's microphone, and fail on a runner.
     #[cfg(test)]
     pub(crate) fn pretend_recording(&self, sample_rate: u32, frame_ms: u32) {
-        let mut snapshot = self.snapshot();
+        let mut snapshot = self.stored_snapshot();
         snapshot.sample_rate = sample_rate;
         snapshot.channels = 1;
         snapshot.frame_ms = frame_ms;
@@ -111,6 +124,7 @@ impl CaptureService {
         let settings = self.settings.current();
         self.set_state(CaptureState::Starting, None);
 
+        self.recorder_health.reset();
         let (sender, receiver) = bounded(FRAME_CHANNEL_CAPACITY);
         let options = CaptureOptions {
             device_id: settings.input_device_id.clone(),
@@ -158,6 +172,7 @@ impl CaptureService {
                 encoder: self.encoder.clone(),
                 session_id: session.id,
                 layout: self.segment_layout(&settings),
+                health: self.recorder_health.clone(),
             },
             receiver,
         ) {
@@ -305,7 +320,7 @@ impl CaptureService {
     }
 
     fn set_state(&self, state: CaptureState, error: Option<String>) {
-        let mut snapshot = self.snapshot();
+        let mut snapshot = self.stored_snapshot();
         snapshot.state = state;
         snapshot.error = error;
 

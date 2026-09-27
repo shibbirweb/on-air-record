@@ -5,9 +5,11 @@
 //! service is running belongs in the `settings` table instead, see `models::settings`.
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use clap::{Parser, Subcommand};
+
+use crate::error::{AppError, AppResult};
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 8080;
@@ -140,13 +142,19 @@ impl AppConfig {
     ///
     /// Rows written by older versions are all relative, so this is backward compatible without a
     /// migration.
-    pub fn resolve_segment_path(&self, stored: &str) -> PathBuf {
+    ///
+    /// `None` for a relative path that climbs out of the data directory. The recorder never writes one,
+    /// so it can only come from a damaged or tampered index, and following it would let playback stream,
+    /// and retention delete, a file that is not a recording.
+    pub fn resolve_segment_path(&self, stored: &str) -> Option<PathBuf> {
         let path = Path::new(stored);
         if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.data_dir.join(path)
+            return Some(path.to_path_buf());
         }
+        let stays_inside = path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));
+        stays_inside.then(|| self.data_dir.join(path))
     }
 
     /// Where segments are written, given the configured override.
@@ -184,9 +192,19 @@ impl AppConfig {
     }
 
     /// Create the directories the service writes to. Called once during startup.
-    pub fn ensure_directories(&self) -> std::io::Result<()> {
-        std::fs::create_dir_all(&self.data_dir)?;
-        std::fs::create_dir_all(self.recordings_dir())?;
+    ///
+    /// The error names the directory, because this is the message an operator sees when the service
+    /// refuses to start, and a bare "File exists" or "Permission denied" leaves them guessing which of
+    /// several paths to fix.
+    pub fn ensure_directories(&self) -> AppResult<()> {
+        for dir in [self.data_dir.clone(), self.recordings_dir()] {
+            std::fs::create_dir_all(&dir).map_err(|error| {
+                AppError::internal(format!(
+                    "could not create the directory {}: {error}",
+                    dir.display()
+                ))
+            })?;
+        }
         Ok(())
     }
 }
@@ -319,7 +337,7 @@ mod tests {
         };
         assert_eq!(
             config.resolve_segment_path("recordings/2026-09-05/1/000000.pcm"),
-            PathBuf::from("/srv/oar/recordings/2026-09-05/1/000000.pcm")
+            Some(PathBuf::from("/srv/oar/recordings/2026-09-05/1/000000.pcm"))
         );
     }
 
@@ -331,7 +349,24 @@ mod tests {
         };
         assert_eq!(
             config.resolve_segment_path("/mnt/audio/2026-09-05/1/000000.pcm"),
-            PathBuf::from("/mnt/audio/2026-09-05/1/000000.pcm")
+            Some(PathBuf::from("/mnt/audio/2026-09-05/1/000000.pcm"))
+        );
+    }
+
+    #[test]
+    fn relative_segment_paths_never_climb_out_of_the_data_dir() {
+        let config = AppConfig {
+            data_dir: PathBuf::from("/srv/oar"),
+            ..AppConfig::default()
+        };
+        assert_eq!(config.resolve_segment_path("../etc/passwd"), None);
+        assert_eq!(
+            config.resolve_segment_path("recordings/../../etc/passwd"),
+            None
+        );
+        assert_eq!(
+            config.resolve_segment_path("./recordings/1/000000.pcm"),
+            Some(PathBuf::from("/srv/oar/./recordings/1/000000.pcm"))
         );
     }
 

@@ -221,7 +221,9 @@ deliver on average one frame of audio per frame of wall clock time.
 
 Gap handling: recording gaps are real, for example when the service was stopped or the device was swapped.
 The cursor reports a gap instead of silently skipping it, the session sends a `gap` control message, and the
-UI shows the timeline as empty there rather than pretending audio existed.
+UI shows the timeline as empty there rather than pretending audio existed. A segment whose file is missing,
+unreadable or shorter than its index row is reported the same way, as a gap over the audio that could not
+be read, so an export fills it with silence and everything after it stays at its true offset.
 
 Live handoff: when the cursor reaches the end of the newest segment, the session sends `switched-to-live` and
 resubscribes to `BroadcastHub`. There is a small overlap because the open segment is not on disk yet, so the

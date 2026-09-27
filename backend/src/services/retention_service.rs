@@ -20,7 +20,7 @@ use crate::util::time::now_ms;
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Segments removed per pass, so a first run against a huge backlog stays responsive.
-const BATCH_SIZE: i64 = 500;
+pub(crate) const BATCH_SIZE: i64 = 500;
 
 /// What one pass did, returned for logging and for the tests.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -69,27 +69,55 @@ impl RetentionService {
         self.sweep_before(now_ms() - retention_ms)
     }
 
-    /// Delete everything that ended before `cutoff_ms`.
+    /// Delete everything that ended before `cutoff_ms`, up to `BATCH_SIZE` segments.
+    ///
+    /// A file that cannot be deleted keeps its row and is stepped over: the pass pages on past it until it
+    /// has deleted a batch or run out of expired segments, so a folder that lost its write permission
+    /// never stops the janitor reaching everything after it.
     pub fn sweep_before(&self, cutoff_ms: i64) -> AppResult<SweepReport> {
-        let expired = self.segments.find_expired(cutoff_ms, BATCH_SIZE)?;
         let mut report = SweepReport::default();
+        let mut after: Option<(i64, i64)> = None;
 
-        for segment in expired {
-            let path = self.config.resolve_segment_path(&segment.path);
-            match std::fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    // Already gone. Removing the row is exactly the repair that is wanted.
-                }
-                Err(error) => {
-                    tracing::warn!(%error, path = %path.display(), "could not delete an expired segment");
-                    continue;
-                }
+        loop {
+            let expired = self
+                .segments
+                .find_expired_after(cutoff_ms, after, BATCH_SIZE)?;
+            let fetched = expired.len();
+
+            for segment in expired {
+                after = Some((segment.ended_at_ms, segment.id));
+
+                let reclaimed = match self.config.resolve_segment_path(&segment.path) {
+                    Some(path) => match std::fs::remove_file(&path) {
+                        Ok(()) => segment.byte_len,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            // Already gone. Removing the row is exactly the repair that is wanted.
+                            segment.byte_len
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, path = %path.display(), "could not delete an expired segment");
+                            continue;
+                        }
+                    },
+                    None => {
+                        // The row points outside the data directory, which the recorder never writes. It
+                        // is damage, so the row goes and whatever file it names is left alone.
+                        tracing::warn!(
+                            path = segment.path,
+                            "dropping an expired segment row whose path leaves the data directory"
+                        );
+                        0
+                    }
+                };
+
+                self.segments.delete(segment.id)?;
+                report.segments_deleted += 1;
+                report.bytes_reclaimed += reclaimed;
             }
 
-            self.segments.delete(segment.id)?;
-            report.segments_deleted += 1;
-            report.bytes_reclaimed += segment.byte_len;
+            if fetched < BATCH_SIZE as usize || report.segments_deleted >= BATCH_SIZE as usize {
+                break;
+            }
         }
 
         if report.segments_deleted > 0 {

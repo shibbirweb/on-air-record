@@ -511,6 +511,11 @@ playable. Shutting the service down itself is a separate thing, covered in the
 The remaining rows are for support purposes. **Dropped frames** should stay at zero; a number climbing
 there means the computer cannot keep up with the audio.
 
+If recordings stop reaching the disk, because the recordings folder cannot be written to, the disk is full
+or another program is holding the database, a red message under these rows says so. Listeners keep hearing
+the live feed meanwhile, but that stretch is not being saved. The message goes away by itself once the
+problem is fixed, and recording carries on without pressing anything.
+
 ## Disk space
 
 ![The storage panel, showing disk used, how far back the history goes and the recent sessions](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/storage.png)

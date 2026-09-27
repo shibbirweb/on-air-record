@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::audio::activity::{self, EnvelopeRun, Sound, FLOOR_CONTEXT_MS};
 use crate::audio::peaks::{self, PeakSource, PEAK_BUCKET_MS};
 use crate::error::{AppError, AppResult};
-use crate::models::{SoundSensitivity, TimeRange};
+use crate::models::{Segment, SoundSensitivity, TimeRange};
 use crate::repositories::{DaySummary, SegmentRepository};
 use crate::services::BroadcastHub;
 use crate::util::day::{day_bounds_ms, is_valid_day};
@@ -156,7 +156,7 @@ impl TimelineService {
             .iter()
             .map(|segment| PeakSource {
                 start_ms: segment.started_at_ms,
-                values: &segment.peaks,
+                values: envelope_of(segment),
             })
             .collect();
 
@@ -193,7 +193,7 @@ impl TimelineService {
             .iter()
             .map(|segment| EnvelopeRun {
                 start_ms: segment.started_at_ms,
-                values: &segment.peaks,
+                values: envelope_of(segment),
             })
             .collect();
 
@@ -256,6 +256,20 @@ impl TimelineService {
     pub fn source_bucket_ms(&self) -> i64 {
         PEAK_BUCKET_MS
     }
+}
+
+/// A segment's stored envelope, cut to the buckets its time range can hold.
+///
+/// The envelope is one byte per bucket from the segment's start, so one longer than the segment would be
+/// drawn, and searched for sounds, past its end: over a recording gap, where the timeline must show
+/// nothing, or over the next segment. Only a damaged row has one. The spare bucket allows for the
+/// partial bucket a segment's last frame can leave when frame durations round down.
+fn envelope_of(segment: &Segment) -> &[u8] {
+    let buckets = (segment.duration_ms() + PEAK_BUCKET_MS - 1) / PEAK_BUCKET_MS + 1;
+    let length = usize::try_from(buckets)
+        .unwrap_or(0)
+        .min(segment.peaks.len());
+    &segment.peaks[..length]
 }
 
 #[cfg(test)]

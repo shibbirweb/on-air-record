@@ -41,12 +41,37 @@ Every release of On Air Record, newest first. The format follows
 - Where the clocks change at midnight, as in the Azores, Cuba and Chile, the day of the change and the day
   before it no longer share or lose an hour of recording in the day picker, and such a day is no longer
   missing from it. (OAR-108)
+- With a sound card that hands over audio in chunks of half a second or more, the recording no longer
+  splits into short segments with small jumps in time between them. (OAR-108)
 - Sizes just under a unit read as the next unit up, such as 1.0 MB rather than 1024.0 KB. (OAR-108)
 - On Windows, the update command shown for an install in a folder whose name has a curly apostrophe, such
   as one typed on a phone, now works when pasted into PowerShell. (OAR-108)
 - The level meter no longer stays red after recording stops. (OAR-108)
+- Hint and secondary text in the light theme is a shade darker, so it reads clearly against its
+  background. (OAR-108)
 - Screen readers now announce the volume, gain, segment length and start up delay sliders, the on air
   sign and the bookmark count by name. (OAR-108)
+- **The recorder panel says when recordings stop reaching the disk.** If the recordings folder cannot be
+  written, the disk is full, or the database will not take new recordings, the live feed carries on as
+  before and the panel now says why nothing is being saved, clearing by itself once the problem is fixed.
+  Before, it went on looking like a healthy recorder. (OAR-108)
+- A recording finished while another program, such as a backup, was holding the database is added to the
+  timeline once the database is free, instead of being lost from it. (OAR-108)
+- When a recording file has gone missing or been cut short, playback reports the gap and an export has
+  silence in its place, so everything after it stays at the right time. Before, an export moved the rest
+  of the audio earlier, and a long run of missing files ended playback early or silenced the rest of an
+  export. (OAR-108)
+- After a moment of audio that could not be saved, the recording carries on at the right time. Before,
+  the rest of that stretch played one frame early. (OAR-108)
+- A recording whose folder was deleted while it was being written no longer shows on the timeline as
+  audio that cannot be played. (OAR-108)
+- The clean up of old recordings keeps going past files it cannot delete. Before, a few hundred such files
+  stopped it deleting anything newer, and the disk filled. (OAR-108)
+- When the service cannot start because of a folder or the database, the message names the file or folder
+  to fix, and a database file it cannot write to is refused at start instead of running without saving
+  anything. (OAR-108)
+- A damaged index can no longer make playback read, or the clean up delete, a file outside the data
+  folder. (OAR-108)
 
 ## [0.8.1] - 2026-09-27
 

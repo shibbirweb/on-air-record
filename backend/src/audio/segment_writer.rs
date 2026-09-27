@@ -181,6 +181,17 @@ impl SegmentWriter {
             return Ok(None);
         }
 
+        // On Unix a file deleted while open goes on taking writes into storage nothing names, and is gone
+        // once closed. Indexing it would draw audio on the timeline that can never be played.
+        if let Err(error) = std::fs::metadata(&self.absolute_path) {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                return Err(AppError::internal(format!(
+                    "segment file {} was deleted while it was being written",
+                    self.absolute_path.display()
+                )));
+            }
+        }
+
         Ok(Some(SegmentDraft {
             session_id: self.session_id,
             sequence: self.sequence,

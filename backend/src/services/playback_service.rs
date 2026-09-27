@@ -31,8 +31,9 @@ pub enum CursorOutput {
 
 /// Segments the cursor will consult before giving up in one step.
 ///
-/// A run of empty or truncated files could otherwise spin the loop, and a bound turns that into a
-/// reported end of recording instead of a stuck connection.
+/// A run of empty rows or unreadable files could otherwise spin the loop. The bound turns a long run into
+/// a step that reports how far it got, a gap over the files it could not read, instead of a stuck
+/// connection.
 const MAX_SEGMENT_HOPS: usize = 16;
 
 pub struct PlaybackService {
@@ -93,30 +94,80 @@ impl PlaybackCursor {
     }
 
     /// Produce the next step of playback.
+    ///
+    /// A segment whose file ends before its index row does (deleted, truncated, unreadable, or pointing
+    /// somewhere it must not) is reported as a gap over the audio that could not be read, exactly as a
+    /// recording gap is. Skipping it silently would move the listener's clock forward with no
+    /// explanation, and would shift everything after it earlier in an export, whose byte position is its
+    /// clock. A run of such segments is one gap, and it never ends playback while readable material lies
+    /// beyond it: the hop bound turns a long run into several gaps, each moving forward, rather than into
+    /// a false end of recording that would throw a listener to the live feed.
     pub fn advance(&mut self) -> AppResult<CursorOutput> {
+        // Where readable audio stopped, once a segment has been found to hold less than its row says.
+        let mut lost_from: Option<i64> = None;
+
         for _ in 0..MAX_SEGMENT_HOPS {
             if self.open.is_none() {
                 match self.locate()? {
                     Located::Ready => {}
                     Located::Jumped { from_ms, to_ms } => {
-                        return Ok(CursorOutput::Gap { from_ms, to_ms });
+                        return Ok(CursorOutput::Gap {
+                            from_ms: lost_from.unwrap_or(from_ms),
+                            to_ms,
+                        });
                     }
                     Located::Exhausted => {
-                        return Ok(CursorOutput::EndOfRecording {
-                            at_ms: self.position_ms,
+                        return Ok(match lost_from {
+                            Some(from_ms) => CursorOutput::Gap {
+                                from_ms,
+                                to_ms: self.position_ms,
+                            },
+                            None => CursorOutput::EndOfRecording {
+                                at_ms: self.position_ms,
+                            },
                         });
                     }
                 }
             }
 
+            let before = self
+                .open
+                .as_ref()
+                .map(|open| (self.position_ms, open.offset));
+
             match self.read_frame()? {
-                Some(frame) => return Ok(CursorOutput::Frame(frame)),
-                None => continue,
+                Read::Frame(frame) => {
+                    if let (Some(from_ms), Some((position_ms, offset))) = (lost_from, before) {
+                        // The hole has to be reported before the audio after it. Put the read head back
+                        // so this frame is read again on the next step, rather than held here.
+                        self.position_ms = position_ms;
+                        if let Some(open) = self.open.as_mut() {
+                            open.offset = offset;
+                        }
+                        return Ok(CursorOutput::Gap {
+                            from_ms,
+                            to_ms: position_ms,
+                        });
+                    }
+                    return Ok(CursorOutput::Frame(frame));
+                }
+                Read::Spent => {}
+                Read::Lost { from_ms } => {
+                    if self.position_ms > from_ms {
+                        lost_from.get_or_insert(from_ms);
+                    }
+                }
             }
         }
 
-        Ok(CursorOutput::EndOfRecording {
-            at_ms: self.position_ms,
+        Ok(match lost_from {
+            Some(from_ms) => CursorOutput::Gap {
+                from_ms,
+                to_ms: self.position_ms,
+            },
+            None => CursorOutput::EndOfRecording {
+                at_ms: self.position_ms,
+            },
         })
     }
 
@@ -140,23 +191,45 @@ impl PlaybackCursor {
         Ok(Located::Jumped { from_ms, to_ms })
     }
 
-    /// Read one frame from the open segment, or `None` when it is spent and the caller should retry.
-    fn read_frame(&mut self) -> AppResult<Option<AudioFrame>> {
+    /// Read one frame from the open segment, or say why there is none.
+    fn read_frame(&mut self) -> AppResult<Read> {
         let Some(open) = self.open.as_mut() else {
-            return Ok(None);
+            return Ok(Read::Spent);
         };
 
         let available = open.segment.byte_len - open.offset;
         if available <= 0 {
             self.advance_past_open_segment();
-            return Ok(None);
+            return Ok(Read::Spent);
+        }
+
+        let from_ms = self.position_ms;
+
+        // No rate means no way to turn bytes into time: every frame would last zero milliseconds and the
+        // cursor would crawl through the file two bytes at a time without the clock moving. Only a
+        // damaged row says this, since the recorder always knows the rate it recorded at.
+        if open.segment.sample_rate == 0 {
+            tracing::warn!(
+                segment_id = open.segment.id,
+                "skipping a segment with no sample rate"
+            );
+            self.advance_past_open_segment();
+            return Ok(Read::Lost { from_ms });
         }
 
         let samples_per_frame = frame_samples_for(open.segment.sample_rate, self.frame_ms) as i64;
         let wanted = samples_per_frame * open.segment.bytes_per_sample_frame();
         let read_len = wanted.min(available).max(0) as usize;
 
-        let path = self.config.resolve_segment_path(&open.segment.path);
+        let Some(path) = self.config.resolve_segment_path(&open.segment.path) else {
+            tracing::warn!(
+                segment_id = open.segment.id,
+                path = open.segment.path,
+                "refusing to read a segment path that leaves the data directory"
+            );
+            self.advance_past_open_segment();
+            return Ok(Read::Lost { from_ms });
+        };
         let bytes = match read_segment_bytes(&path, open.offset, read_len) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -164,13 +237,14 @@ impl PlaybackCursor {
                 // Skipping the segment keeps playback moving instead of failing the whole connection.
                 tracing::warn!(%error, segment_id = open.segment.id, "skipping an unreadable segment");
                 self.advance_past_open_segment();
-                return Ok(None);
+                return Ok(Read::Lost { from_ms });
             }
         };
 
         if bytes.len() < 2 {
+            // The file is shorter than its row says, truncated by a crash or a failing disk.
             self.advance_past_open_segment();
-            return Ok(None);
+            return Ok(Read::Lost { from_ms });
         }
 
         let timestamp_ms = open.segment.timestamp_for_offset(open.offset);
@@ -185,7 +259,7 @@ impl PlaybackCursor {
         open.offset += bytes.len() as i64;
         self.position_ms = frame.end_timestamp_ms();
 
-        Ok(Some(frame))
+        Ok(Read::Frame(frame))
     }
 
     fn advance_past_open_segment(&mut self) {
@@ -194,6 +268,17 @@ impl PlaybackCursor {
             self.position_ms = self.position_ms.max(open.segment.ended_at_ms);
         }
     }
+}
+
+/// What one read from the open segment produced.
+enum Read {
+    Frame(AudioFrame),
+    /// The segment ended where its row said it would. The next segment is looked up.
+    Spent,
+    /// The segment's file ended before its row did, so the audio from `from_ms` to the row's end is lost.
+    Lost {
+        from_ms: i64,
+    },
 }
 
 enum Located {
