@@ -110,4 +110,26 @@ mod tests {
             .expect("query");
         assert_eq!(tables, 3);
     }
+
+    #[test]
+    fn a_file_database_is_opened_in_wal_mode_with_foreign_keys_on() {
+        // WAL is what lets the recorder write while listeners read, and an in memory database cannot use
+        // it, so this needs a real file.
+        let dir = std::env::temp_dir().join(format!("oar-db-wal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("folder");
+        let database = Database::open(&dir.join("on-air-record.sqlite")).expect("open");
+        let (mode, foreign_keys): (String, i64) = database
+            .with_connection(|conn| {
+                let mode = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+                let keys = conn.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+                Ok((mode, keys))
+            })
+            .expect("pragmas");
+        drop(database);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(mode.to_lowercase(), "wal");
+        assert_eq!(foreign_keys, 1, "bookmarks and segments rely on it");
+    }
 }

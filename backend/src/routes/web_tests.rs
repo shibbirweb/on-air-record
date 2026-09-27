@@ -100,3 +100,59 @@ async fn a_known_path_with_the_wrong_method_says_so_rather_than_not_found() {
     .await;
     assert_eq!(reply.status, StatusCode::METHOD_NOT_ALLOWED);
 }
+
+#[tokio::test]
+async fn the_interface_is_sent_compressed_to_a_browser_that_accepts_it() {
+    use axum::body::{to_bytes, Body};
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let app = app_serving_ui("web-gzip");
+    // Large enough to be worth compressing, as every real bundle is.
+    let script = "console.log('the interface');\n".repeat(400);
+    std::fs::write(
+        app.data_dir.join("ui").join("assets").join("big.js"),
+        &script,
+    )
+    .expect("asset");
+
+    let request = Request::builder()
+        .uri("/assets/big.js")
+        .header("host", "recorder.test:8080")
+        .header("accept-encoding", "gzip")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.router.clone().oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-encoding"], "gzip");
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    assert_eq!(&bytes[..2], &[0x1f, 0x8b], "a gzip stream");
+    assert!(
+        bytes.len() < script.len() / 4,
+        "{} bytes for {}",
+        bytes.len(),
+        script.len()
+    );
+}
+
+/// Called directly: whether a real request reaches it depends on whether `frontend/dist` happens to be
+/// built on the machine running the tests, since debug builds read the embedded copy from disk.
+#[tokio::test]
+async fn without_a_built_interface_the_page_says_how_to_build_it() {
+    use axum::body::to_bytes;
+    use axum::response::IntoResponse;
+
+    let response = super::missing_ui().await.into_response();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let page = String::from_utf8_lossy(&body);
+    assert!(page.contains("has not been built"), "{page}");
+    assert!(
+        page.contains("npm run build"),
+        "the one command that fixes it: {page}"
+    );
+}

@@ -270,3 +270,52 @@ fn a_row_the_locked_database_would_not_delete_is_repaired_on_the_next_pass() {
     assert!(!second.exists());
     assert_eq!(store.segments.stats().expect("stats").segment_count, 0);
 }
+
+#[test]
+fn a_session_a_crash_left_open_is_closed_at_its_last_segment_on_the_next_start() {
+    let scratch = super::Scratch::new("startup-dangling-session");
+    let config = AppConfig {
+        data_dir: scratch.root.join("data"),
+        ..AppConfig::default()
+    };
+
+    let session_id = {
+        let state = AppState::bootstrap(config.clone()).expect("first run");
+        let session_id = state
+            .sessions
+            .create(&SessionDraft {
+                device_id: "generated".to_string(),
+                device_name: "generated".to_string(),
+                sample_rate: 48_000,
+                channels: 1,
+                started_at_ms: T0,
+            })
+            .expect("session")
+            .id;
+        let layout = SegmentLayout::under_data_dir(&config.data_dir);
+        for sequence in 0..2 {
+            seed_segment(
+                &state.segments,
+                &SeedAt {
+                    layout: layout.clone(),
+                    session_id,
+                    sequence,
+                    start_ms: T0 + sequence * 1_000,
+                    end_ms: T0 + (sequence + 1) * 1_000,
+                    level: 700,
+                },
+            );
+        }
+        // The process dies here: the session is never closed.
+        session_id
+    };
+
+    // The next start repairs it, ending it where its audio ends rather than leaving it open forever.
+    let state = AppState::bootstrap(config).expect("second run");
+    let session = state
+        .sessions
+        .find(session_id)
+        .expect("find")
+        .expect("still there");
+    assert_eq!(session.ended_at_ms, Some(T0 + 2_000));
+}

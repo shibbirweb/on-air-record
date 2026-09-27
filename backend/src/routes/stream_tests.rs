@@ -1032,6 +1032,29 @@ async fn no_level_is_sent_to_a_listener_in_a_recording_when_nothing_is_recording
     );
 }
 
+#[tokio::test]
+async fn the_listener_count_includes_people_in_a_recording_or_paused_not_only_live() {
+    let server = serve(app("stream-listener-count")).await;
+    let t0 = recent_start();
+    seed_recording(&server.app, &[steady(t0, 60, 20)]);
+
+    let mut live = connect(&server, None).await;
+    greeting(&mut live).await;
+    let mut playing = connect(&server, None).await;
+    greeting(&mut playing).await;
+    send(&mut playing, json!({ "type": "seek", "timestampMs": t0 })).await;
+    until_control(&mut playing, "mode").await;
+    let mut paused = connect(&server, None).await;
+    greeting(&mut paused).await;
+    send(&mut paused, json!({ "type": "pause" })).await;
+    until_control(&mut paused, "mode").await;
+
+    // The count comes from the listener registry, not the live feed's subscribers, which would miss two.
+    let status = call(&server.app, Method::GET, "/api/status", None, None).await;
+    assert_eq!(status.body["listeners"], 3, "{}", status.body);
+    drop((live, playing, paused));
+}
+
 // Control messages.
 
 #[tokio::test]
