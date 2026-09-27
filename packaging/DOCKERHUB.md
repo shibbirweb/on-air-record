@@ -107,6 +107,27 @@ including SELinux, rootless Docker, and a muted input.
 Disk use is about 330 MB per hour of recording at full quality, or 110 MB at voice quality. The settings
 page works out how much history fits and deletes the oldest recordings to stay inside it.
 
+## Environment variables
+
+Set these under `environment:` in `compose.yaml`, or with `-e NAME=value` on `docker run`:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `TZ` | `UTC` | Your time zone, such as `Europe/London`. Recordings are filed by local calendar day. |
+| `OAR_CHANNEL` | `beta` in a beta image, `stable` otherwise | Which releases the update notices offer. Set `beta` when following the `beta` tag. |
+| `OAR_LOG_LEVEL` | `info` | `error`, `warn`, `info`, `debug` or `trace`. Use `debug` when reporting a problem. |
+| `RUST_LOG` | not set | A detailed logging filter that replaces `OAR_LOG_LEVEL`, such as `on_air_record=debug`. |
+
+The image sets `OAR_PORT=8080`, `OAR_HOST=0.0.0.0`, `OAR_DATA_DIR=/data` and `OAR_CONTAINER=docker`; leave
+them alone. In particular `OAR_HOST=127.0.0.1` makes it unreachable through the port mapping while it
+still reports healthy; to limit who can reach it, publish the port on one address, like
+`-p 127.0.0.1:8080:8080`.
+
+With the compose file, its `.env` holds `AUDIO_GID` (the group that owns `/dev/snd`), `TZ`, and
+`OAR_PORT`, which there is only the port on the host; the service inside stays on 8080. The setup guide
+[lists every variable](https://github.com/shibbirweb/on-air-record/blob/master/docs/SETUP.md#environment-variables)
+with more detail.
+
 ## Day to day
 
 ```sh

@@ -21,7 +21,8 @@ You do not need to install anything to listen. There is no account, no password,
 web address in an ordinary browser.
 
 If nothing is running yet, start with the **[installation guide](SETUP.md)**, which covers downloading and
-running it on macOS, Linux and Windows.
+running it on macOS, Linux and Windows. On Linux, the recommended way is its
+[Docker section](SETUP.md#docker-on-linux).
 
 > The screenshots in this guide come from a demonstration setup with several days of example recordings
 > already on disk, so the timeline looks busy. A brand new installation starts empty and fills up as it

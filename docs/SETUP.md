@@ -23,9 +23,10 @@ flowchart LR
 ## Contents
 
 - [What you need](#what-you-need)
-- [The quick way](#the-quick-way)
-- [Linux: microphone access](#linux-microphone-access)
-- [Docker on Linux](#docker-on-linux)
+- [Which way to install](#which-way-to-install)
+- [Docker on Linux](#docker-on-linux), recommended on Linux
+- [The quick way](#the-quick-way), the installer for macOS and Windows
+- [Linux: microphone access](#linux-microphone-access), for the installer on Linux
 - [Stopping it](#stopping-it)
 - [Step 1: download](#step-1-download)
 - [Step 2: run it](#step-2-run-it)
@@ -56,246 +57,54 @@ flowchart LR
   figure out for you on its settings page.
 - A network the listeners are also on.
 
-Nothing else. There is no database to install, no runtime, no web server. The whole thing is one file.
+Nothing else. There is no database to install, no runtime, no web server. The whole thing is one file, or,
+on Linux, one Docker image.
 
-## The quick way
+## Which way to install
 
-One command does all three steps below. Run it from whatever folder you want the installation to live in.
+Choose by the machine the microphone is plugged into:
 
-**macOS and Linux**, in a terminal:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh
-```
-
-**Windows**, in PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1 | iex
-```
-
-It works out which build your machine needs, downloads the latest release, checks it against the published
-checksum, asks which port to use, and starts the service. Everything lands in one `on-air-record` folder
-created right there:
-
-```
-on-air-record/
-  on-air-record     the program
-  start.sh          starts it again with your settings   (start.cmd on Windows)
-  config            your settings
-  data/             recordings and the database
-```
-
-Nothing is written anywhere else on the machine. To start it again later:
-
-```sh
-./on-air-record/start.sh          # macOS and Linux
-```
-
-```powershell
-.\on-air-record\start.cmd         # Windows, or just double click it in Explorer
-```
-
-That reads `config`, so the port is only chosen once. Useful options:
-
-| macOS and Linux | Windows | What it does |
-| --- | --- | --- |
-| `--port 9000` | `-Port 9000` | Use this port without asking |
-| `--release v0.1.0` | `-Release v0.1.0` | Install that exact version instead of the newest |
-| `--reconfigure` | `-Reconfigure` | Ask for the port again |
-| `--update` | `-Update` | Fetch a newer release over the top |
-| `--beta` | `-Beta` | Follow beta releases, see [Trying a beta](#trying-a-beta) |
-| `--stable` | `-Stable` | Go back to stable releases |
-| `--no-start` | `-NoStart` | Install and configure, but do not start |
-| `--dir <path>` | `-Dir <path>` | Install somewhere other than the current folder |
-
-On macOS and Linux, pass them after `--`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh -s -- --port 9000
-```
-
-On Windows, `iex` cannot take parameters, so use the script block form:
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1))) -Port 9000
-```
-
-This also sidesteps the "unidentified developer" warning on macOS and SmartScreen on Windows, because a
-file fetched with `curl` or `irm` is not quarantined the way a browser download is. Windows will still ask
-about the firewall the first time the service starts; say yes for private networks.
-
-It will refuse to run on ARM Linux, such as a Raspberry Pi, because there is no prebuilt binary for it.
-That needs [building from source](#building-from-source).
-
-The rest of this section is the same thing done by hand.
-
-**On Linux, read [Linux: microphone access](#linux-microphone-access) first.** On a server, or any machine
-you reach over SSH, your account usually cannot open the microphone until you add it to one group, and the
-tempting shortcut of running it with `sudo` causes a second, quieter problem.
-
-## Linux: microphone access
-
-Linux keeps the sound hardware behind device files in `/dev/snd`, and only `root` and members of the
-`audio` group may open them. When you sit at a desktop and log in there, you are given access
-automatically. When you log in over SSH, which is how most servers are run, you are not.
-
-### How you can tell
-
-The web interface loads, but recording will not start. The recorder panel shows an error, and the log says
-something like:
-
-```
-auto start failed ... device 'default' has no usable input config: ... 'snd_pcm_open' failed with error 'Permission denied (13)'
-```
-
-The giveaway is that **it works when started with `sudo`**. To confirm, as your normal user:
-
-```sh
-id -nG          # the groups you are in right now; is audio one of them?
-arecord -l      # does this list your microphone?
-sudo arecord -l # and does this?
-```
-
-If `arecord -l` lists nothing but `sudo arecord -l` shows your microphone, this is the problem. If neither
-lists it, Linux cannot see the microphone at all: check the cable, try another USB port, and look at
-`dmesg` for a driver message. That is outside the app.
-
-### Fixing it
-
-Add your account to the `audio` group, once:
-
-```sh
-sudo usermod -aG audio "$USER"
-```
-
-Then **log out and back in**. Over SSH, that means disconnecting and connecting again. A new group only
-applies to logins that start after it was added, so until then nothing changes. Check that it took:
-
-```sh
-id -nG          # audio should now be in the list
-arecord -l      # and your microphone should be listed without sudo
-```
-
-Now start it the normal way, without `sudo`:
-
-```sh
-./on-air-record/start.sh
-```
-
-### Do not run it with sudo
-
-It works, which is exactly why it is tempting. The trouble comes later. Everything the program creates while
-it runs as `root`, such as the day folders under `data/recordings`, belongs to `root`. The next time you
-start it as yourself, even with the group fixed, it can open the microphone but cannot write into those
-folders. The recorder panel still says **Recording**, and the live audio still plays, but **nothing is
-saved** and the timeline stays empty. The only sign is in the log:
-
-```
-could not open a segment file error=io error: Permission denied (os error 13)
-```
-
-### If you already ran it with sudo
-
-Stop the copy that runs as `root`, give the folder back to your account, and start it again as yourself:
-
-```sh
-sudo ./on-air-record/stop.sh               # needs sudo, because the running copy belongs to root
-sudo chown -R "$USER": ./on-air-record     # take back everything it created
-./on-air-record/start.sh                   # no sudo from now on
-```
-
-Without `sudo`, the stop script is not allowed to stop a process owned by `root`, so it waits and then
-suggests `kill -9`. Do not use that; run it again with `sudo` instead.
-
-Then check that recording really works. Leave it running for a minute and look at the timeline, not just
-the recorder panel. New audio appears once each block of recording (10 seconds by default) is finished and
-written, so an empty timeline after a minute means something is still wrong.
-
-### Running it as a different account
-
-You may not want it under your own login at all: a shared server, an admin account you would rather keep
-separate, or simply wanting the recordings to belong to something other than you. Give it an account of its
-own. It needs three things: to be in the `audio` group, to own the folder it is installed in, and to be the
-account that starts it. It never needs `root`.
-
-The examples call the account `onair`; any name works.
-
-**1. Create the account and let it use the microphone.**
-
-```sh
-sudo useradd --create-home --shell /bin/bash onair
-sudo usermod -aG audio onair
-```
-
-**2. Install it as that account**, so the account owns everything from the start. This puts it in the
-account's home folder, `/home/onair/on-air-record`:
-
-```sh
-sudo -u onair -H sh -c 'cd ~ && curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh -s -- --port 8080 --no-start'
-```
-
-If you would rather keep it outside a home folder, such as in `/opt`, move it there afterwards. Moving
-keeps the owner, so nothing else is needed:
-
-```sh
-sudo mv /home/onair/on-air-record /opt/on-air-record
-```
-
-If you already have an installation under your own account, hand that over instead of installing again.
-Stop it first:
-
-```sh
-./on-air-record/stop.sh
-sudo mv ./on-air-record /opt/on-air-record
-sudo chown -R onair: /opt/on-air-record
-```
-
-**3. Start and stop it as that account**, always through `sudo -u`, using wherever it now lives:
-
-```sh
-sudo -u onair /home/onair/on-air-record/start.sh    # or /opt/on-air-record/start.sh
-sudo -u onair /home/onair/on-air-record/stop.sh
-```
-
-This is not the same as `sudo ./on-air-record/start.sh`: `sudo -u onair` runs it as `onair`, not as
-`root`, so every file it creates belongs to `onair` and the ownership trap above cannot happen. It also
-picks up the `audio` group straight away, with no logging out, because `sudo` starts the program with the
-account's current groups. Plain `sudo`, without `-u`, is still the thing to avoid.
-
-Check it worked the same way as before: leave it running for a minute and look at the timeline.
-
-Starting it this way ties it to your terminal, like any other manual start. To have it run in the
-background and come back after a reboot, use the systemd unit below. It already follows this pattern, with
-an account of its own called `on-air-record`.
-
-### When it runs as a system service
-
-The systemd unit in [Keeping it running: Linux](#keeping-it-running-linux) runs as its own
-`on-air-record` account and already joins the `audio` group, so none of the above applies to it. The same
-ownership trap does apply if you ever start the program by hand with `sudo` against the service's data
-directory. Put it right with:
-
-```sh
-sudo systemctl stop on-air-record
-sudo chown -R on-air-record: /var/lib/on-air-record
-sudo systemctl start on-air-record
-```
+| The host | Use |
+| --- | --- |
+| Linux, including a Raspberry Pi on a 64 bit OS | [Docker](#docker-on-linux), recommended |
+| macOS | [The quick way](#the-quick-way), the installer |
+| Windows | [The quick way](#the-quick-way), the installer |
+| Linux without Docker, or a Raspberry Pi on a 32 bit OS | [The quick way](#the-quick-way), after [Linux: microphone access](#linux-microphone-access); a 32 bit Pi needs [building from source](#building-from-source) |
 
 ## Docker on Linux
 
-Every release is also published as a container image, `ghcr.io/shibbirweb/on-air-record`, for 64 bit
-Intel and AMD machines and for 64 bit ARM, which includes a Raspberry Pi running a 64 bit OS. It is the
-same program as the downloads, with nothing added.
+**On Linux, this is the recommended way to run On Air Record.** Every release is published as a container
+image, `ghcr.io/shibbirweb/on-air-record`, for 64 bit Intel and AMD machines and for 64 bit ARM, which
+includes a Raspberry Pi running a 64 bit OS. It is the same program as the downloads, with nothing added.
+Compared with [the installer](#the-quick-way) on Linux, it takes away the parts that usually go wrong:
+
+- **No permissions to set up on your account.** The container is given the sound devices itself, so there
+  is no [audio group](#linux-microphone-access) to join, no logging out and back in, and no
+  [`sudo` mistake](#do-not-run-it-with-sudo) that leaves recordings it cannot save.
+- **It starts again with the machine,** with no systemd unit to write.
+- **Updating is two commands,** which admins are shown in the app when a new version is out.
+- **A Raspberry Pi gets a ready made build** instead of [building from source](#building-from-source).
+- **Everything it keeps is in one volume,** so nothing else on the machine changes, and removing it
+  removes all of it.
+
+The one cost is installing Docker, once.
+
+### What you need for Docker
+
+- **A Linux host.** Docker Desktop on macOS and Windows runs containers inside a small virtual machine that
+  has no sound hardware, so there is nothing to pass through and the app would list no microphones. On a
+  Mac or a Windows PC, use [the quick way](#the-quick-way) instead.
+- **Docker Engine, not Docker Desktop.** Docker Desktop for Linux also runs containers in a virtual machine,
+  with the same result. Install Docker Engine with the Compose plugin by
+  [Docker's instructions](https://docs.docker.com/engine/install/) for your distribution; they cover
+  Ubuntu, Debian, Fedora and Raspberry Pi OS. Afterwards `docker compose version` should answer.
+- **Permission to run `docker`,** either with `sudo` in front of each command or by being in the `docker`
+  group. Membership of that group is as good as `root` on the machine, so `sudo` is the careful choice on a
+  shared one.
 
 The same image, with the same tags, is on Docker Hub as `shibbirweb/on-air-record`. Either works wherever
 an image is named below. This page uses `ghcr.io` because Docker Hub limits how often one address may
 download without signing in, which a shared network can run into.
-
-**This only works on a Linux host.** The container reaches the microphone through the host's sound device
-files in `/dev/snd`. Docker Desktop on macOS and Windows runs containers inside a small virtual machine that
-has no sound hardware, so there is nothing to pass through and the app would list no microphones. On a Mac
-or a Windows PC, use [the quick way](#the-quick-way) instead.
 
 Nearly every problem with this setup is a permission problem, and each one looks the same from the web
 page: no microphones listed. The next part explains the three things that have to be right, so that the
@@ -429,6 +238,53 @@ docker run -d --name on-air-record --restart unless-stopped \
 
 `--stop-timeout 30` gives it time to close and index the recording it is writing when it is stopped.
 Docker's default of ten seconds can cut that short and lose the last few seconds.
+
+### Environment variables
+
+There are two places to set things, and they are easy to confuse.
+
+**In `.env`, beside `compose.yaml`.** `docker compose` reads these on the host to fill in the compose
+file. The container never sees them directly.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `AUDIO_GID` | `29` | The number of the group that owns `/dev/snd`, given to the container with `group_add` so it may open the sound devices. See [how the container gets the microphone](#how-the-container-gets-the-microphone). |
+| `TZ` | `UTC` | Your time zone, such as `Europe/London`, passed into the container as `TZ`. |
+| `OAR_PORT` | `8080` | The port on the host: the left side of the port mapping. The service inside stays on 8080. |
+
+**In the container.** Set these under `environment:` in `compose.yaml`, or with `-e NAME=value` on
+`docker run`. They are what the program itself reads:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `TZ` | `UTC` | The time zone recordings are filed by. Recordings are kept by local calendar day, so this must be the zone you live in. |
+| `OAR_CHANNEL` | `beta` in a beta image, `stable` otherwise | Which releases the update notices offer, `stable` or `beta`. Set it to `beta` when following the `beta` tag, because a stable image reached through that tag otherwise offers only stable releases. |
+| `OAR_LOG_LEVEL` | `info` | How much the log says: `error`, `warn`, `info`, `debug` or `trace`. Use `debug` when reporting a problem. |
+| `RUST_LOG` | not set | A detailed logging filter that replaces `OAR_LOG_LEVEL` when set, such as `on_air_record=debug,tower_http=info`. |
+
+The image sets a few more. Leave them as they are:
+
+| Variable | Set to | Why leave it |
+| --- | --- | --- |
+| `OAR_PORT` | `8080` | The port inside the container. To serve on another port, change `OAR_PORT` in `.env` instead, which moves only the host's side. Changing this one needs the right side of the port mapping changed to match, and gains nothing. |
+| `OAR_HOST` | `0.0.0.0` | Which connections inside the container are accepted. Port mapping arrives from outside the container's loopback, so `127.0.0.1` makes it unreachable, and the health check still says `healthy`, because it asks from inside. To limit who can reach it, publish the port on one host address instead, such as `127.0.0.1:8080:8080`. |
+| `OAR_DATA_DIR` | `/data` | Where recordings, settings and accounts are kept, which is where the volume is mounted. Anywhere else is inside the container and lost when it is recreated. |
+| `OAR_CONTAINER` | `docker` | Tells the service it runs in a container, so update notices say to pull the new image, and a microphone it cannot reach is explained in terms of `devices:` and `group_add`. |
+| `OAR_STATIC_DIR` | not set | A folder holding a web interface to serve instead of the one built into the program. Only for working on the interface. |
+
+`OAR_PORT` appears in both lists on purpose, with different meanings: in `.env` it is only the host's port,
+and `docker compose` does not pass it into the container. For example, a beta follower who wants more
+detail in the log adds this to `compose.yaml`:
+
+```yaml
+    environment:
+      TZ: "${TZ:-UTC}"
+      OAR_CHANNEL: beta
+      OAR_LOG_LEVEL: debug
+```
+
+After changing `compose.yaml` or `.env`, run `docker compose up -d` to recreate the container;
+`docker compose restart` keeps the old settings.
 
 ### Permission problems: what you see and what fixes it
 
@@ -579,6 +435,237 @@ docker exec on-air-record on-air-record auth reset-2fa you@example.com
 **Uninstalling:** `docker compose down` removes the container. The recordings stay in the volume until you
 also run `docker volume rm on-air-record_data`, which **deletes them all**.
 
+## The quick way
+
+The installer, for macOS and Windows, and for Linux when Docker is not an option. On Linux,
+[Docker](#docker-on-linux) is the simpler choice.
+
+One command does all three steps below. Run it from whatever folder you want the installation to live in.
+
+**macOS and Linux**, in a terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh
+```
+
+**Windows**, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1 | iex
+```
+
+It works out which build your machine needs, downloads the latest release, checks it against the published
+checksum, asks which port to use, and starts the service. Everything lands in one `on-air-record` folder
+created right there:
+
+```
+on-air-record/
+  on-air-record     the program
+  start.sh          starts it again with your settings   (start.cmd on Windows)
+  config            your settings
+  data/             recordings and the database
+```
+
+Nothing is written anywhere else on the machine. To start it again later:
+
+```sh
+./on-air-record/start.sh          # macOS and Linux
+```
+
+```powershell
+.\on-air-record\start.cmd         # Windows, or just double click it in Explorer
+```
+
+That reads `config`, so the port is only chosen once. Useful options:
+
+| macOS and Linux | Windows | What it does |
+| --- | --- | --- |
+| `--port 9000` | `-Port 9000` | Use this port without asking |
+| `--release v0.1.0` | `-Release v0.1.0` | Install that exact version instead of the newest |
+| `--reconfigure` | `-Reconfigure` | Ask for the port again |
+| `--update` | `-Update` | Fetch a newer release over the top |
+| `--beta` | `-Beta` | Follow beta releases, see [Trying a beta](#trying-a-beta) |
+| `--stable` | `-Stable` | Go back to stable releases |
+| `--no-start` | `-NoStart` | Install and configure, but do not start |
+| `--dir <path>` | `-Dir <path>` | Install somewhere other than the current folder |
+
+On macOS and Linux, pass them after `--`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh -s -- --port 9000
+```
+
+On Windows, `iex` cannot take parameters, so use the script block form:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1))) -Port 9000
+```
+
+This also sidesteps the "unidentified developer" warning on macOS and SmartScreen on Windows, because a
+file fetched with `curl` or `irm` is not quarantined the way a browser download is. Windows will still ask
+about the firewall the first time the service starts; say yes for private networks.
+
+It will refuse to run on ARM Linux, such as a Raspberry Pi, because there is no prebuilt binary for it. On
+a 64 bit OS, [Docker](#docker-on-linux) has a ready made arm64 build; otherwise it needs
+[building from source](#building-from-source).
+
+The rest of this section is the same thing done by hand.
+
+**Using the installer on Linux? Read [Linux: microphone access](#linux-microphone-access) first.** On a server, or any machine
+you reach over SSH, your account usually cannot open the microphone until you add it to one group, and the
+tempting shortcut of running it with `sudo` causes a second, quieter problem.
+
+## Linux: microphone access
+
+This is for the installer, or any direct install, on Linux. **With [Docker](#docker-on-linux), none of it
+applies**: the container is given the sound devices itself, and your account needs nothing.
+
+Linux keeps the sound hardware behind device files in `/dev/snd`, and only `root` and members of the
+`audio` group may open them. When you sit at a desktop and log in there, you are given access
+automatically. When you log in over SSH, which is how most servers are run, you are not.
+
+### How you can tell
+
+The web interface loads, but recording will not start. The recorder panel shows an error, and the log says
+something like:
+
+```
+auto start failed ... device 'default' has no usable input config: ... 'snd_pcm_open' failed with error 'Permission denied (13)'
+```
+
+The giveaway is that **it works when started with `sudo`**. To confirm, as your normal user:
+
+```sh
+id -nG          # the groups you are in right now; is audio one of them?
+arecord -l      # does this list your microphone?
+sudo arecord -l # and does this?
+```
+
+If `arecord -l` lists nothing but `sudo arecord -l` shows your microphone, this is the problem. If neither
+lists it, Linux cannot see the microphone at all: check the cable, try another USB port, and look at
+`dmesg` for a driver message. That is outside the app.
+
+### Fixing it
+
+Add your account to the `audio` group, once:
+
+```sh
+sudo usermod -aG audio "$USER"
+```
+
+Then **log out and back in**. Over SSH, that means disconnecting and connecting again. A new group only
+applies to logins that start after it was added, so until then nothing changes. Check that it took:
+
+```sh
+id -nG          # audio should now be in the list
+arecord -l      # and your microphone should be listed without sudo
+```
+
+Now start it the normal way, without `sudo`:
+
+```sh
+./on-air-record/start.sh
+```
+
+### Do not run it with sudo
+
+It works, which is exactly why it is tempting. The trouble comes later. Everything the program creates while
+it runs as `root`, such as the day folders under `data/recordings`, belongs to `root`. The next time you
+start it as yourself, even with the group fixed, it can open the microphone but cannot write into those
+folders. The recorder panel still says **Recording**, and the live audio still plays, but **nothing is
+saved** and the timeline stays empty. The only sign is in the log:
+
+```
+could not open a segment file error=io error: Permission denied (os error 13)
+```
+
+### If you already ran it with sudo
+
+Stop the copy that runs as `root`, give the folder back to your account, and start it again as yourself:
+
+```sh
+sudo ./on-air-record/stop.sh               # needs sudo, because the running copy belongs to root
+sudo chown -R "$USER": ./on-air-record     # take back everything it created
+./on-air-record/start.sh                   # no sudo from now on
+```
+
+Without `sudo`, the stop script is not allowed to stop a process owned by `root`, so it waits and then
+suggests `kill -9`. Do not use that; run it again with `sudo` instead.
+
+Then check that recording really works. Leave it running for a minute and look at the timeline, not just
+the recorder panel. New audio appears once each block of recording (10 seconds by default) is finished and
+written, so an empty timeline after a minute means something is still wrong.
+
+### Running it as a different account
+
+You may not want it under your own login at all: a shared server, an admin account you would rather keep
+separate, or simply wanting the recordings to belong to something other than you. Give it an account of its
+own. It needs three things: to be in the `audio` group, to own the folder it is installed in, and to be the
+account that starts it. It never needs `root`.
+
+The examples call the account `onair`; any name works.
+
+**1. Create the account and let it use the microphone.**
+
+```sh
+sudo useradd --create-home --shell /bin/bash onair
+sudo usermod -aG audio onair
+```
+
+**2. Install it as that account**, so the account owns everything from the start. This puts it in the
+account's home folder, `/home/onair/on-air-record`:
+
+```sh
+sudo -u onair -H sh -c 'cd ~ && curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.sh | sh -s -- --port 8080 --no-start'
+```
+
+If you would rather keep it outside a home folder, such as in `/opt`, move it there afterwards. Moving
+keeps the owner, so nothing else is needed:
+
+```sh
+sudo mv /home/onair/on-air-record /opt/on-air-record
+```
+
+If you already have an installation under your own account, hand that over instead of installing again.
+Stop it first:
+
+```sh
+./on-air-record/stop.sh
+sudo mv ./on-air-record /opt/on-air-record
+sudo chown -R onair: /opt/on-air-record
+```
+
+**3. Start and stop it as that account**, always through `sudo -u`, using wherever it now lives:
+
+```sh
+sudo -u onair /home/onair/on-air-record/start.sh    # or /opt/on-air-record/start.sh
+sudo -u onair /home/onair/on-air-record/stop.sh
+```
+
+This is not the same as `sudo ./on-air-record/start.sh`: `sudo -u onair` runs it as `onair`, not as
+`root`, so every file it creates belongs to `onair` and the ownership trap above cannot happen. It also
+picks up the `audio` group straight away, with no logging out, because `sudo` starts the program with the
+account's current groups. Plain `sudo`, without `-u`, is still the thing to avoid.
+
+Check it worked the same way as before: leave it running for a minute and look at the timeline.
+
+Starting it this way ties it to your terminal, like any other manual start. To have it run in the
+background and come back after a reboot, use the systemd unit below. It already follows this pattern, with
+an account of its own called `on-air-record`.
+
+### When it runs as a system service
+
+The systemd unit in [Keeping it running: Linux](#keeping-it-running-linux) runs as its own
+`on-air-record` account and already joins the `audio` group, so none of the above applies to it. The same
+ownership trap does apply if you ever start the program by hand with `sudo` against the service's data
+directory. Put it right with:
+
+```sh
+sudo systemctl stop on-air-record
+sudo chown -R on-air-record: /var/lib/on-air-record
+sudo systemctl start on-air-record
+```
+
 ## Stopping it
 
 While the terminal that started it is still open, **Ctrl+C** stops it cleanly.
@@ -645,7 +732,8 @@ Go to the **Releases** page of the repository and download the file for your mac
 Not sure which Mac you have? Apple menu, About This Mac. Anything that says Apple M1, M2, M3 or later needs
 the `aarch64` file.
 
-There is no prebuilt file for ARM Linux, such as a Raspberry Pi. That works, but you have to
+There is no prebuilt file for ARM Linux, such as a Raspberry Pi. On a 64 bit OS, use
+[Docker](#docker-on-linux), which has an arm64 build; on a 32 bit OS, you have to
 [build it from source](#building-from-source).
 
 Each download has a `.sha256` file next to it if you want to check it arrived intact:
@@ -686,6 +774,8 @@ Run it once by hand like this before setting it up to start automatically, becau
 never gets shown that microphone prompt.
 
 ### Linux
+
+[Docker](#docker-on-linux) is the simpler way on Linux, and needs none of this. By hand:
 
 ALSA is how Linux hands out audio, and the program loads its shared library at run time. Desktop systems
 already have it. A minimal server may not, in which case the program fails to start with a message about
@@ -931,6 +1021,8 @@ both. Run `on-air-record --help` to see this list on the machine itself.
 | `--data-dir` | `OAR_DATA_DIR` | `./data` | Where recordings and the database are kept. |
 | `--static-dir` | `OAR_STATIC_DIR` | `../frontend/dist` | A folder holding a web interface to serve instead of the built in one. You do not normally need this. |
 | `--log-level` | `OAR_LOG_LEVEL` | `info` | How much detail is printed: `error`, `warn`, `info`, `debug` or `trace`. Use `debug` when reporting a problem. |
+| none | `OAR_CHANNEL` | from the version | Which releases the update notices offer: `stable` or `beta`. The installers' `--beta` saves it in their `config` file. |
+| none | `RUST_LOG` | not set | A detailed logging filter that replaces `--log-level`, such as `on_air_record=debug,tower_http=info`. |
 
 A complete example:
 
@@ -943,6 +1035,9 @@ The same thing with environment variables:
 ```sh
 OAR_PORT=9000 OAR_DATA_DIR=/srv/on-air-record OAR_LOG_LEVEL=debug ./on-air-record
 ```
+
+In Docker, the image sets some of these for you; [Environment variables](#environment-variables) in the
+Docker section lists what to set there and what to leave alone.
 
 Everything else, such as which microphone to use, how long to keep recordings and at what quality, is
 changed on the app's own settings page while it is running. It is remembered between restarts, so it does
@@ -1025,6 +1120,10 @@ permission on macOS belongs to a logged in user, and a daemon running as the sys
 been granted it. The cost is that recording only runs while you are logged in.
 
 ## Keeping it running: Linux
+
+**With [Docker](#docker-on-linux) there is nothing to do.** The compose file restarts the container
+whenever the machine starts, as long as Docker itself starts at boot, which it does by default once
+installed; `sudo systemctl enable docker` makes sure. The rest of this section is for a direct install.
 
 The repository ships a systemd unit at
 [`packaging/on-air-record.service`](../packaging/on-air-record.service), and it is included in the Linux
@@ -1168,6 +1267,9 @@ Nothing else is written anywhere on the machine, so there is no cache or configu
 
 ## Trying a beta
 
+With Docker, follow betas by changing the image tag, as [Day to day](#day-to-day) describes. The rest of
+this section is for the installers.
+
 New features are released as a **beta** first, with a version like `0.4.0-beta.1`, for people willing to
 try them before everybody else gets them. Betas are tested on all three platforms like any release, but
 they are new, so expect the occasional rough edge, and please
@@ -1206,7 +1308,8 @@ In Docker, `docker compose down`, then `docker volume rm on-air-record_data` for
 
 ## Building from source
 
-Needed only for a platform with no prebuilt file, such as a Raspberry Pi, or to work on the code.
+Needed only for a platform with no prebuilt file or image, such as a Raspberry Pi on a 32 bit OS, or to work
+on the code.
 
 You need [Rust](https://rustup.rs) 1.82 or newer and Node.js 22. On Debian based Linux you also need the
 audio and build headers:

@@ -42,6 +42,10 @@ services:
       # Recordings are filed under the local calendar day, so this has to be the zone you live in.
       TZ: "${TZ:-UTC}"
       # OAR_CHANNEL: beta
+      # More detail in the log, for reporting a problem: error, warn, info, debug or trace.
+      # OAR_LOG_LEVEL: debug
+      # docs/SETUP.md, "Environment variables", lists every variable, and the ones the image sets that
+      # should be left alone.
     volumes:
       # Recordings, settings and accounts. A named volume is owned by the container's user from the start;
       # to use a folder instead, see docs/SETUP.md.

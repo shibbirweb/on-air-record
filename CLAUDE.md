@@ -351,6 +351,10 @@ plain relative links in those files, and keep images as absolute raw GitHub URLs
 rewrite. `make wiki` builds a preview. When a user facing behaviour changes, update the matching section
 there as well as the `README.md` feature checklist.
 
+Docker is the recommended install on Linux and the README and setup guide lead with it there; the installer
+leads for macOS and Windows. Keep that order when adding install instructions, and give Linux-only advice
+for a direct install a pointer to Docker first.
+
 ## Further reading
 
 `docs/ARCHITECTURE.md` (layers and patterns), `docs/AUDIO_PIPELINE.md` (capture, framing, storage, DVR
