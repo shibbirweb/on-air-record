@@ -1405,14 +1405,22 @@ page.
 **Docker Hub needs two repository secrets,** set once:
 
 1. On Docker Hub, signed in as `shibbirweb`, open Account settings, **Personal access tokens**, and create
-   one with **Read & Write** access. Creating the `on-air-record` repository there first, as public, lets
-   you give it a description; otherwise the first push creates it.
+   one with **Read, Write, Delete** access. Pushing images needs only Read and Write, but Docker Hub only
+   lets a token with Delete change the repository's description, which the page below needs.
 2. In this repository on GitHub, Settings, Secrets and variables, Actions, add `DOCKERHUB_USERNAME`
    (`shibbirweb`) and `DOCKERHUB_TOKEN` (the token).
 
 Until both are set, releases still publish to `ghcr.io` and the image tags job warns that Docker Hub was
 skipped. Releases published before the secrets existed are not pushed there afterwards; Docker Hub starts
 at the next release.
+
+**The Docker Hub page** is [`packaging/DOCKERHUB.md`](../packaging/DOCKERHUB.md), published by
+[`.github/workflows/dockerhub-description.yml`](../.github/workflows/dockerhub-description.yml). Docker
+Hub reads nothing from GitHub, so that file is the whole page. It is written for stable users, naming
+`latest` and the compose file on `master`, so it publishes when a change to it reaches `master`, usually
+with a stable release; run the workflow from the Actions tab to publish it sooner. It runs apart from
+releases, so a token without Delete fails it alone, with a `Forbidden` error, and never a release. When a
+Docker behaviour changes, update that page as well as the Docker section above.
 
 Expect ten to fifteen minutes, most of it compiling. The release exists and is visible the whole time; the
 files appear at the end. Notes you wrote yourself are left exactly as they are.

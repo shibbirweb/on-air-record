@@ -336,6 +336,9 @@ group) and a symptom to fix table; keep a new failure mode in that table rather 
 device, owner GIDs against `/proc/self/status`) and appends the fix to capture errors; a new row in the
 table that the service can detect belongs in its `diagnose` too. It must only ever open a control device,
 never a PCM one, so checking never takes the microphone.
+`packaging/DOCKERHUB.md` is the whole Docker Hub page (Docker Hub reads nothing from GitHub), published by
+`dockerhub-description.yml` on pushes to master; keep it in step with the guide's Docker section, with
+absolute links only.
 
 ## Docs and the wiki
 

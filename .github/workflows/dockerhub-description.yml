@@ -1,0 +1,48 @@
+# Publishes packaging/DOCKERHUB.md as the description on the image's Docker Hub page.
+#
+# Docker Hub does not read anything from GitHub, so without this its page for shibbirweb/on-air-record
+# stays blank. The page is written for people running the stable release: it names `latest` and fetches the
+# compose file from master, neither of which exists before the first stable release. So it follows master,
+# and publishes when a change to the page lands there, which usually means a stable release.
+# Run it by hand from the Actions tab to publish sooner, or again.
+#
+# It needs the same DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets as release.yml, and the token needs the
+# Read, Write, Delete scope: Docker Hub only lets a token with Delete change a repository's description,
+# while pushing images needs only Read and Write. It is kept out of release.yml on purpose, so a token
+# without that scope fails this alone and never a release.
+name: Docker Hub description
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - packaging/DOCKERHUB.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  description:
+    name: update the Docker Hub page
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Docker Hub refuses a description over 25,000 bytes, with an error that does not say so.
+      - name: Check the page fits
+        run: |
+          size="$(wc -c < packaging/DOCKERHUB.md)"
+          echo "packaging/DOCKERHUB.md is $size bytes"
+          [ "$size" -le 25000 ] || { echo "::error::Docker Hub allows 25000 bytes, and the page is $size"; exit 1; }
+
+      - uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: shibbirweb/on-air-record
+          # Docker Hub's limit here is 100 characters.
+          short-description: Record a microphone around the clock and stream it live to browsers on your network
+          readme-filepath: packaging/DOCKERHUB.md
