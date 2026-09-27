@@ -320,8 +320,9 @@ The `Dockerfile` at the root builds the same binary for Linux. `release.yml` pus
 Hub with a warning otherwise. Tags: the version and `beta`, and for stable also `latest` and the minor line.
 ghcr.io is the one the docs and update notices lead with, because Docker Hub rate limits anonymous pulls.
 Microphone passthrough is `/dev/snd` plus the host's audio GID via `group_add` (`packaging/compose.yaml`), so
-it is **Linux hosts only**; Docker Desktop has no sound hardware, and passthrough has never been tried with a
-real microphone, only checked in CI with a loopback card. The image sets `OAR_CONTAINER`, which makes the
+it is **Linux hosts only**; Docker Desktop has no sound hardware. Passthrough with a real microphone was
+verified by hand on an Ubuntu server with a 0.8.0 beta; nothing automated covers it, because GitHub's hosted
+runners cannot load `snd-aloop`, so the loopback steps in CI and `verify-image` only warn. The image sets `OAR_CONTAINER`, which makes the
 install kind `docker` so update notices say to pull rather than run an installer. It runs as uid 10001 and
 ships `tzdata` because days are local; keep both. Its `HEALTHCHECK` is `on-air-record health`
 (`health_probe.rs`), a std only HTTP probe of `/api/health` that opens no database; it reports liveness, not
@@ -336,9 +337,11 @@ group) and a symptom to fix table; keep a new failure mode in that table rather 
 device, owner GIDs against `/proc/self/status`) and appends the fix to capture errors; a new row in the
 table that the service can detect belongs in its `diagnose` too. It must only ever open a control device,
 never a PCM one, so checking never takes the microphone.
-`packaging/DOCKERHUB.md` is the whole Docker Hub page (Docker Hub reads nothing from GitHub), published by
-`dockerhub-description.yml` on pushes to master; keep it in step with the guide's Docker section, with
-absolute links only.
+`packaging/DOCKERHUB.md` is the whole Docker Hub page (Docker Hub reads nothing from GitHub), published on
+every release by `dockerhub-description.yml`, which `release.yml` calls. It rewrites the page's master
+links to the release tag and, while Docker Hub has no `latest`, names `beta` in place of the
+`<!-- before-stable -->` marker, so keep links pointing at master and keep that marker. Keep the page in
+step with the guide's Docker section, with absolute links only.
 
 ## Docs and the wiki
 

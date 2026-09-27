@@ -1,25 +1,32 @@
 # Publishes packaging/DOCKERHUB.md as the description on the image's Docker Hub page.
 #
 # Docker Hub does not read anything from GitHub, so without this its page for shibbirweb/on-air-record
-# stays blank. The page is written for people running the stable release: it names `latest` and fetches the
-# compose file from master, neither of which exists before the first stable release. So it follows master,
-# and publishes when a change to the page lands there, which usually means a stable release.
-# Run it by hand from the Actions tab to publish sooner, or again.
+# stays blank. release.yml calls it on every release, beta or stable, once the image tags exist, and it can
+# be run by hand from the Actions tab for any published release.
 #
-# It needs the same DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets as release.yml, and the token needs the
-# Read, Write, Delete scope: Docker Hub only lets a token with Delete change a repository's description,
-# while pushing images needs only Read and Write. It is kept out of release.yml on purpose, so a token
-# without that scope fails this alone and never a release.
+# The page is rendered for the release it is published with. Its links point at that release's tag rather
+# than master, so the compose file and the guides it links to exist and match that version. And until a
+# stable release exists there is no `latest` image, which the page and the compose file both name, so
+# while Docker Hub has no `latest` tag the page names `beta` instead and says how to point the compose file
+# at it. That check is made each time, so the note goes away by itself with the first stable release.
+#
+# It needs the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets, and the token needs the Read, Write, Delete
+# scope: Docker Hub only lets a token with Delete change a repository's description.
 name: Docker Hub description
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - packaging/DOCKERHUB.md
-      - .github/workflows/dockerhub-description.yml
+  workflow_call:
+    inputs:
+      tag:
+        description: The published release whose page to publish, like v0.8.0
+        type: string
+        required: true
   workflow_dispatch:
+    inputs:
+      tag:
+        description: The published release whose page to publish, like v0.8.0
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -29,14 +36,48 @@ jobs:
     name: update the Docker Hub page
     runs-on: ubuntu-latest
     steps:
+      # The release's own page, not whatever the default branch holds now, as everything release.yml
+      # checks out.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
-      # Docker Hub refuses a description over 25,000 bytes, with an error that does not say so.
-      - name: Check the page fits
+      - name: Render the page for this release
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          size="$(wc -c < packaging/DOCKERHUB.md)"
-          echo "packaging/DOCKERHUB.md is $size bytes"
+          set -eu
+          sed -e "s#github.com/shibbirweb/on-air-record/blob/master/#github.com/shibbirweb/on-air-record/blob/$TAG/#g" \
+              -e "s#raw.githubusercontent.com/shibbirweb/on-air-record/master/#raw.githubusercontent.com/shibbirweb/on-air-record/$TAG/#g" \
+              packaging/DOCKERHUB.md > "$RUNNER_TEMP/page.md"
+
+          status="$(curl -s -o /dev/null -w '%{http_code}' https://hub.docker.com/v2/repositories/shibbirweb/on-air-record/tags/latest)"
+          case "$status" in
+            200)
+              sed -i '/<!-- before-stable -->/d' "$RUNNER_TEMP/page.md"
+              echo "Docker Hub has a latest image, so the page names it"
+              ;;
+            404)
+              note="**No stable release has an image yet,** so there is no \`latest\` tag. Until there is, point the compose file at the newest beta before starting it: \`sed -i 's/:latest/:beta/' compose.yaml\`."
+              sed -i -e 's#shibbirweb/on-air-record:latest#shibbirweb/on-air-record:beta#g' \
+                     -e "s#<!-- before-stable -->#$note#" "$RUNNER_TEMP/page.md"
+              echo "Docker Hub has no latest image yet, so the page names beta"
+              ;;
+            *)
+              echo "::error::Docker Hub answered $status when asked whether a latest image exists"
+              exit 1
+              ;;
+          esac
+
+          # Docker Hub refuses a description over 25,000 bytes, with an error that does not say so.
+          size="$(wc -c < "$RUNNER_TEMP/page.md")"
+          echo "the page is $size bytes"
           [ "$size" -le 25000 ] || { echo "::error::Docker Hub allows 25000 bytes, and the page is $size"; exit 1; }
+          if grep -q 'before-stable' "$RUNNER_TEMP/page.md"; then
+            echo "::error::the before-stable marker was left in the page"
+            exit 1
+          fi
+          cp "$RUNNER_TEMP/page.md" docker-hub-page.md
 
       - uses: peter-evans/dockerhub-description@v4
         with:
@@ -45,4 +86,4 @@ jobs:
           repository: shibbirweb/on-air-record
           # Docker Hub's limit here is 100 characters.
           short-description: Record a microphone around the clock and stream it live to browsers on your network
-          readme-filepath: packaging/DOCKERHUB.md
+          readme-filepath: docker-hub-page.md
