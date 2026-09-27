@@ -356,6 +356,9 @@ plain relative links in those files, and keep images as absolute raw GitHub URLs
 rewrite. `make wiki` builds a preview. When a user facing behaviour changes, update the matching section
 there as well as the `README.md` feature checklist.
 
+The README's badges are mostly live (shields.io and GitHub), but three are fixed text: platforms, the image
+architectures, and the Rust version, which must follow `rust-version` in `backend/Cargo.toml`.
+
 Docker is the recommended install on Linux and the README and setup guide lead with it there; the installer
 leads for macOS and Windows. Keep that order when adding install instructions, and give Linux-only advice
 for a direct install a pointer to Docker first.
