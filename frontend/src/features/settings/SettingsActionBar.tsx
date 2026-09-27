@@ -97,6 +97,7 @@ export function SettingsActionBar() {
         'recordingSampleRate',
         'recordingsDir',
         'checkForUpdates',
+        'soundSensitivity',
       ] as const
     ).every(
       (key) => Object.is(pending[key], defaults[key]),

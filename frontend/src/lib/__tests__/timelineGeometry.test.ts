@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   chooseTickStepMs,
+  soundBands,
   tickTimestamps,
   timeToX,
   xToTime,
@@ -123,5 +124,36 @@ describe('zoomWindow', () => {
   it('degrades safely on a degenerate window', () => {
     expect(zoomWindow({ startMs: 0, spanMs: 0 }, 1_000, 500).spanMs).toBe(1_000);
     expect(zoomWindow(window, 0, 500).spanMs).toBe(0);
+  });
+});
+
+describe('soundBands', () => {
+  // A minute across 600 pixels: ten pixels a second.
+  const view = { startMs: 0, spanMs: 60_000, width: 600 };
+
+  it('places a sound where it happened and as wide as it lasted', () => {
+    expect(soundBands([{ startMs: 10_000, endMs: 12_000 }], view)).toEqual([{ left: 100, width: 20 }]);
+  });
+
+  it('keeps a sound far shorter than a pixel visible', () => {
+    const day = { startMs: 0, spanMs: 86_400_000, width: 1000 };
+    const [band] = soundBands([{ startMs: 3_600_000, endMs: 3_601_000 }], day);
+    expect(band.width).toBe(3);
+  });
+
+  it('clips at the edges and drops what is off screen', () => {
+    expect(
+      soundBands(
+        [
+          { startMs: -5_000, endMs: 1_000 },
+          { startMs: 59_000, endMs: 70_000 },
+          { startMs: 80_000, endMs: 81_000 },
+        ],
+        view,
+      ),
+    ).toEqual([
+      { left: 0, width: 10 },
+      { left: 590, width: 10 },
+    ]);
   });
 });

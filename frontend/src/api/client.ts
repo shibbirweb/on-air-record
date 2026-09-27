@@ -19,6 +19,8 @@ import type {
   ServiceStatus,
   Settings,
   SettingsPatch,
+  Sound,
+  SoundsWindow,
   Role,
   Storage,
   TimelineRange,
@@ -235,6 +237,15 @@ export const api = {
     request<Peaks>(
       `/timeline/peaks?fromMs=${Math.round(fromMs)}&toMs=${Math.round(toMs)}&buckets=${buckets}`,
     ),
+
+  sounds: (fromMs: number, toMs: number) =>
+    request<SoundsWindow>(`/timeline/sounds?fromMs=${Math.round(fromMs)}&toMs=${Math.round(toMs)}`),
+
+  /** The sound to jump to from `fromMs`, or `null` when there is none that way. */
+  nextSound: (fromMs: number, direction: 'forward' | 'backward') =>
+    request<{ sound: Sound | null }>(
+      `/timeline/sounds/next?fromMs=${Math.round(fromMs)}&direction=${direction}`,
+    ).then((body) => body.sound),
 
   bookmarks: () =>
     request<{ bookmarks: Bookmark[] }>('/bookmarks').then((body) => body.bookmarks),

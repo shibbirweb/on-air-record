@@ -262,6 +262,9 @@ through every part of the interface with screenshots.
   pick a day and play from any point in it, the way you would scrub a CCTV recording.
 - **Waveform with timeline.** Amplitude peaks are computed while recording and stored alongside each
   segment, so the UI can draw the waveform for both live audio and history.
+- **Jump between sounds.** The timeline marks the moments something was heard, judged against each room's
+  own background rather than a fixed loudness, and next and previous sound buttons jump between them, so
+  a night of recording is its few events rather than hours of silence to scrub through.
 - **Device picker.** All host input devices are enumerated at runtime, and the selected device is persisted
   in SQLite so the service comes back on the same microphone after a restart.
 - **Bounded disk use.** A retention window is enforced by a janitor that prunes expired audio, its index
@@ -490,6 +493,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Zoom anchored on the marker, and on the pointer when scrolling
 - [x] Cue marker showing the selected moment before playback has started
 - [x] Calendar day picker, with days holding no recording shown as unselectable
+- [x] Sounds found against each room's own background, marked on the timeline and minimap, with next and previous sound buttons
 - [x] Picking a day frames it on the timeline and plays from its first recorded moment
 - [x] Transport controls: play, pause, jump back thirty seconds, go live, playback speed
 - [x] Volume slider and mute

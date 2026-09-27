@@ -91,6 +91,11 @@ pub fn build(state: Arc<AppState>) -> Router {
         .route("/timeline/range", get(timeline_controller::range))
         .route("/timeline/days", get(timeline_controller::days))
         .route("/timeline/peaks", get(timeline_controller::peaks))
+        .route("/timeline/sounds", get(timeline_controller::sounds))
+        .route(
+            "/timeline/sounds/next",
+            get(timeline_controller::next_sound),
+        )
         .route(
             "/bookmarks",
             get(bookmark_controller::list).post(bookmark_controller::create),

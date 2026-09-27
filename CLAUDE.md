@@ -45,6 +45,9 @@ npm run dev      # Vite on :5173, proxies /api and the WebSocket to :8080
 npm run build    # tsc -b then vite build, writes dist/, which a release backend embeds
 npm test         # Vitest, ~165 tests
 npm run lint     # oxlint
+
+# From the repository root, after both builds
+node scripts/e2e.mjs   # the service and UI driven through headless Chrome
 ```
 
 Full stack locally: `npm run build` once, then `cargo run`, then open `http://localhost:8080`. For hot
@@ -109,6 +112,18 @@ recorder) watch it and push the whole list to their browser on every change. Rul
   listener session never subscribes; do not rely on the frontend to hide it.
 - The registry is also the listener count in `GET /api/status`; `BroadcastHub::listener_count` only counts
   sessions on the live feed.
+
+### Finding sounds
+
+`audio/activity.rs` finds the moments something was heard, purely from the stored envelope, so it needs no
+decoding and no extra storage. It is relative, not a fixed level: each five minute block (aligned to the
+clock) gets a noise floor, the 30th percentile of its own levels, and `soundSensitivity` sets how far above
+it counts. Bursts under 200 ms never merge, which is what keeps a wavering background from chaining into
+one endless sound; that exact bug was found by running the service, not by the flat test backgrounds, so
+keep `a_wavering_background_is_not_a_sound_at_any_sensitivity`. `TimelineService::sounds` reads
+`FLOOR_CONTEXT_MS` either side of the window so answers do not depend on window width, and `next_sound`
+scans a day at a time. The frontend only draws and seeks; with nothing playing or cued, the buttons search
+from the timeline's left edge unless it is following live.
 
 ### Update notices
 
@@ -278,9 +293,25 @@ testing.
 directory, to prove the access rules through the wiring rather than in isolation. Add a case there when a
 route's access changes.
 
-Frontend tests cover `lib/` and the Zustand slices in `store/`. Components are not unit tested, because
-what would break in them is canvas drawing and Web Audio scheduling and neither is meaningfully exercised
-in jsdom.
+`services/sound_pipeline_tests.rs` generates real audio (room noise, hum, speech like syllables, a click,
+a door) and pushes it through the real recorder into segments and SQLite, then asks the timeline service
+for the sounds. It is the closest CI gets to a microphone, and it pins the documented limits: a voice at a
+tenth of the gain is below what the stored levels resolve, and High or more gain brings a quiet one back.
+
+Frontend tests cover `lib/` and the Zustand slices in `store/` in the node environment. Component tests
+use React Testing Library in jsdom, which a file opts into with `// @vitest-environment jsdom` and
+`import '@/test/dom'` (jest-dom matchers, cleanup, and stand ins for the ResizeObserver and pointer capture
+the component library expects). They replace store actions with spies and test wiring: what a control asks
+for and does with the answer. Canvas components are tested with `recordCanvases` from `@/test/canvas`, a
+fake 2D context that records every `fillRect` with its colour and alpha, plus a hand cranked animation
+frame; jsdom resolves no stylesheet, so colours are the fallbacks passed to `readCssColor`. Web Audio is not
+unit tested. Keep logic that has several cases (such as `lib/soundSearch.ts`) in `lib/` and test it there,
+leaving components thin. `scripts/e2e.mjs` covers what jsdom cannot, in a real browser: it seeds recordings into a fresh data
+directory, starts the built service, and drives headless Chrome over the DevTools protocol with real mouse
+events, reading the canvases back pixel by pixel. It is CI's `browser end to end` job and part of
+`make check` (`make e2e` alone); it needs Chrome and Node 22.13 or newer for `node:sqlite`. Canvases the
+test reads carry an `aria-label`, which it finds them by; keep those if a canvas is reworked. Add a check
+there when a feature's value is in what the page does rather than what a function returns.
 
 Verify audio changes by running the service and listening. Browsers require a user gesture before audio
 starts, so headless checks cannot confirm playback. A useful trick for exercising the DVR without waiting

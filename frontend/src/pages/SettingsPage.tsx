@@ -15,6 +15,7 @@ import { RecordingQuality } from '@/features/settings/RecordingQuality';
 import { SettingsActionBar } from '@/features/settings/SettingsActionBar';
 import { RetentionSettings } from '@/features/settings/RetentionSettings';
 import { SettingsPanel } from '@/features/settings/SettingsPanel';
+import { SoundDetectionSettings } from '@/features/settings/SoundDetectionSettings';
 import { UpdateSettings } from '@/features/settings/UpdateSettings';
 import { usePolling } from '@/hooks/usePolling';
 import { useCanAdminister } from '@/store/useAuthStore';
@@ -84,6 +85,16 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent>
           <SettingsPanel />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Finding sounds</CardTitle>
+          <CardDescription>What the timeline marks as a sound, and jumps between.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SoundDetectionSettings />
         </CardContent>
       </Card>
 

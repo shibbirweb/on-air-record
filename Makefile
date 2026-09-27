@@ -13,7 +13,7 @@ MAKEFLAGS += --no-print-directory
 .DEFAULT_GOAL := help
 
 .PHONY: help tools node-version run dev-backend dev-frontend ui build test lint fmt check \
-        version pending release wiki install-preview docker clean
+        e2e version pending release wiki install-preview docker clean
 
 help: ## List these targets
 	@echo 'On Air Record'
@@ -77,6 +77,12 @@ lint: node-version ## Clippy with warnings denied, and oxlint
 fmt: ## Format the Rust code
 	cd backend && cargo fmt
 
+# The real service on seeded recordings, driven through headless Chrome: the buttons, the canvases and
+# the settings card that unit tests cannot reach. Needs Chrome, and Node 22.13 or newer for node:sqlite.
+e2e: ui ## Build the UI and service, then drive them in headless Chrome
+	cd backend && cargo build
+	node scripts/e2e.mjs
+
 # The same things CI runs, in the same order, so a green run here means a green run there.
 check: node-version ## Everything CI checks, before you push
 	node scripts/version.mjs check
@@ -86,6 +92,8 @@ check: node-version ## Everything CI checks, before you push
 	cd frontend && npm run lint
 	cd frontend && npm test
 	cd frontend && npm run build
+	cd backend && cargo build
+	node scripts/e2e.mjs
 	@echo ''
 	@echo 'All clear.'
 

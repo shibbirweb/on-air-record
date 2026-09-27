@@ -6,7 +6,10 @@ use axum::extract::{Query, State};
 use axum::Json;
 
 use crate::app::AppState;
-use crate::dto::{PeaksQuery, PeaksResponse, RecordingDaysResponse, TimelineRangeResponse};
+use crate::dto::{
+    NextSoundQuery, NextSoundResponse, PeaksQuery, PeaksResponse, RecordingDaysResponse,
+    SoundsQuery, SoundsResponse, TimelineRangeResponse,
+};
 use crate::error::{AppError, AppResult};
 
 /// Largest window a single peaks request may cover.
@@ -48,4 +51,46 @@ pub async fn peaks(
         .peaks(query.from_ms, query.to_ms, query.buckets)?;
 
     Ok(Json(view.into()))
+}
+
+/// `GET /api/timeline/sounds`
+///
+/// The moments something was heard in a window, found with the current sensitivity setting.
+pub async fn sounds(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SoundsQuery>,
+) -> AppResult<Json<SoundsResponse>> {
+    if query.to_ms - query.from_ms > MAX_WINDOW_MS {
+        return Err(AppError::bad_request(
+            "the requested window is too wide, ask for at most 32 days at a time",
+        ));
+    }
+    let sensitivity = state.settings.current().sound_sensitivity;
+    let sounds = state
+        .timeline
+        .sounds(query.from_ms, query.to_ms, sensitivity)?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    Ok(Json(SoundsResponse {
+        from_ms: query.from_ms,
+        to_ms: query.to_ms,
+        sensitivity,
+        sounds,
+    }))
+}
+
+/// `GET /api/timeline/sounds/next`
+///
+/// The sound to jump to from where playback is, forward or back.
+pub async fn next_sound(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<NextSoundQuery>,
+) -> AppResult<Json<NextSoundResponse>> {
+    let sensitivity = state.settings.current().sound_sensitivity;
+    let sound = state
+        .timeline
+        .next_sound(query.from_ms, query.direction.into(), sensitivity)?
+        .map(Into::into);
+    Ok(Json(NextSoundResponse { sound }))
 }

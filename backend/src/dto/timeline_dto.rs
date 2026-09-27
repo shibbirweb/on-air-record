@@ -2,8 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::TimeRange;
-use crate::services::timeline_service::{PeaksView, DEFAULT_BUCKETS};
+use crate::audio::activity::Sound;
+use crate::models::{SoundSensitivity, TimeRange};
+use crate::services::timeline_service::{PeaksView, SeekDirection, DEFAULT_BUCKETS};
 use crate::services::{RecordingDay, TimelineRange};
 
 #[derive(Debug, Serialize)]
@@ -151,4 +152,79 @@ impl From<crate::services::ExportPlan> for ExportPlanResponse {
             mixed_rates: plan.mixed_rates,
         }
     }
+}
+
+/// Query string of the sounds endpoint.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoundsQuery {
+    pub from_ms: i64,
+    pub to_ms: i64,
+}
+
+/// A moment something was heard.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoundDto {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    /// Where to start playback to hear it from its beginning: a second early, but never inside a gap.
+    pub seek_ms: i64,
+    /// Its loudest envelope value, 0 to 255.
+    pub peak: u8,
+}
+
+impl From<Sound> for SoundDto {
+    fn from(sound: Sound) -> Self {
+        Self {
+            start_ms: sound.start_ms,
+            end_ms: sound.end_ms,
+            seek_ms: sound.seek_ms,
+            peak: sound.peak,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoundsResponse {
+    pub from_ms: i64,
+    pub to_ms: i64,
+    /// The setting these were found with, so a client can tell a stale answer after it changes.
+    pub sensitivity: SoundSensitivity,
+    pub sounds: Vec<SoundDto>,
+}
+
+/// Which way the next sound endpoint looks. Forward unless told otherwise.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DirectionParam {
+    #[default]
+    Forward,
+    Backward,
+}
+
+impl From<DirectionParam> for SeekDirection {
+    fn from(direction: DirectionParam) -> Self {
+        match direction {
+            DirectionParam::Forward => SeekDirection::Forward,
+            DirectionParam::Backward => SeekDirection::Backward,
+        }
+    }
+}
+
+/// Query string of the next sound endpoint: where playback is now, and which way to look.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextSoundQuery {
+    pub from_ms: i64,
+    #[serde(default)]
+    pub direction: DirectionParam,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextSoundResponse {
+    /// `null` when there is no sound that way in the recordings.
+    pub sound: Option<SoundDto>,
 }

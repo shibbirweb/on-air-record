@@ -21,5 +21,5 @@ pub use device::InputDevice;
 pub use listener::{ListenerAccount, ListenerActivity, ListenerEntry, PlayerState};
 pub use segment::{Segment, SegmentDraft, TimeRange};
 pub use session::{RecordingSession, SessionDraft};
-pub use settings::{Settings, SettingsPatch};
+pub use settings::{Settings, SettingsPatch, SoundSensitivity};
 pub use user::{authorize, Access, AuthMode, Denied, Role, User};

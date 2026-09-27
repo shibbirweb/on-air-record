@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
+use crate::audio::activity::{self, EnvelopeRun, Sound, FLOOR_CONTEXT_MS};
 use crate::audio::peaks::{self, PeakSource, PEAK_BUCKET_MS};
 use crate::error::{AppError, AppResult};
-use crate::models::TimeRange;
+use crate::models::{SoundSensitivity, TimeRange};
 use crate::repositories::{DaySummary, SegmentRepository};
 use crate::services::BroadcastHub;
 use crate::util::day::{day_bounds_ms, is_valid_day};
@@ -50,6 +51,25 @@ pub struct PeaksView {
     pub bucket_ms: i64,
     pub values: Vec<u8>,
 }
+
+/// Which way to look for the next sound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeekDirection {
+    Forward,
+    Backward,
+}
+
+/// How much of the recording one step of a next or previous search reads at a time. A day is under a
+/// megabyte of envelope, and nothing is scanned beyond the first and last recording.
+const SOUND_SCAN_CHUNK_MS: i64 = 24 * 3_600_000;
+
+/// Next skips a sound whose start is less than this ahead, which is the sound just jumped to: playback
+/// began at its lead in a moment ago, so its start is still only just ahead.
+const NEXT_MIN_AHEAD_MS: i64 = 250;
+
+/// Previous restarts the current sound once playback is this far past its start, and goes to the one
+/// before it otherwise, the way a music player's back button treats a track.
+const PREVIOUS_RESTART_AFTER_MS: i64 = 2_000;
 
 pub struct TimelineService {
     segments: Arc<SegmentRepository>,
@@ -149,6 +169,87 @@ impl TimelineService {
             bucket_ms,
             values,
         })
+    }
+
+    /// Every sound in a window, including one that began before it or runs past its end.
+    ///
+    /// The detector reads the recording either side of the window too, so the answer does not depend on
+    /// how wide the window is: the timeline asking about an hour and the minimap asking about the day see
+    /// the same sounds.
+    pub fn sounds(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+        sensitivity: SoundSensitivity,
+    ) -> AppResult<Vec<Sound>> {
+        if to_ms <= from_ms {
+            return Err(AppError::bad_request("toMs must be greater than fromMs"));
+        }
+        let segments = self.segments.find_in_range(TimeRange::new(
+            from_ms.saturating_sub(FLOOR_CONTEXT_MS),
+            to_ms.saturating_add(FLOOR_CONTEXT_MS),
+        ))?;
+        let runs: Vec<EnvelopeRun<'_>> = segments
+            .iter()
+            .map(|segment| EnvelopeRun {
+                start_ms: segment.started_at_ms,
+                values: &segment.peaks,
+            })
+            .collect();
+
+        Ok(activity::detect(&runs, sensitivity)
+            .into_iter()
+            .filter(|sound| sound.end_ms > from_ms && sound.start_ms < to_ms)
+            .collect())
+    }
+
+    /// The sound to jump to from `from_ms`, or `None` when there is none that way.
+    ///
+    /// Only indexed recording is searched, the same as scrubbing, so the few seconds being recorded right
+    /// now are never found; the UI offers going live instead.
+    pub fn next_sound(
+        &self,
+        from_ms: i64,
+        direction: SeekDirection,
+        sensitivity: SoundSensitivity,
+    ) -> AppResult<Option<Sound>> {
+        let stats = self.segments.stats()?;
+        let (Some(oldest_ms), Some(newest_ms)) = (stats.oldest_ms, stats.newest_ms) else {
+            return Ok(None);
+        };
+
+        match direction {
+            SeekDirection::Forward => {
+                let mut chunk_start = from_ms.max(oldest_ms);
+                while chunk_start < newest_ms {
+                    let chunk_end = chunk_start.saturating_add(SOUND_SCAN_CHUNK_MS);
+                    let found = self
+                        .sounds(chunk_start, chunk_end, sensitivity)?
+                        .into_iter()
+                        .find(|sound| sound.seek_ms > from_ms + NEXT_MIN_AHEAD_MS);
+                    if found.is_some() {
+                        return Ok(found);
+                    }
+                    chunk_start = chunk_end;
+                }
+            }
+            SeekDirection::Backward => {
+                let mut chunk_end = from_ms.min(newest_ms);
+                while chunk_end > oldest_ms {
+                    let chunk_start = chunk_end.saturating_sub(SOUND_SCAN_CHUNK_MS);
+                    let found = self
+                        .sounds(chunk_start, chunk_end, sensitivity)?
+                        .into_iter()
+                        .rev()
+                        .find(|sound| sound.seek_ms < from_ms - PREVIOUS_RESTART_AFTER_MS);
+                    if found.is_some() {
+                        return Ok(found);
+                    }
+                    chunk_end = chunk_start;
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// Resolution of a stored envelope bucket, exposed so the UI can decide when to stop zooming in.
@@ -317,6 +418,146 @@ mod tests {
                 .len(),
             MAX_BUCKETS
         );
+    }
+
+    /// A segment whose envelope is `level` throughout, with a sound of `loud` from `sound_from_ms` for
+    /// `sound_ms`, all positioned on the timeline.
+    fn insert_with_sound(
+        fixture: &Fixture,
+        sequence: i64,
+        start_ms: i64,
+        end_ms: i64,
+        sound_from_ms: i64,
+        sound_ms: i64,
+    ) {
+        let buckets = ((end_ms - start_ms) / PEAK_BUCKET_MS) as usize;
+        let mut peaks = vec![1u8; buckets];
+        let first = ((sound_from_ms - start_ms) / PEAK_BUCKET_MS) as usize;
+        let last = first + (sound_ms / PEAK_BUCKET_MS) as usize;
+        for value in &mut peaks[first..last] {
+            *value = 80;
+        }
+        fixture
+            .segments
+            .insert(&SegmentDraft {
+                session_id: fixture.session_id,
+                sequence,
+                day: crate::util::day::local_day(start_ms),
+                path: format!("recordings/1/{sequence:06}.pcm"),
+                started_at_ms: start_ms,
+                ended_at_ms: end_ms,
+                sample_rate: 48_000,
+                channels: 1,
+                byte_len: (end_ms - start_ms) * 96,
+                peaks,
+            })
+            .expect("insert");
+    }
+
+    const HOUR: i64 = 3_600_000;
+    const MEDIUM: SoundSensitivity = SoundSensitivity::Medium;
+
+    #[test]
+    fn sounds_in_a_window_include_one_that_began_before_it() {
+        let fixture = fixture();
+        insert_with_sound(&fixture, 0, 0, HOUR, 1_800_000, 3_000);
+
+        let sounds = fixture
+            .service
+            .sounds(1_801_000, 1_900_000, MEDIUM)
+            .expect("sounds");
+        assert_eq!(sounds.len(), 1);
+        assert_eq!(sounds[0].start_ms, 1_800_000);
+        assert_eq!(sounds[0].seek_ms, 1_799_000);
+        assert!(fixture
+            .service
+            .sounds(0, 1_000_000, MEDIUM)
+            .expect("sounds")
+            .is_empty());
+    }
+
+    #[test]
+    fn next_and_previous_walk_the_sounds_in_order() {
+        let fixture = fixture();
+        insert_with_sound(&fixture, 0, 0, HOUR, 600_000, 2_000);
+        insert_with_sound(&fixture, 1, HOUR, 2 * HOUR, HOUR + 600_000, 2_000);
+
+        let next = |from| {
+            fixture
+                .service
+                .next_sound(from, SeekDirection::Forward, MEDIUM)
+                .expect("next")
+        };
+        let previous = |from| {
+            fixture
+                .service
+                .next_sound(from, SeekDirection::Backward, MEDIUM)
+                .expect("previous")
+        };
+
+        let first = next(0).expect("a first sound");
+        assert_eq!(first.start_ms, 600_000);
+        // Having jumped there, playback sits at its lead in; next moves on rather than finding it again.
+        let second = next(first.seek_ms + 100).expect("a second sound");
+        assert_eq!(second.start_ms, HOUR + 600_000);
+        assert_eq!(
+            next(second.seek_ms + 100),
+            None,
+            "nothing after the last sound"
+        );
+
+        // Just after jumping to the second, previous goes back to the first...
+        assert_eq!(
+            previous(second.seek_ms + 500).map(|s| s.start_ms),
+            Some(600_000)
+        );
+        // ...but well into it, previous restarts it, as a music player would.
+        assert_eq!(
+            previous(second.seek_ms + 10_000).map(|s| s.start_ms),
+            Some(HOUR + 600_000)
+        );
+        assert_eq!(
+            previous(first.seek_ms + 500),
+            None,
+            "nothing before the first sound"
+        );
+    }
+
+    #[test]
+    fn next_crosses_days_of_silence_and_recording_gaps() {
+        let fixture = fixture();
+        insert_with_sound(&fixture, 0, 0, HOUR, 10_000, 2_000);
+        // Nothing for three days, then a recording with a sound in it.
+        let later = 3 * 24 * HOUR;
+        insert_with_sound(&fixture, 1, later, later + HOUR, later + 1_200_000, 2_000);
+
+        let found = fixture
+            .service
+            .next_sound(60_000, SeekDirection::Forward, MEDIUM)
+            .expect("next")
+            .expect("found across the gap");
+        assert_eq!(found.start_ms, later + 1_200_000);
+
+        let back = fixture
+            .service
+            .next_sound(later, SeekDirection::Backward, MEDIUM)
+            .expect("previous")
+            .expect("found across the gap");
+        assert_eq!(back.start_ms, 10_000);
+    }
+
+    #[test]
+    fn with_nothing_recorded_there_is_nothing_to_find() {
+        let fixture = fixture();
+        assert_eq!(
+            fixture
+                .service
+                .next_sound(0, SeekDirection::Forward, MEDIUM)
+                .expect("next"),
+            None
+        );
+        assert!(fixture.service.sounds(0, 10_000, MEDIUM).is_ok());
+        assert!(fixture.service.sounds(10_000, 10_000, MEDIUM).is_err());
     }
 
     #[test]

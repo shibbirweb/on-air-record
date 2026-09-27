@@ -15,6 +15,8 @@ pub mod playback_service;
 pub mod recorder_service;
 pub mod retention_service;
 pub mod settings_service;
+#[cfg(test)]
+mod sound_pipeline_tests;
 pub mod timeline_service;
 pub mod totp;
 pub mod update_service;

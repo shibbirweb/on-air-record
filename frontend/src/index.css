@@ -36,6 +36,8 @@
   --wave: oklch(0.72 0.16 60);
   --wave-muted: oklch(0.82 0.06 60);
   --coverage: oklch(0.88 0.04 60);
+  /* Moments something was heard, shaded on the timeline and minimap. */
+  --sound: oklch(0.6 0.12 190);
 }
 
 .dark {
@@ -63,6 +65,7 @@
   --wave: oklch(0.78 0.16 62);
   --wave-muted: oklch(0.45 0.08 62);
   --coverage: oklch(0.34 0.04 62);
+  --sound: oklch(0.72 0.11 190);
 }
 
 @theme inline {
@@ -95,6 +98,7 @@
   --color-wave: var(--wave);
   --color-wave-muted: var(--wave-muted);
   --color-coverage: var(--coverage);
+  --color-sound: var(--sound);
 }
 
 @layer base {

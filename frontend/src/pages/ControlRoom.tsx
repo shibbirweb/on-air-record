@@ -105,9 +105,10 @@ export function ControlRoom() {
               <CardTitle>Timeline</CardTitle>
               <CardDescription>
                 Click anywhere to play from that moment, drag to pan, scroll to zoom. Shaded bands are the
-                stretches that were recorded. The bar underneath is the whole day, with the visible window
-                marked on it, and dragging that window moves the timeline. Bookmarks appear as flags on
-                both.
+                stretches that were recorded, and teal marks the moments something was heard; the next and
+                previous sound buttons above jump between them. The bar underneath is the whole day, with
+                the visible window marked on it, and dragging that window moves the timeline. Bookmarks
+                appear as flags on both.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">

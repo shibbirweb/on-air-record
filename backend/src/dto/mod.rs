@@ -28,7 +28,8 @@ pub use settings_dto::{
 };
 pub use status_dto::{CaptureDto, HealthResponse, LevelsDto, StatusResponse};
 pub use timeline_dto::{
-    CoverageDto, ExportPlanResponse, ExportQuery, PeaksQuery, PeaksResponse, RecordingDayDto,
-    RecordingDaysResponse, TimelineRangeResponse,
+    CoverageDto, ExportPlanResponse, ExportQuery, NextSoundQuery, NextSoundResponse, PeaksQuery,
+    PeaksResponse, RecordingDayDto, RecordingDaysResponse, SoundDto, SoundsQuery, SoundsResponse,
+    TimelineRangeResponse,
 };
 pub use update_dto::UpdateStatusResponse;

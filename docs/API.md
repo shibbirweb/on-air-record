@@ -312,7 +312,8 @@ a new recording session because the sample rate may differ. Returns the status b
   "autoStart": true,
   "autoStartDelaySeconds": 0,
   "frameMs": 100,
-  "checkForUpdates": true
+  "checkForUpdates": true,
+  "soundSensitivity": "medium"
 }
 ```
 
@@ -334,6 +335,7 @@ Accepts any subset of the settings object and returns the full updated object.
 | `autoStartDelaySeconds` | integer | 0 to 600 | On next service start. Seconds auto start waits before opening the device; the HTTP server does not wait |
 | `frameMs` | integer | 20 to 500 | On next capture start |
 | `checkForUpdates` | boolean | | On the next scheduled check. Whether the service asks GitHub every six hours for a newer release; see `GET /api/updates` |
+| `soundSensitivity` | string | `low`, `medium`, `high` | Immediately, for the next sounds request. How far above each room's own background a moment must rise to count as a sound; see `GET /api/timeline/sounds`. Any other word is refused |
 
 ### `GET /api/settings/defaults`
 
@@ -455,6 +457,55 @@ sessions recorded on one day are reported as one entry, however many times the r
 
 Each value is `0..255`. A zero means either silence or no recording, so the UI reads `coverage` from
 `/api/timeline/range` to tell the two apart.
+
+### `GET /api/timeline/sounds`
+
+The moments something was heard in a window, found from the stored levels with the current
+`soundSensitivity`. Listener access.
+
+| Query parameter | Required | Notes |
+| --- | --- | --- |
+| `fromMs` | yes | Window start, epoch milliseconds |
+| `toMs` | yes | Window end, greater than `fromMs`, at most 32 days after it |
+
+```json
+{
+  "fromMs": 1757030400000,
+  "toMs": 1757034000000,
+  "sensitivity": "medium",
+  "sounds": [
+    { "startMs": 1757031000000, "endMs": 1757031007200, "seekMs": 1757030999000, "peak": 36 }
+  ]
+}
+```
+
+- A sound is a stretch where the level rises clearly above that room's own background: each five minute
+  block gets a noise floor from its levels, and `soundSensitivity` sets how far above it counts. Bursts
+  under 200 ms are ignored, bursts less than 2 s apart merge, sounds under 300 ms are dropped, and a sound
+  never spans a gap in the recording.
+- A sound that starts before the window or ends after it is included whole, and the answer is the same
+  whatever the window, because the recording either side is read too.
+- `seekMs` is where to start playback to hear it from its beginning: a second early, but never inside a
+  gap. `peak` is its loudest level, `0..255`, on the same scale as `peaks`.
+- Only indexed segments are searched, like scrubbing, so the few seconds being recorded now are not.
+
+### `GET /api/timeline/sounds/next`
+
+The sound to jump to from where playback is. Searches all of history, a day at a time, not only a window.
+Listener access.
+
+| Query parameter | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `fromMs` | yes | | Where playback is now, epoch milliseconds |
+| `direction` | no | `forward` | `forward` or `backward` |
+
+```json
+{ "sound": { "startMs": 1757031000000, "endMs": 1757031007200, "seekMs": 1757030999000, "peak": 36 } }
+```
+
+`sound` is `null` when there is none that way. `forward` skips a sound whose `seekMs` is less than 250 ms
+ahead, which is the one just jumped to. `backward` returns the sound playback is in when more than 2 s
+into it, and the one before otherwise, the way a music player's back button treats a track.
 
 ## Export
 

@@ -68,7 +68,12 @@ export type Settings = {
   effectiveRecordingsDir: string;
   /** Whether the service asks GitHub every few hours for a newer release. */
   checkForUpdates: boolean;
+  /** How readily the timeline marks a moment as a sound. */
+  soundSensitivity: SoundSensitivity;
 };
+
+/** How far above the room's own background a moment must rise to count as a sound. */
+export type SoundSensitivity = 'low' | 'medium' | 'high';
 
 /**
  * A partial update. `effectiveRecordingsDir` is derived server side and cannot be written, and the two
@@ -149,6 +154,24 @@ export type Peaks = {
   toMs: number;
   bucketMs: number;
   peaks: number[];
+};
+
+/** A moment something was heard, found by the server from the stored levels. */
+export type Sound = {
+  startMs: number;
+  endMs: number;
+  /** Where to start playback to hear it from its beginning: a second early, never inside a gap. */
+  seekMs: number;
+  /** Its loudest level, 0 to 255. */
+  peak: number;
+};
+
+/** The sounds in a window, and the sensitivity they were found with. */
+export type SoundsWindow = {
+  fromMs: number;
+  toMs: number;
+  sensitivity: SoundSensitivity;
+  sounds: Sound[];
 };
 
 export type RecordingSession = {

@@ -12,6 +12,11 @@ Every release of On Air Record, newest first. The format follows
 - **The whole compose file, to copy.** The README, the setup guide and the Docker Hub page now show the
   complete `compose.yaml` with a note on each line, and an example `.env`, so it can be written by hand
   instead of downloaded. (OAR-105)
+- **Jump between sounds.** New next and previous sound buttons beside the 30 second rewind jump straight
+  to the moments something was heard, starting a second early so each is heard from its beginning, and
+  those moments are marked in teal on the timeline and the day overview. What counts as a sound is judged
+  against the room's own background, so it suits a quiet bedroom and a noisy kitchen alike; admins can
+  make it more or less sensitive under Settings, Finding sounds. (OAR-107)
 
 ## [0.8.1] - 2026-09-27
 

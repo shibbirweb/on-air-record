@@ -1,8 +1,8 @@
 /**
  * The CCTV style timeline.
  *
- * One canvas draws four layers: the coverage bands that say what was recorded, the waveform envelope, the
- * time grid, and the moving parts (playhead, live edge, hover cursor). Canvas rather than DOM because the
+ * One canvas draws five layers: the coverage bands that say what was recorded, the sounds found in it, the
+ * waveform envelope, the time grid, and the moving parts (playhead, live edge, hover cursor). Canvas rather than DOM because the
  * playhead moves sixty times a second and the envelope can be a thousand bars, and a thousand divs being
  * repositioned every frame is exactly the kind of thing that makes a page feel heavy.
  *
@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAnimationFrame } from '@/hooks/useAnimationFrame';
 import { formatClock } from '@/lib/format';
-import { chooseTickStepMs, tickTimestamps, timeToX, xToTime } from '@/lib/timelineGeometry';
+import { chooseTickStepMs, soundBands, tickTimestamps, timeToX, xToTime } from '@/lib/timelineGeometry';
 import type { TimelineWindow } from '@/lib/timelineGeometry';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useTimelineStore } from '@/store/useTimelineStore';
@@ -91,6 +91,7 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
   const spanMs = useTimelineStore((state) => state.spanMs);
   const peaks = useTimelineStore((state) => state.peaks);
   const range = useTimelineStore((state) => state.range);
+  const sounds = useTimelineStore((state) => state.sounds);
   const panBy = useTimelineStore((state) => state.panBy);
   const zoomTo = useTimelineStore((state) => state.zoomTo);
   const seek = useTransportStore((state) => state.seek);
@@ -102,14 +103,14 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
   // The draw loop runs outside React, so everything it reads is mirrored into refs and refreshed after
   // each render. Without this the loop would close over the values from the render that started it.
   const viewRef = useRef({ windowStartMs, spanMs });
-  const dataRef = useRef({ peaks, range });
+  const dataRef = useRef({ peaks, range, sounds });
   const hoverRef = useRef<number | null>(null);
   const cueRef = useRef<number | null>(requestedPositionMs);
   const bookmarksRef = useRef(bookmarks);
 
   useEffect(() => {
     viewRef.current = { windowStartMs, spanMs };
-    dataRef.current = { peaks, range };
+    dataRef.current = { peaks, range, sounds };
     hoverRef.current = hoverMs;
     cueRef.current = requestedPositionMs;
     bookmarksRef.current = bookmarks;
@@ -158,6 +159,7 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
       playhead: readCssColor(container, '--foreground', '#fff'),
       surface: readCssColor(container, '--card', '#111'),
       bookmark: readCssColor(container, '--primary', '#e8a33d'),
+      sound: readCssColor(container, '--sound', '#2aa'),
     };
 
     const waveTop = RULER_HEIGHT;
@@ -178,7 +180,18 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
       context.globalAlpha = 1;
     }
 
-    // Layer 2: the waveform envelope, drawn symmetrically around the centre line.
+    // Layer 2: the sounds found in the recording. A tint behind the waveform shows how long each lasted,
+    // and a solid strip along the bottom keeps a short one findable when zoomed out to hours.
+    context.fillStyle = colours.sound;
+    for (const band of soundBands(dataRef.current.sounds, view)) {
+      context.globalAlpha = 0.22;
+      context.fillRect(band.left, waveTop, band.width, waveHeight);
+      context.globalAlpha = 1;
+      context.fillRect(band.left, waveTop + waveHeight - 4, band.width, 4);
+    }
+    context.globalAlpha = 1;
+
+    // Layer 3: the waveform envelope, drawn symmetrically around the centre line.
     const envelope = dataRef.current.peaks;
     if (envelope && envelope.peaks.length > 0) {
       const bucketCount = envelope.peaks.length;
@@ -200,7 +213,7 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
       }
     }
 
-    // Layer 3: the time grid and its labels.
+    // Layer 4: the time grid and its labels.
     const stepMs = chooseTickStepMs(view);
     context.strokeStyle = colours.grid;
     context.fillStyle = colours.text;
@@ -219,7 +232,7 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
       context.fillText(formatClock(tick), x + 4, RULER_HEIGHT / 2);
     }
 
-    // Layer 4: the moving parts.
+    // Layer 5: the moving parts.
     const liveEdge = dataRef.current.range?.liveEdgeMs ?? null;
     if (liveEdge !== null) {
       const x = timeToX(liveEdge, view);
@@ -409,6 +422,8 @@ export function TimelineScrubber({ getPlayheadMs, className }: TimelineScrubberP
     <div ref={containerRef} className={className}>
       <canvas
         ref={canvasRef}
+        role="img"
+        aria-label="Timeline"
         className="w-full cursor-crosshair touch-none rounded-lg border bg-card select-none"
         style={{ height: HEIGHT }}
         onPointerDown={onPointerDown}

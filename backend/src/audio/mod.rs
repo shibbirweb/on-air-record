@@ -6,6 +6,7 @@
 //!
 //! [`AudioFrame`]: crate::models::AudioFrame
 
+pub mod activity;
 pub mod capture;
 pub mod device_access;
 pub mod device_registry;

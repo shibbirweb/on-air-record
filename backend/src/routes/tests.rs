@@ -186,6 +186,8 @@ async fn with_accounts_on_everything_but_the_login_needs_a_session() {
     for path in [
         "/api/status",
         "/api/timeline/range",
+        "/api/timeline/sounds?fromMs=0&toMs=60000",
+        "/api/timeline/sounds/next?fromMs=0",
         "/api/settings",
         "/api/ws/stream",
     ] {
@@ -251,6 +253,8 @@ async fn a_listener_can_listen_but_not_change_anything() {
     for path in [
         "/api/status",
         "/api/timeline/range",
+        "/api/timeline/sounds?fromMs=0&toMs=60000",
+        "/api/timeline/sounds/next?fromMs=0&direction=backward",
         "/api/bookmarks",
         "/api/settings",
     ] {
@@ -261,6 +265,12 @@ async fn a_listener_can_listen_but_not_change_anything() {
     let forbidden = [
         (Method::POST, "/api/capture/stop", None),
         (Method::PATCH, "/api/settings", Some(json!({ "gain": 2.0 }))),
+        // Finding sounds is for everyone; what counts as one is the admins' call.
+        (
+            Method::PATCH,
+            "/api/settings",
+            Some(json!({ "soundSensitivity": "high" })),
+        ),
         (Method::POST, "/api/settings/reset", None),
         (
             Method::POST,

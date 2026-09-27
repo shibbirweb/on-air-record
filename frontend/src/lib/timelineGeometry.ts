@@ -98,3 +98,29 @@ export function tickTimestamps(view: TimelineWindow, stepMs: number): number[] {
   }
   return ticks;
 }
+
+/**
+ * Where to shade each sound on a canvas of `view.width` pixels: its left edge and width, clipped to the
+ * canvas and dropped when entirely off it.
+ *
+ * A sound is often far narrower than a pixel when zoomed out to a day, and a sliver that thin would not
+ * show at all, which defeats the point of marking it. So every band is at least `minWidthPx` wide.
+ */
+export function soundBands(
+  sounds: readonly { startMs: number; endMs: number }[],
+  view: TimelineWindow,
+  minWidthPx = 3,
+): { left: number; width: number }[] {
+  const bands: { left: number; width: number }[] = [];
+  for (const sound of sounds) {
+    const start = timeToX(sound.startMs, view);
+    const end = timeToX(sound.endMs, view);
+    if (end < 0 || start > view.width) {
+      continue;
+    }
+    const left = Math.max(start, 0);
+    const right = Math.min(Math.max(end, left + minWidthPx), view.width);
+    bands.push({ left, width: Math.max(right - left, 0) });
+  }
+  return bands;
+}

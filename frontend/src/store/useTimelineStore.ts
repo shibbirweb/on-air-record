@@ -9,7 +9,7 @@
 import { create } from 'zustand';
 
 import { api, ApiError } from '@/api/client';
-import type { CoverageBand, Peaks, RecordingDay, TimelineRange } from '@/api/types';
+import type { CoverageBand, Peaks, RecordingDay, Sound, TimelineRange } from '@/api/types';
 import { dayBoundsMs } from '@/lib/day';
 import { zoomWindow } from '@/lib/timelineGeometry';
 
@@ -60,6 +60,10 @@ type TimelineState = {
   peaks: Peaks | null;
   /** Coarse envelope covering the whole minimap day. */
   dayPeaks: Peaks | null;
+  /** The moments something was heard in the visible window, shaded on the timeline. */
+  sounds: Sound[];
+  /** The same for the minimap's whole day. */
+  daySounds: Sound[];
   /** Calendar days that hold recordings, newest first. */
   days: RecordingDay[];
   loadingPeaks: boolean;
@@ -93,6 +97,16 @@ type TimelineState = {
   refreshPeaks: () => Promise<void>;
   refreshDays: () => Promise<void>;
   refreshDayPeaks: () => Promise<void>;
+  /**
+   * The sound to jump to from `fromMs`, forward or back, or `null` when there is none that way. The
+   * search runs on the server across all of history, not only what is on screen.
+   */
+  findSound: (fromMs: number, direction: 'forward' | 'backward') => Promise<Sound | null>;
+  /**
+   * Make sure a moment just jumped to is on screen: centre on it at the current zoom when it is outside
+   * the window, and stop following live either way, or the view would scroll away from it.
+   */
+  bringIntoView: (timestampMs: number) => void;
 };
 
 export const useTimelineStore = create<TimelineState>((set, get) => ({
@@ -102,6 +116,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   range: null,
   peaks: null,
   dayPeaks: null,
+  sounds: [],
+  daySounds: [],
   days: [],
   loadingPeaks: false,
   error: null,
@@ -275,11 +291,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   refreshDayPeaks: async () => {
     const { startMs, endMs } = get().minimapWindow();
 
-    try {
-      set({ dayPeaks: await api.peaks(startMs, endMs, MINIMAP_BUCKETS) });
-    } catch {
-      // The minimap is an orientation aid. Losing it should not raise an error banner over the timeline
-      // the listener is actually using, so the stale envelope simply stays on screen.
+    // Side by side and independently: the sounds are a layer over the envelope, so failing to find them
+    // must not cost the envelope, and the other way round.
+    const [peaks, sounds] = await Promise.allSettled([
+      api.peaks(startMs, endMs, MINIMAP_BUCKETS),
+      api.sounds(startMs, endMs),
+    ]);
+    // The minimap is an orientation aid. Losing either should not raise an error banner over the timeline
+    // the listener is actually using, so whatever is stale simply stays on screen.
+    if (peaks.status === 'fulfilled') {
+      set({ dayPeaks: peaks.value });
+    }
+    if (sounds.status === 'fulfilled') {
+      set({ daySounds: sounds.value.sounds });
     }
   },
 
@@ -289,6 +313,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const toMs = state.windowStartMs + state.spanMs;
 
     set({ loadingPeaks: true });
+    const sounds = api.sounds(fromMs, toMs).then(
+      (window) => set({ sounds: window.sounds }),
+      // Sounds are an extra layer; the waveform's own error is the one worth a banner.
+      () => undefined,
+    );
     try {
       set({ peaks: await api.peaks(fromMs, toMs, PEAK_BUCKETS), error: null });
     } catch (cause) {
@@ -296,5 +325,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     } finally {
       set({ loadingPeaks: false });
     }
+    await sounds;
+  },
+
+  findSound: (fromMs, direction) => api.nextSound(fromMs, direction),
+
+  bringIntoView: (timestampMs) => {
+    const state = get();
+    const inView =
+      timestampMs >= state.windowStartMs && timestampMs <= state.windowStartMs + state.spanMs;
+    if (inView) {
+      set({ followingLive: false });
+      return;
+    }
+    set({ followingLive: false, windowStartMs: timestampMs - state.spanMs / 2 });
   },
 }));

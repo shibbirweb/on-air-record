@@ -164,6 +164,56 @@ jobs:
       - name: Build
         run: npm run build
 
+  # What no unit test reaches: the real service on seeded recordings, driven through real headless Chrome.
+  # The buttons that ask the server and seek, the canvases that draw the sounds, and the settings card,
+  # whose dropdown only answers real pointer events. Ubuntu runners come with Chrome, and the script needs
+  # nothing beyond Node, so this is one build and one run.
+  e2e:
+    name: browser end to end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ALSA headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - name: Build the web UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the service
+        working-directory: backend
+        run: cargo build
+
+      - name: Drive it in Chrome
+        env:
+          E2E_ARTIFACTS: ${{ runner.temp }}/e2e
+        run: node scripts/e2e.mjs
+
+      # What the browser saw at each step, to read a failure by rather than guess at it.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-screenshots
+          path: ${{ runner.temp }}/e2e
+          retention-days: 7
+
   # The installers are the only code most people will ever run, and they cannot be tested by compiling
   # them. This installs from the latest published release on all three platforms, exactly as a user would,
   # and then checks the service it produced actually answers.
