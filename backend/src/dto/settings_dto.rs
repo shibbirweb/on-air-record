@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::models::{Settings, SettingsPatch};
+use crate::models::{Settings, SettingsPatch, SoundSensitivity};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +24,8 @@ pub struct SettingsDto {
     pub effective_recordings_dir: String,
     /// Whether the service asks GitHub every few hours for a newer release.
     pub check_for_updates: bool,
+    /// `low`, `medium` or `high`: how readily the timeline marks a moment as a sound.
+    pub sound_sensitivity: SoundSensitivity,
 }
 
 impl SettingsDto {
@@ -46,6 +48,7 @@ impl SettingsDto {
             recordings_dir: settings.recordings_dir,
             effective_recordings_dir,
             check_for_updates: settings.check_for_updates,
+            sound_sensitivity: settings.sound_sensitivity,
         }
     }
 }
@@ -78,6 +81,8 @@ pub struct SettingsPatchRequest {
     pub recordings_dir: Option<Option<String>>,
     #[serde(default)]
     pub check_for_updates: Option<bool>,
+    #[serde(default)]
+    pub sound_sensitivity: Option<SoundSensitivity>,
 }
 
 impl From<SettingsPatchRequest> for SettingsPatch {
@@ -93,6 +98,7 @@ impl From<SettingsPatchRequest> for SettingsPatch {
             recording_sample_rate: request.recording_sample_rate,
             recordings_dir: request.recordings_dir,
             check_for_updates: request.check_for_updates,
+            sound_sensitivity: request.sound_sensitivity,
         }
     }
 }
@@ -153,6 +159,26 @@ mod tests {
         assert_eq!(json["segmentSeconds"], 10);
         assert_eq!(json["autoStart"], true);
         assert_eq!(json["autoStartDelaySeconds"], 0);
+    }
+
+    #[test]
+    fn sound_sensitivity_travels_as_a_lowercase_word() {
+        let json = serde_json::to_value(SettingsDto::new(
+            Settings::default(),
+            &crate::config::AppConfig::default(),
+        ))
+        .expect("serialise");
+        assert_eq!(json["soundSensitivity"], "medium");
+
+        let request: SettingsPatchRequest =
+            serde_json::from_str(r#"{"soundSensitivity":"high"}"#).expect("parse");
+        let patch: SettingsPatch = request.into();
+        assert_eq!(patch.sound_sensitivity, Some(SoundSensitivity::High));
+
+        // A word the setting does not know is refused, not silently ignored.
+        assert!(
+            serde_json::from_str::<SettingsPatchRequest>(r#"{"soundSensitivity":"loud"}"#).is_err()
+        );
     }
 
     #[test]

@@ -45,15 +45,18 @@ export function RecordingLocation() {
   const examples = pathExamples(settings.effectiveRecordingsDir);
   const result = probe && probe.path === value ? probe.result : null;
 
+  // Staged exactly as typed. Trimming here, with the box showing the draft, deleted a space the moment it
+  // was typed, so "/Volumes/My Drive" or "Program Files" could not be entered; the server trims the saved
+  // folder instead. Only a box of nothing but spaces means the default location.
   const stage = (next: string) => {
-    const trimmed = next.trim();
-    edit({ recordingsDir: trimmed === '' ? null : trimmed });
+    edit({ recordingsDir: next.trim() === '' ? null : next });
   };
 
   const test = async () => {
     setTesting(true);
     try {
-      const outcome = await api.testRecordingsDir(value === '' ? null : value);
+      const folder = value.trim();
+      const outcome = await api.testRecordingsDir(folder === '' ? null : folder);
       setProbe({ path: value, result: outcome });
     } catch (cause) {
       setProbe({

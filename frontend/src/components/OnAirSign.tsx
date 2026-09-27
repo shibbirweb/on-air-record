@@ -13,8 +13,12 @@ type OnAirSignProps = {
 };
 
 export function OnAirSign({ live, className }: OnAirSignProps) {
+  // The sign always reads "On air", as a studio's does; whether it is lit is the message. Colour alone
+  // tells a screen reader nothing, so the state is its accessible name, announced when it changes.
   return (
     <div
+      role="status"
+      aria-label={live ? 'On air' : 'Off air'}
       className={cn(
         'flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-semibold tracking-widest uppercase transition-colors',
         live

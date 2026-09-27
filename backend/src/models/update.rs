@@ -35,14 +35,14 @@ impl Version {
         let text = text.trim();
         let text = text.strip_prefix('v').unwrap_or(text);
         let (core, beta) = match text.split_once('-') {
-            Some((core, rest)) => (core, Some(rest.strip_prefix("beta.")?.parse().ok()?)),
+            Some((core, rest)) => (core, Some(number(rest.strip_prefix("beta.")?)?)),
             None => (text, None),
         };
         let mut parts = core.split('.');
         let version = Self {
-            major: parts.next()?.parse().ok()?,
-            minor: parts.next()?.parse().ok()?,
-            patch: parts.next()?.parse().ok()?,
+            major: number(parts.next()?)?,
+            minor: number(parts.next()?)?,
+            patch: number(parts.next()?)?,
             beta,
         };
         if parts.next().is_some() {
@@ -54,6 +54,15 @@ impl Version {
     pub fn is_beta(&self) -> bool {
         self.beta.is_some()
     }
+}
+
+/// One numeric part of a version: digits only. `u64::from_str` alone also takes a leading `+`, which
+/// would let a tag like `v0.+7.0` through as 0.7.0.
+fn number(part: &str) -> Option<u64> {
+    if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    part.parse().ok()
 }
 
 impl Ord for Version {
@@ -214,6 +223,9 @@ mod tests {
             "0.6.0-beta",
             "latest",
             "v0.x.0",
+            // Found by `only_the_published_shape_is_a_version`: `u64::from_str` takes a leading plus.
+            "0.+7.0",
+            "0.0.0-beta.+0",
         ] {
             assert_eq!(Version::parse(text), None, "{text}");
         }
@@ -362,5 +374,167 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Versions from a small range, so equal parts and equal versions come up often enough for the
+        /// ordering properties to test ties, not just different majors.
+        fn close_version() -> impl Strategy<Value = Version> {
+            (0u64..3, 0u64..3, 0u64..3, proptest::option::of(0u64..3)).prop_map(
+                |(major, minor, patch, beta)| Version {
+                    major,
+                    minor,
+                    patch,
+                    beta,
+                },
+            )
+        }
+
+        fn spelled(version: &Version) -> String {
+            let core = format!("{}.{}.{}", version.major, version.minor, version.patch);
+            match version.beta {
+                Some(beta) => format!("{core}-beta.{beta}"),
+                None => core,
+            }
+        }
+
+        fn release_of(tag: String, prerelease: bool, draft: bool) -> Release {
+            Release {
+                url: format!("https://example.com/{tag}"),
+                tag,
+                prerelease,
+                draft,
+                published_at_ms: None,
+                notes: String::new(),
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// Any version, spelled the way `version.mjs` writes it, as a tag, or with stray whitespace,
+            /// parses back to itself, including numbers far past anything the project will reach.
+            #[test]
+            fn every_version_parses_back_from_its_spelling(
+                major in any::<u64>(),
+                minor in any::<u64>(),
+                patch in any::<u64>(),
+                beta in proptest::option::of(any::<u64>()),
+            ) {
+                let version = Version { major, minor, patch, beta };
+                let text = spelled(&version);
+                prop_assert_eq!(Version::parse(&text), Some(version));
+                prop_assert_eq!(Version::parse(&format!("v{text}")), Some(version));
+                prop_assert_eq!(Version::parse(&format!(" v{text}\n")), Some(version));
+            }
+
+            /// A tag comes from GitHub, so parsing must answer for any text, and whatever it accepts has
+            /// the only shape the project publishes: digits, dots, and an optional `-beta.N`. Near misses
+            /// are generated on purpose, since random text almost never looks like a version at all.
+            #[test]
+            fn only_the_published_shape_is_a_version(text in prop_oneof![
+                ".{0,24}",
+                "[ v]{0,2}[0-9+_ -]{1,3}\\.[0-9+_ -]{1,3}\\.[0-9+_ -]{1,3}(-beta\\.[0-9+_ -]{1,3})?",
+                "v?[0-9+]{1,3}\\.[0-9+]{1,3}\\.[0-9+]{1,3}(-beta\\.[0-9+]{1,3})?",
+            ]) {
+                if Version::parse(&text).is_some() {
+                    let bare = text.trim();
+                    let bare = bare.strip_prefix('v').unwrap_or(bare);
+                    let (core, beta) = match bare.split_once("-beta.") {
+                        Some((core, beta)) => (core, Some(beta)),
+                        None => (bare, None),
+                    };
+                    let digits = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+                    let parts: Vec<&str> = core.split('.').collect();
+                    prop_assert!(parts.len() == 3 && parts.iter().all(|part| digits(part)), "accepted {:?}", text);
+                    prop_assert!(beta.is_none_or(digits), "accepted {:?}", text);
+                }
+            }
+
+            /// The order is a total order that agrees with equality: exactly one of less, equal or greater,
+            /// the reverse when the sides swap, and transitive. `newer_releases` sorts by it and compares
+            /// with it, so a broken order could offer an older release, or none, depending on list order.
+            #[test]
+            fn versions_are_totally_ordered(a in close_version(), b in close_version(), c in close_version()) {
+                prop_assert_eq!(a.cmp(&b) == Ordering::Equal, a == b);
+                prop_assert_eq!(a.cmp(&b), b.cmp(&a).reverse());
+                if a <= b && b <= c {
+                    prop_assert!(a <= c);
+                }
+            }
+
+            /// Every beta comes after everything with a lower version number and before the release it
+            /// previews, and betas of one release follow their own numbers.
+            #[test]
+            fn a_beta_sits_between_the_last_release_and_its_own(
+                release in close_version().prop_map(|version| Version { beta: None, ..version }),
+                beta in any::<u64>(),
+                other in any::<u64>(),
+            ) {
+                let preview = Version { beta: Some(beta), ..release };
+                prop_assert!(preview < release);
+                let earlier = Version { patch: release.patch.wrapping_sub(1), beta: None, ..release };
+                if release.patch > 0 {
+                    prop_assert!(earlier < preview);
+                }
+                let sibling = Version { beta: Some(other), ..release };
+                prop_assert_eq!(preview.cmp(&sibling), beta.cmp(&other));
+            }
+
+            /// What is offered is exactly the published releases newer than the running version that the
+            /// channel may see, newest first: nothing older, no drafts, no betas on stable however they
+            /// are flagged, and nothing that qualifies left out.
+            #[test]
+            fn only_newer_releases_on_the_channel_are_offered(
+                current in close_version(),
+                beta_channel in any::<bool>(),
+                listed in proptest::collection::vec((close_version(), any::<bool>(), proptest::bool::weighted(0.2), any::<bool>()), 0..12),
+            ) {
+                let channel = if beta_channel { Channel::Beta } else { Channel::Stable };
+                let releases: Vec<Release> = listed
+                    .iter()
+                    .map(|(version, prerelease, draft, as_tag)| {
+                        let tag = if *as_tag { format!("v{}", spelled(version)) } else { spelled(version) };
+                        release_of(tag, *prerelease, *draft)
+                    })
+                    .collect();
+                let offered = newer_releases(&current, channel, &releases);
+
+                let versions: Vec<Version> = offered
+                    .iter()
+                    .map(|release| Version::parse(&release.tag).expect("only parsed tags are offered"))
+                    .collect();
+                for (release, version) in offered.iter().zip(&versions) {
+                    prop_assert!(*version > current);
+                    prop_assert!(!release.draft);
+                    if channel == Channel::Stable {
+                        prop_assert!(!release.prerelease && !version.is_beta());
+                    }
+                }
+                prop_assert!(versions.windows(2).all(|pair| pair[0] >= pair[1]));
+
+                let qualifying = listed
+                    .iter()
+                    .filter(|(version, prerelease, draft, _)| {
+                        !draft && *version > current
+                            && (channel == Channel::Beta || (!prerelease && !version.is_beta()))
+                    })
+                    .count();
+                prop_assert_eq!(offered.len(), qualifying);
+            }
+
+            /// Reading the installer's config never panics on any file contents, and a channel is only
+            /// ever named by one of the two words.
+            #[test]
+            fn any_config_names_a_channel_or_none(text in "(.{0,20}\n){0,4}(OAR_CHANNEL=.{0,10})?") {
+                let named = channel_from_config(&text);
+                if named.is_some() {
+                    prop_assert!(text.contains("beta") || text.contains("stable"));
+                }
+            }
+        }
     }
 }

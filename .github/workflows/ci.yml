@@ -83,16 +83,125 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Two stages. First the tests, on Linux, where a runner is cheapest and quickest to start: the backend
+  # suite, the frontend suite and the browser end to end run side by side. Only when all three pass do
+  # the platform jobs start, building and testing on macOS and Windows, running the installers everywhere
+  # and building the container image. A failing test then costs one Linux run, not seven, and its result
+  # is not buried among the same failure repeated on every platform. Skipped platform jobs leave the run
+  # failed, which is what beta.yml and stable.yml read.
+  backend-tests:
+    name: backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      # cpal links against ALSA on Linux.
+      - name: Install ALSA headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      # The suite runs once, instrumented, and fails if line coverage drops under the floor in the
+      # Makefile. The platform jobs run it again plainly, so an instrumented build hiding a failure
+      # would still be caught there.
+      - name: Test, measuring coverage
+        run: make -C .. coverage-backend
+
+      # The runner is on UTC, which has no daylight saving, so the day arithmetic runs again in zones whose
+      # clocks change at midnight. That is where day bounds were once an hour out, and UTC never shows it.
+      - name: Day arithmetic in other timezones
+        run: |
+          for zone in America/Havana Atlantic/Azores America/Santiago Pacific/Apia; do
+            echo "TZ=$zone"
+            TZ=$zone cargo test --lib util::day
+          done
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          {
+            echo '### Backend coverage'
+            echo ''
+            echo '```'
+            cargo llvm-cov report --summary-only | tail -n 1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/target/llvm-cov/html
+          retention-days: 14
+
+  frontend-tests:
+    name: frontend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # The suite, measuring coverage, and failing under the floors set in vite.config.ts.
+      - name: Test, measuring coverage
+        run: npm run coverage
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+          retention-days: 14
+
+      # Also type checks, because the build script runs tsc first.
+      - name: Build
+        run: npm run build
+
+  # The platform stage for the backend. Every platform the service claims to support builds and runs the
+  # suite, because a test can pass on Linux and fail on Windows (paths, line endings, the C toolchain
+  # bundled SQLite needs), and only a real runner settles that. Windows cannot be cross compiled from a
+  # Mac, so this job is the only thing standing behind the Windows build.
   backend:
     name: backend (${{ matrix.os }})
+    needs: [backend-tests, frontend-tests, e2e]
     runs-on: ${{ matrix.os }}
     strategy:
-      # One platform failing should not hide whether the others are fine, which is the whole point of
-      # running all three.
+      # One platform failing should not hide whether the others are fine.
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
           - macos-latest
           - windows-latest
     defaults:
@@ -101,42 +210,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # cpal links against ALSA on Linux. macOS has CoreAudio and Windows has WASAPI in the SDK, so
-      # neither needs anything installed.
-      - name: Install ALSA headers
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config
-
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
 
-      - name: Check formatting
-        run: cargo fmt --all --check
-
+      # Lint again per platform: code behind a cfg for one target is invisible to clippy on another.
       - name: Lint
         run: cargo clippy --all-targets -- -D warnings
 
+      # One test at a time on Windows. A crash in native code there (the bundled SQLite, or cpal talking to
+      # WASAPI through COM) kills the whole test binary, and only a serial run's output names the test that
+      # was running; in parallel the log just ends. It costs about half a minute.
       - name: Test
-        run: cargo test
+        run: cargo test ${{ matrix.os == 'windows-latest' && '-- --test-threads=1' || '' }}
 
-  # On all three platforms too. The UI runs in the browser, but its toolchain does not: oxlint and the
-  # Vite bundler ship native binaries per platform, and a developer on Windows or a Mac runs these same
-  # scripts, so each has to be shown to work rather than assumed.
+  # The platform stage for the frontend. The UI runs in the browser, but its toolchain does not: oxlint
+  # and the Vite bundler ship native binaries per platform, and a developer on Windows or a Mac runs these
+  # same scripts, so each has to be shown to work rather than assumed.
   frontend:
     name: frontend (${{ matrix.os }})
+    needs: [backend-tests, frontend-tests, e2e]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
           - macos-latest
           - windows-latest
     defaults:
@@ -160,9 +262,58 @@ jobs:
       - name: Test
         run: npm test
 
-      # Also type checks, because the build script runs tsc first.
       - name: Build
         run: npm run build
+
+  # What no unit test reaches: the real service on seeded recordings, driven through real headless Chrome.
+  # The buttons that ask the server and seek, the canvases that draw the sounds, and the settings card,
+  # whose dropdown only answers real pointer events. Ubuntu runners come with Chrome, and the script needs
+  # nothing beyond Node, so this is one build and one run.
+  e2e:
+    name: browser end to end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ALSA headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - name: Build the web UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the service
+        working-directory: backend
+        run: cargo build
+
+      - name: Drive it in Chrome
+        env:
+          E2E_ARTIFACTS: ${{ runner.temp }}/e2e
+        run: node scripts/e2e.mjs
+
+      # What the browser saw at each step, to read a failure by rather than guess at it.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-screenshots
+          path: ${{ runner.temp }}/e2e
+          retention-days: 7
 
   # The installers are the only code most people will ever run, and they cannot be tested by compiling
   # them. This installs from the latest published release on all three platforms, exactly as a user would,
@@ -172,6 +323,7 @@ jobs:
   # version rather than the one already on master.
   installers:
     name: installer (${{ matrix.os }})
+    needs: [backend-tests, frontend-tests, e2e]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -391,6 +543,7 @@ jobs:
   # less the sound card a runner does not have: the service must come up without one, as it does anywhere.
   image:
     name: container image
+    needs: [backend-tests, frontend-tests, e2e]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

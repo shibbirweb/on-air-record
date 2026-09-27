@@ -35,6 +35,14 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ureq = "3.4.2"
 
 [dev-dependencies]
+# Randomised inputs for the arithmetic and parsers whose edge cases hand picked examples miss. Default
+# features off: the fork and timeout features spawn processes, which the tests have no use for.
+proptest = { version = "1.9.0", default-features = false, features = ["std", "bit-set"] }
+# A real WebSocket client, for driving the stream session over a real socket. The same version axum
+# serves with, so it adds no second copy of the protocol code.
+tokio-tungstenite = "0.29"
+# A pausable clock, so the stream's 15 second access checks and idle timeout are tested without waiting.
+tokio = { version = "1.53.1", features = ["test-util"] }
 # `oneshot`, for driving the real router in tests without binding a port.
 tower = { version = "0.5.3", features = ["util"] }
 

@@ -472,4 +472,82 @@ mod tests {
 
         assert_eq!(chunks, 2);
     }
+
+    /// For any range that touches the recording, the file is exactly the length the plan promised and
+    /// the header declares, and the audio sits where the clock says: a moment inside a recorded stretch
+    /// is audio, a moment in a gap or past the end is silence. Two recordings built once and shared by
+    /// every case, because each costs real files: one at a single rate with a gap, where positions are
+    /// checked, and one mixing rates, which goes through the resampler and is checked for length only.
+    /// Moments within 20 ms of an edge are not judged, since a frame straddling an edge and the rounding
+    /// of each gap to whole samples may move an edge by a few samples, which is inaudible.
+    #[test]
+    fn any_range_exports_the_promised_length_with_the_audio_in_place() {
+        use proptest::test_runner::{Config, TestCaseError, TestRunner};
+
+        let single = fixture("prop-single", &[(0, 3_000, 44_100), (5_000, 7_000, 44_100)]);
+        let mixed = fixture("prop-mixed", &[(0, 2_000, 48_000), (3_000, 5_000, 16_000)]);
+        let recorded = [(0i64, 3_000i64), (5_000, 7_000)];
+
+        let mut runner = TestRunner::new(Config {
+            cases: 48,
+            ..Config::default()
+        });
+        runner
+            .run(
+                &(-2_000i64..8_000, 1i64..6_000, proptest::bool::ANY),
+                |(from_ms, length_ms, use_mixed)| {
+                    let fixture = if use_mixed { &mixed } else { &single };
+                    let range = TimeRange::new(from_ms, from_ms + length_ms);
+                    let Ok(plan) = fixture.service.plan(range) else {
+                        // A range with no recording in it is refused, which the other tests cover.
+                        return Ok(());
+                    };
+                    let file = render(fixture, &plan);
+
+                    if file.len() as u64 != plan.total_bytes {
+                        return Err(TestCaseError::fail(format!(
+                            "{range:?} wrote {} bytes of {}",
+                            file.len(),
+                            plan.total_bytes
+                        )));
+                    }
+                    let declared = u32::from_le_bytes(file[40..44].try_into().expect("four bytes"));
+                    if u64::from(declared) != plan.data_bytes || plan.data_bytes % 2 != 0 {
+                        return Err(TestCaseError::fail(format!(
+                            "{range:?} declared {declared} for {} bytes",
+                            plan.data_bytes
+                        )));
+                    }
+                    if use_mixed {
+                        return Ok(());
+                    }
+
+                    for at_ms in (range.start_ms..range.end_ms).step_by(10) {
+                        let near_edge = recorded.iter().any(|(start_ms, end_ms)| {
+                            (at_ms - start_ms).abs() < 20 || (at_ms - end_ms).abs() < 20
+                        }) || at_ms - range.start_ms < 20
+                            || range.end_ms - at_ms < 20;
+                        if near_edge {
+                            continue;
+                        }
+                        let index = ((at_ms - range.start_ms) * 44_100 / 1_000) as usize;
+                        let offset = wav::HEADER_BYTES + index * 2;
+                        let sample = i16::from_le_bytes(
+                            file[offset..offset + 2].try_into().expect("two bytes"),
+                        );
+                        let inside = recorded
+                            .iter()
+                            .any(|(start_ms, end_ms)| (*start_ms..*end_ms).contains(&at_ms));
+                        let expected = if inside { 1_000 } else { 0 };
+                        if sample != expected {
+                            return Err(TestCaseError::fail(format!(
+                                "{range:?} at {at_ms} ms held {sample}, expected {expected}"
+                            )));
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .expect("every range exports correctly");
+    }
 }

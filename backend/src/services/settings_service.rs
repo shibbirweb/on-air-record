@@ -334,6 +334,7 @@ mod tests {
                 recording_sample_rate: None,
                 recordings_dir: None,
                 check_for_updates: false,
+                sound_sensitivity: crate::models::SoundSensitivity::High,
             })
             .expect("configure");
 

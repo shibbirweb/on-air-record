@@ -39,7 +39,9 @@ export function RecordingQuality() {
   const settings = useSettingsStore((state) => state.settings);
   const draft = useSettingsStore((state) => state.draft);
   const edit = useSettingsStore((state) => state.edit);
-  const deviceRate = useStatusStore((state) => state.status?.capture.sampleRate ?? 0);
+  // The microphone's own rate, not the rate being recorded: at Telephone quality the recording rate is
+  // 8 kHz, and offering only what lies under it would trap the choice there.
+  const deviceRate = useStatusStore((state) => state.status?.capture.deviceSampleRate ?? 0);
 
   if (!settings) {
     return <p className="text-muted-foreground text-sm">Loading...</p>;

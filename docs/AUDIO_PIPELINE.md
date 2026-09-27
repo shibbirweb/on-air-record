@@ -25,7 +25,9 @@ flowchart TD
 ```
 
 Two properties of that picture are load bearing. The recorder is the **only** publisher into the hub, so a
-live listener hears exactly what reached the disk, in the same order. And the envelope is computed during
+live listener hears frames in capture order, the order they reach the disk; and it never waits on the disk,
+whose writes and index inserts run on a thread of their own behind a minute of queue, so storage trouble
+can cost the recording but never pause the broadcast. And the envelope is computed during
 recording, while the samples are still in cache, rather than by re reading the file later.
 
 ## 1. Capture
@@ -221,7 +223,9 @@ deliver on average one frame of audio per frame of wall clock time.
 
 Gap handling: recording gaps are real, for example when the service was stopped or the device was swapped.
 The cursor reports a gap instead of silently skipping it, the session sends a `gap` control message, and the
-UI shows the timeline as empty there rather than pretending audio existed.
+UI shows the timeline as empty there rather than pretending audio existed. A segment whose file is missing,
+unreadable or shorter than its index row is reported the same way, as a gap over the audio that could not
+be read, so an export fills it with silence and everything after it stays at its true offset.
 
 Live handoff: when the cursor reaches the end of the newest segment, the session sends `switched-to-live` and
 resubscribes to `BroadcastHub`. There is a small overlap because the open segment is not on disk yet, so the

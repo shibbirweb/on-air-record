@@ -17,6 +17,7 @@ pub const KEY_FRAME_MS: &str = "frame_ms";
 pub const KEY_RECORDINGS_DIR: &str = "recordings_dir";
 pub const KEY_RECORDING_SAMPLE_RATE: &str = "recording_sample_rate";
 pub const KEY_CHECK_FOR_UPDATES: &str = "check_for_updates";
+pub const KEY_SOUND_SENSITIVITY: &str = "sound_sensitivity";
 
 /// Sample rates the recorder will downmix to, highest first.
 ///
@@ -39,6 +40,42 @@ pub const FRAME_MS_RANGE: (u32, u32) = (20, 500);
 /// Ten minutes is far longer than any USB interface takes to enumerate. A delay beyond that is more
 /// likely a typo than a plan, and would leave a freshly booted recorder silently idle for too long.
 pub const AUTO_START_DELAY_SECONDS_RANGE: (u32, u32) = (0, 600);
+
+/// How far above the room's own background a sound has to rise before the timeline calls it a sound.
+///
+/// A choice of three rather than a number, because the underlying measure (a multiple of the noise floor
+/// plus a margin, see `audio::activity`) means nothing to somebody listening back, while "it misses quiet
+/// things" or "it flags the fridge" is exactly what they can judge and correct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SoundSensitivity {
+    /// Only clearly loud moments: a door, a raised voice.
+    Low,
+    /// Ordinary speech in an ordinary room.
+    #[default]
+    Medium,
+    /// Quiet sounds too, at the cost of flagging more of the background.
+    High,
+}
+
+impl SoundSensitivity {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim() {
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
@@ -68,6 +105,8 @@ pub struct Settings {
     /// Whether to ask GitHub every few hours if a newer release exists. It is the only request the
     /// service makes to the internet, so it can be switched off for a host that should make none.
     pub check_for_updates: bool,
+    /// How readily the timeline marks a moment as a sound, for finding them and jumping between them.
+    pub sound_sensitivity: SoundSensitivity,
 }
 
 impl Default for Settings {
@@ -83,6 +122,7 @@ impl Default for Settings {
             recording_sample_rate: None,
             recordings_dir: None,
             check_for_updates: true,
+            sound_sensitivity: SoundSensitivity::Medium,
         }
     }
 }
@@ -124,6 +164,10 @@ impl Settings {
                 .get(KEY_RECORDINGS_DIR)
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
+            sound_sensitivity: pairs
+                .get(KEY_SOUND_SENSITIVITY)
+                .and_then(|value| SoundSensitivity::parse(value))
+                .unwrap_or(defaults.sound_sensitivity),
         }
         .clamped()
     }
@@ -167,6 +211,10 @@ impl Settings {
             (
                 KEY_RECORDINGS_DIR.to_string(),
                 self.recordings_dir.clone().unwrap_or_default(),
+            ),
+            (
+                KEY_SOUND_SENSITIVITY.to_string(),
+                self.sound_sensitivity.as_str().to_string(),
             ),
         ]
     }
@@ -237,6 +285,7 @@ pub struct SettingsPatch {
     /// `Some(None)` returns to the default location under the data directory.
     pub recordings_dir: Option<Option<String>>,
     pub check_for_updates: Option<bool>,
+    pub sound_sensitivity: Option<SoundSensitivity>,
 }
 
 impl SettingsPatch {
@@ -251,6 +300,7 @@ impl SettingsPatch {
             && self.recording_sample_rate.is_none()
             && self.recordings_dir.is_none()
             && self.check_for_updates.is_none()
+            && self.sound_sensitivity.is_none()
     }
 
     /// Apply the patch to `base` and return the clamped result.
@@ -277,6 +327,9 @@ impl SettingsPatch {
         }
         if let Some(check_for_updates) = self.check_for_updates {
             updated.check_for_updates = check_for_updates;
+        }
+        if let Some(sound_sensitivity) = self.sound_sensitivity {
+            updated.sound_sensitivity = sound_sensitivity;
         }
         if let Some(auto_start_delay_seconds) = self.auto_start_delay_seconds {
             updated.auto_start_delay_seconds = auto_start_delay_seconds;
@@ -360,6 +413,7 @@ mod tests {
             recording_sample_rate: Some(16_000),
             recordings_dir: Some("/mnt/audio".to_string()),
             check_for_updates: false,
+            sound_sensitivity: crate::models::SoundSensitivity::High,
         };
         let pairs: HashMap<String, String> = settings.to_pairs().into_iter().collect();
         assert_eq!(Settings::from_pairs(&pairs), settings);
@@ -545,5 +599,162 @@ mod tests {
             ..SettingsPatch::default()
         }
         .is_empty());
+    }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        const KEYS: [&str; 11] = [
+            KEY_INPUT_DEVICE_ID,
+            KEY_GAIN,
+            KEY_SEGMENT_SECONDS,
+            KEY_RETENTION_HOURS,
+            KEY_AUTO_START,
+            KEY_AUTO_START_DELAY_SECONDS,
+            KEY_FRAME_MS,
+            KEY_RECORDINGS_DIR,
+            KEY_RECORDING_SAMPLE_RATE,
+            KEY_CHECK_FOR_UPDATES,
+            KEY_SOUND_SENSITIVITY,
+        ];
+
+        /// What a stored value might hold after years of upgrades or a hand edit: anything at all, or
+        /// something close to a real value, including numbers out of range, non finite gains, and the
+        /// words the parsers look for with stray spacing.
+        fn stored_value() -> impl Strategy<Value = String> {
+            prop_oneof![
+                ".{0,12}",
+                any::<u32>().prop_map(|value| value.to_string()),
+                any::<i64>().prop_map(|value| value.to_string()),
+                any::<f32>().prop_map(|value| value.to_string()),
+                prop_oneof![
+                    Just("true"),
+                    Just("false"),
+                    Just("yes"),
+                    Just("0"),
+                    Just(""),
+                    Just("  "),
+                    Just("NaN"),
+                    Just("inf"),
+                    Just("-0"),
+                    Just("low"),
+                    Just(" high "),
+                    Just("medium"),
+                ]
+                .prop_map(str::to_string),
+            ]
+        }
+
+        fn stored() -> impl Strategy<Value = HashMap<String, String>> {
+            proptest::collection::vec(
+                proptest::option::of(stored_value()),
+                KEYS.len()..=KEYS.len(),
+            )
+            .prop_map(|values| {
+                KEYS.iter()
+                    .zip(values)
+                    .filter_map(|(key, value)| Some((key.to_string(), value?)))
+                    .collect()
+            })
+        }
+
+        fn assert_in_range(settings: &Settings) -> Result<(), TestCaseError> {
+            prop_assert!(
+                settings.gain.is_finite() && (GAIN_RANGE.0..=GAIN_RANGE.1).contains(&settings.gain)
+            );
+            prop_assert!((SEGMENT_SECONDS_RANGE.0..=SEGMENT_SECONDS_RANGE.1)
+                .contains(&settings.segment_seconds));
+            prop_assert!(settings
+                .retention_hours
+                .is_none_or(
+                    |hours| (RETENTION_HOURS_RANGE.0..=RETENTION_HOURS_RANGE.1).contains(&hours)
+                ));
+            prop_assert!((FRAME_MS_RANGE.0..=FRAME_MS_RANGE.1).contains(&settings.frame_ms));
+            prop_assert!(
+                (AUTO_START_DELAY_SECONDS_RANGE.0..=AUTO_START_DELAY_SECONDS_RANGE.1)
+                    .contains(&settings.auto_start_delay_seconds)
+            );
+            prop_assert!(settings
+                .recording_sample_rate
+                .is_none_or(|rate| SUPPORTED_SAMPLE_RATES.contains(&rate)));
+            prop_assert!(settings
+                .input_device_id
+                .as_deref()
+                .is_none_or(|id| !id.is_empty() && id.trim() == id));
+            prop_assert!(settings
+                .recordings_dir
+                .as_deref()
+                .is_none_or(|dir| !dir.is_empty() && dir.trim() == dir));
+            Ok(())
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// Whatever the settings table holds, loading it gives values inside every documented range,
+            /// and saving them and loading again gives back the same settings. The first is what lets a
+            /// hand edited database never stop the service booting; the second is what stops a setting
+            /// from drifting each time an unrelated one is saved.
+            #[test]
+            fn any_stored_settings_load_in_range_and_survive_a_save(pairs in stored()) {
+                let loaded = Settings::from_pairs(&pairs);
+                assert_in_range(&loaded)?;
+
+                let saved: HashMap<String, String> = loaded.to_pairs().into_iter().collect();
+                prop_assert_eq!(saved.len(), KEYS.len());
+                prop_assert_eq!(Settings::from_pairs(&saved), loaded);
+            }
+
+            /// Any patch, applied to any loaded settings, leaves them in range and survives a save, and a
+            /// patch that sets nothing changes nothing. A patch carries raw values from the API, so the
+            /// clamping in `apply_to` is the only thing between a client and an impossible setting.
+            #[test]
+            fn any_patch_leaves_settings_in_range(
+                pairs in stored(),
+                gain in proptest::option::of(any::<f32>()),
+                segment_seconds in proptest::option::of(any::<u32>()),
+                retention_hours in proptest::option::of(proptest::option::of(any::<u32>())),
+                frame_ms in proptest::option::of(any::<u32>()),
+                delay in proptest::option::of(any::<u32>()),
+                rate in proptest::option::of(proptest::option::of(any::<u32>())),
+                device in proptest::option::of(proptest::option::of(".{0,8}")),
+                dir in proptest::option::of(proptest::option::of(".{0,8}")),
+            ) {
+                let base = Settings::from_pairs(&pairs);
+                prop_assert_eq!(SettingsPatch::default().apply_to(&base), base.clone());
+
+                let patch = SettingsPatch {
+                    input_device_id: device,
+                    gain,
+                    segment_seconds,
+                    retention_hours,
+                    auto_start_delay_seconds: delay,
+                    frame_ms,
+                    recording_sample_rate: rate,
+                    recordings_dir: dir,
+                    ..SettingsPatch::default()
+                };
+                let updated = patch.apply_to(&base);
+                assert_in_range(&updated)?;
+                let saved: HashMap<String, String> = updated.to_pairs().into_iter().collect();
+                prop_assert_eq!(Settings::from_pairs(&saved), updated);
+            }
+
+            /// The recorder never records above the device's own rate, and a chosen rate is always one the
+            /// UI offers, so the storage the settings page promises is never exceeded.
+            #[test]
+            fn the_recording_rate_never_exceeds_the_device(
+                pairs in stored(),
+                device_rate in 1u32..400_000,
+            ) {
+                let settings = Settings::from_pairs(&pairs);
+                let rate = settings.effective_sample_rate(device_rate);
+                prop_assert!(rate <= device_rate);
+                if settings.recording_sample_rate.is_none() {
+                    prop_assert_eq!(rate, device_rate);
+                }
+            }
+        }
     }
 }

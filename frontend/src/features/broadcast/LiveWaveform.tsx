@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import { useAnimationFrame } from '@/hooks/useAnimationFrame';
 import type { AudioEngine } from '@/lib/audio/audioEngine';
+import { MIN_HALF_STROKE_PX, nextDisplayGain } from '@/lib/audio/waveformScale';
 import { cn } from '@/lib/utils';
 
 type LiveWaveformProps = {
@@ -22,6 +23,8 @@ export function LiveWaveform({ engine, className, height = 96 }: LiveWaveformPro
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const bufferRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  // How much the trace is magnified, carried from frame to frame so it can grow back gently.
+  const gainRef = useRef(1);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -74,6 +77,17 @@ export function LiveWaveform({ engine, className, height = 96 }: LiveWaveformPro
     const samples = bufferRef.current;
     analyser.getFloatTimeDomainData(samples);
 
+    let peak = 0;
+    for (const sample of samples) {
+      const size = Math.abs(sample);
+      if (size > peak) {
+        peak = size;
+      }
+    }
+    const gain = nextDisplayGain(gainRef.current, peak);
+    gainRef.current = gain;
+    const toY = (sample: number) => centreY - Math.min(Math.max(sample * gain, -1), 1) * centreY * 0.92;
+
     context.strokeStyle = waveColour;
     context.lineWidth = 1.5;
     context.lineJoin = 'round';
@@ -102,8 +116,17 @@ export function LiveWaveform({ engine, className, height = 96 }: LiveWaveformPro
         maximum = 0;
       }
 
-      context.moveTo(x + 0.5, centreY - maximum * centreY * 0.92);
-      context.lineTo(x + 0.5, centreY - minimum * centreY * 0.92);
+      let top = toY(maximum);
+      let bottom = toY(minimum);
+      // A slice with no spread would be a stroke of no length, which draws nothing: silence would leave an
+      // empty box instead of a line. Give every slice at least a hairline around its middle.
+      if (bottom - top < MIN_HALF_STROKE_PX * 2) {
+        const middle = (top + bottom) / 2;
+        top = middle - MIN_HALF_STROKE_PX;
+        bottom = middle + MIN_HALF_STROKE_PX;
+      }
+      context.moveTo(x + 0.5, top);
+      context.lineTo(x + 0.5, bottom);
     }
 
     context.stroke();

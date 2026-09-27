@@ -851,6 +851,27 @@ mod tests {
     }
 
     #[test]
+    fn a_lockout_lasts_its_window_and_then_lets_the_address_try_again() {
+        let throttle = LoginThrottle::default();
+        let start = 1_757_034_000_000;
+        for _ in 0..MAX_FAILURES {
+            throttle.record_failure(CLIENT, start);
+        }
+        assert!(matches!(
+            throttle.check(CLIENT, start + FAILURE_WINDOW_MS - 60_000),
+            Err(AppError::TooManyRequests(_))
+        ));
+        assert!(
+            throttle.check(CLIENT, start + FAILURE_WINDOW_MS).is_ok(),
+            "fifteen minutes on, the address may try again"
+        );
+
+        // A failure after the window starts counting afresh rather than extending the old lock.
+        throttle.record_failure(CLIENT, start + FAILURE_WINDOW_MS);
+        assert!(throttle.check(CLIENT, start + FAILURE_WINDOW_MS).is_ok());
+    }
+
+    #[test]
     fn logging_out_ends_the_session() {
         let service = service();
         let signed_in = service

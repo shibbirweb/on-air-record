@@ -50,9 +50,16 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/** Quote a path for PowerShell: single quotes, with any single quote doubled. */
+/**
+ * Quote a path for PowerShell: single quotes, with any single quote doubled.
+ *
+ * PowerShell's tokenizer treats the typographic single quotes (U+2018 to U+201B) exactly like the ASCII
+ * one, so a folder named O'Brien with a typographic apostrophe would otherwise end the string early and
+ * break the pasted command. A doubled quote stands for its second character, so each is doubled with
+ * itself and the folder name comes through unchanged.
+ */
 export function powershellQuote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+  return `'${value.replace(/['\u2018\u2019\u201A\u201B]/g, (quote) => quote + quote)}'`;
 }
 
 export function updatePlan(status: UpdateStatus, release: ReleaseInfo): UpdatePlan {

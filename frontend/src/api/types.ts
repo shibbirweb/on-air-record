@@ -13,7 +13,13 @@ export type Capture = {
   sessionId: number | null;
   deviceId: string | null;
   deviceName: string | null;
+  /** The rate being recorded, after the recording rate setting. */
   sampleRate: number;
+  /**
+   * The rate the microphone itself runs at, which the recording rates on offer go up to. Not `sampleRate`:
+   * recording at 8 kHz from a 48 kHz device must still offer everything up to 48 kHz.
+   */
+  deviceSampleRate: number;
   channels: number;
   frameMs: number;
   startedAtMs: number | null;
@@ -68,7 +74,12 @@ export type Settings = {
   effectiveRecordingsDir: string;
   /** Whether the service asks GitHub every few hours for a newer release. */
   checkForUpdates: boolean;
+  /** How readily the timeline marks a moment as a sound. */
+  soundSensitivity: SoundSensitivity;
 };
+
+/** How far above the room's own background a moment must rise to count as a sound. */
+export type SoundSensitivity = 'low' | 'medium' | 'high';
 
 /**
  * A partial update. `effectiveRecordingsDir` is derived server side and cannot be written, and the two
@@ -151,6 +162,24 @@ export type Peaks = {
   peaks: number[];
 };
 
+/** A moment something was heard, found by the server from the stored levels. */
+export type Sound = {
+  startMs: number;
+  endMs: number;
+  /** Where to start playback to hear it from its beginning: a second early, never inside a gap. */
+  seekMs: number;
+  /** Its loudest level, 0 to 255. */
+  peak: number;
+};
+
+/** The sounds in a window, and the sensitivity they were found with. */
+export type SoundsWindow = {
+  fromMs: number;
+  toMs: number;
+  sensitivity: SoundSensitivity;
+  sounds: Sound[];
+};
+
 export type RecordingSession = {
   id: number;
   deviceId: string;
@@ -213,7 +242,7 @@ export type ServerMessage =
 export type ListenerView = {
   /** Stable for the life of the connection. */
   id: number;
-  /** Absent for a guest on an open recorder. */
+  /** `null` for a guest on an open recorder. */
   email: string | null;
   role: Role | null;
   address: string;
@@ -318,4 +347,45 @@ export type TwoFactorSetup = {
   otpauthUri: string;
   /** An SVG document. Shown as an image, never inserted as markup. */
   qrSvg: string;
+};
+
+/** The recovery codes, shown once when two factor sign in is turned on or the codes are replaced. */
+export type RecoveryCodes = {
+  recoveryCodes: string[];
+};
+
+// List answers. The server wraps each list in an object so a field can be added beside it later without
+// breaking the page, and naming the wrappers here lets the contract tests check them like any other type.
+
+export type UserList = {
+  users: User[];
+};
+
+export type DeviceList = {
+  devices: InputDevice[];
+};
+
+export type RecordingDayList = {
+  days: RecordingDay[];
+};
+
+export type BookmarkList = {
+  bookmarks: Bookmark[];
+};
+
+export type SessionList = {
+  sessions: RecordingSession[];
+};
+
+/** The sound to jump to, or `null` when there is none that way. */
+export type NextSound = {
+  sound: Sound | null;
+};
+
+/** The body of every error answer, as `backend/src/error.rs` writes it. */
+export type ErrorEnvelope = {
+  error: {
+    code: string;
+    message: string;
+  };
 };

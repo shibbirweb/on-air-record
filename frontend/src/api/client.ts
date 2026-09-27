@@ -9,16 +9,21 @@
 import type {
   AuthState,
   Bookmark,
+  BookmarkList,
+  DeviceList,
   DirectoryTest,
+  ErrorEnvelope,
   ExportPlan,
   Health,
-  InputDevice,
+  NextSound,
   Peaks,
-  RecordingDay,
-  RecordingSession,
+  RecordingDayList,
+  RecoveryCodes,
   ServiceStatus,
+  SessionList,
   Settings,
   SettingsPatch,
+  SoundsWindow,
   Role,
   Storage,
   TimelineRange,
@@ -26,6 +31,7 @@ import type {
   TwoFactorStatus,
   UpdateStatus,
   User,
+  UserList,
 } from './types';
 
 const API_BASE = '/api';
@@ -56,13 +62,6 @@ export class ApiError extends Error {
   }
 }
 
-type ErrorEnvelope = {
-  error?: {
-    code?: string;
-    message?: string;
-  };
-};
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
 
@@ -86,7 +85,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let message = `${response.status} ${response.statusText}`;
 
     try {
-      const envelope = (await response.json()) as ErrorEnvelope;
+      // Every field optional, because a proxy or a crashed service can answer with any JSON at all.
+      const envelope = (await response.json()) as { error?: Partial<ErrorEnvelope['error']> };
       code = envelope.error?.code ?? code;
       message = envelope.error?.message ?? message;
     } catch {
@@ -142,7 +142,7 @@ export const api = {
   beginTwoFactorSetup: () => request<TwoFactorSetup>('/auth/two-factor/setup', { method: 'POST' }),
 
   enableTwoFactor: (code: string) =>
-    request<{ recoveryCodes: string[] }>('/auth/two-factor/enable', {
+    request<RecoveryCodes>('/auth/two-factor/enable', {
       method: 'POST',
       body: JSON.stringify({ code }),
     }).then((body) => body.recoveryCodes),
@@ -154,7 +154,7 @@ export const api = {
     }),
 
   regenerateRecoveryCodes: (password: string) =>
-    request<{ recoveryCodes: string[] }>('/auth/two-factor/recovery-codes', {
+    request<RecoveryCodes>('/auth/two-factor/recovery-codes', {
       method: 'POST',
       body: JSON.stringify({ password }),
     }).then((body) => body.recoveryCodes),
@@ -168,7 +168,7 @@ export const api = {
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
 
-  users: () => request<{ users: User[] }>('/users').then((body) => body.users),
+  users: () => request<UserList>('/users').then((body) => body.users),
 
   createUser: (email: string, password: string, role: Role) =>
     request<User>('/users', {
@@ -196,7 +196,7 @@ export const api = {
 
   stopCapture: () => request<ServiceStatus>('/capture/stop', { method: 'POST' }),
 
-  devices: () => request<{ devices: InputDevice[] }>('/devices').then((body) => body.devices),
+  devices: () => request<DeviceList>('/devices').then((body) => body.devices),
 
   selectDevice: (deviceId: string | null) =>
     request<ServiceStatus>('/devices/select', {
@@ -229,15 +229,24 @@ export const api = {
   timelineRange: () => request<TimelineRange>('/timeline/range'),
 
   recordingDays: () =>
-    request<{ days: RecordingDay[] }>('/timeline/days').then((body) => body.days),
+    request<RecordingDayList>('/timeline/days').then((body) => body.days),
 
   peaks: (fromMs: number, toMs: number, buckets: number) =>
     request<Peaks>(
       `/timeline/peaks?fromMs=${Math.round(fromMs)}&toMs=${Math.round(toMs)}&buckets=${buckets}`,
     ),
 
+  sounds: (fromMs: number, toMs: number) =>
+    request<SoundsWindow>(`/timeline/sounds?fromMs=${Math.round(fromMs)}&toMs=${Math.round(toMs)}`),
+
+  /** The sound to jump to from `fromMs`, or `null` when there is none that way. */
+  nextSound: (fromMs: number, direction: 'forward' | 'backward') =>
+    request<NextSound>(
+      `/timeline/sounds/next?fromMs=${Math.round(fromMs)}&direction=${direction}`,
+    ).then((body) => body.sound),
+
   bookmarks: () =>
-    request<{ bookmarks: Bookmark[] }>('/bookmarks').then((body) => body.bookmarks),
+    request<BookmarkList>('/bookmarks').then((body) => body.bookmarks),
 
   createBookmark: (timestampMs: number, label: string, note?: string | null) =>
     request<Bookmark>('/bookmarks', {
@@ -252,12 +261,12 @@ export const api = {
     }),
 
   deleteBookmark: (id: number) =>
-    request<{ bookmarks: Bookmark[] }>(`/bookmarks/${id}`, { method: 'DELETE' }).then(
+    request<BookmarkList>(`/bookmarks/${id}`, { method: 'DELETE' }).then(
       (body) => body.bookmarks,
     ),
 
   sessions: () =>
-    request<{ sessions: RecordingSession[] }>('/sessions').then((body) => body.sessions),
+    request<SessionList>('/sessions').then((body) => body.sessions),
 
   storage: () => request<Storage>('/storage'),
 

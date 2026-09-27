@@ -34,7 +34,7 @@ The underlying commands:
 ```sh
 # Backend, from backend/
 cargo run                                    # API on :8080, reads ../frontend/dist
-cargo test                                   # ~310 unit and router tests
+cargo test                                   # ~500 unit, router, stream and property tests
 cargo test day_bounds                        # single test by name substring
 cargo test --lib services::playback_service  # one module
 cargo clippy --all-targets -- -D warnings    # must be clean
@@ -43,8 +43,12 @@ cargo fmt
 # Frontend, from frontend/
 npm run dev      # Vite on :5173, proxies /api and the WebSocket to :8080
 npm run build    # tsc -b then vite build, writes dist/, which a release backend embeds
-npm test         # Vitest, ~165 tests
+npm test         # Vitest, ~1450 tests
+npm run coverage # the same, measuring coverage against the floors in vite.config.ts
 npm run lint     # oxlint
+
+# From the repository root, after both builds
+node scripts/e2e.mjs   # the service and UI driven through headless Chrome
 ```
 
 Full stack locally: `npm run build` once, then `cargo run`, then open `http://localhost:8080`. For hot
@@ -66,14 +70,19 @@ them to axum as `AppState`, which is the facade handlers see.
 `src/audio` is the only place that knows `cpal` exists. Everything above it works with `AudioFrame`
 values, which is what keeps the rest testable without hardware.
 
-### The three threads that matter
+### The threads that matter
 
 1. **The cpal callback**, owned by the OS audio thread. Downmixes to mono, applies gain, converts to i16,
    and does one non blocking send. It must never block, allocate in a loop, or panic.
-2. **The recorder** (`services/recorder_service.rs`), its own OS thread, not tokio. Every step it takes is
-   blocking: channel receive, file write, SQLite insert. It is also the *single* publisher into
-   `BroadcastHub`, which is why live listeners hear exactly what is written to disk, in order.
-3. **Tokio**, serving HTTP and one task per WebSocket connection.
+2. **The recorder** (`services/recorder_service.rs`), its own OS thread, not tokio. It is the *single*
+   publisher into `BroadcastHub`, so listeners hear frames in capture order, and it hands each frame to the
+   disk thread with a `try_send`. **It must never wait on storage**: once it also wrote and indexed, and a
+   database another program held locked paused live audio for everyone at each segment close.
+3. **The recorder's disk thread**, beside it: segment files, rollover and the index, every step blocking.
+   Its queue holds a minute of audio. Past that, frames leave the recording (never the broadcast), counted
+   in `RecorderHealth`, and their missing timestamps start a new segment so no file holds a hole. Shutdown
+   joins the recorder, then the disk thread, which writes what is queued and indexes the open segment.
+4. **Tokio**, serving HTTP and one task per WebSocket connection.
 
 `cpal::Stream` is not `Send` on every backend, so it lives on a dedicated thread for its whole life
 (`audio/capture.rs`).
@@ -81,7 +90,8 @@ values, which is what keeps the rest testable without hardware.
 ### How audio reaches a browser
 
 Capture -> `FrameBuilder` cuts fixed 100 ms frames -> recorder publishes to `BroadcastHub` (a tokio
-broadcast channel, observer pattern) and appends to a `SegmentWriter`. Each WebSocket session subscribes
+broadcast channel, observer pattern) and queues the frame for the disk thread, which appends it to a
+`SegmentWriter`. Each WebSocket session subscribes
 to the hub. A slow listener lags its own receiver and is resynchronised; it cannot stall the recorder or
 other listeners.
 
@@ -109,6 +119,18 @@ recorder) watch it and push the whole list to their browser on every change. Rul
   listener session never subscribes; do not rely on the frontend to hide it.
 - The registry is also the listener count in `GET /api/status`; `BroadcastHub::listener_count` only counts
   sessions on the live feed.
+
+### Finding sounds
+
+`audio/activity.rs` finds the moments something was heard, purely from the stored envelope, so it needs no
+decoding and no extra storage. It is relative, not a fixed level: each five minute block (aligned to the
+clock) gets a noise floor, the 30th percentile of its own levels, and `soundSensitivity` sets how far above
+it counts. Bursts under 200 ms never merge, which is what keeps a wavering background from chaining into
+one endless sound; that exact bug was found by running the service, not by the flat test backgrounds, so
+keep `a_wavering_background_is_not_a_sound_at_any_sensitivity`. `TimelineService::sounds` reads
+`FLOOR_CONTEXT_MS` either side of the window so answers do not depend on window width, and `next_sound`
+scans a day at a time. The frontend only draws and seeks; with nothing playing or cued, the buttons search
+from the timeline's left edge unless it is following live.
 
 ### Update notices
 
@@ -148,7 +170,8 @@ One WebSocket carries both live and DVR. Binary messages are audio, a fixed 24 b
 sample rate and channels on every frame so the input device can change mid stream.
 
 `frontend/src/lib/audio/frameCodec.ts` is the mirror of `ws/protocol.rs`. **Change one and you must change
-the other**, and both have tests that encode and decode the documented layout.
+the other**, and both have tests that encode and decode the documented layout. The same goes for every
+JSON message and REST body: see the contract tests under Testing, which fail on whichever side falls behind.
 
 ### Access control
 
@@ -274,13 +297,90 @@ the playback cursor walking a real directory of real PCM across a recording gap.
 data directory plus an in memory SQLite, because the interaction between the two is the thing worth
 testing.
 
-`routes/tests.rs` drives the real router over HTTP with `tower::ServiceExt::oneshot`, on a temp data
-directory, to prove the access rules through the wiring rather than in isolation. Add a case there when a
-route's access changes.
+The router tests drive the real application over HTTP with `tower::ServiceExt::oneshot`, on a temp data
+directory, so they prove the wiring (query parsing, validation, JSON field names, status codes) rather than
+the pieces. `routes/test_support.rs` is their shared harness: `app`, `call`, `get_raw` for non JSON bodies,
+`app_serving_ui` for a deterministic web interface, and `seed_recording`, which writes real PCM files and
+matching segment rows as the recorder would. `routes/tests.rs` holds the access rules; add a case there when
+a route's access changes. Each area has its own feature tests beside it: `timeline_tests.rs`,
+`bookmark_tests.rs`, `export_tests.rs` (reading the WAV back byte by byte), `recorder_tests.rs` and
+`web_tests.rs`. A new endpoint gets a feature test in the matching file. Starting capture is not driven
+there: an unknown device falls back to the default input, so it would record from a developer's microphone
+and fail on a runner, which has none.
 
-Frontend tests cover `lib/` and the Zustand slices in `store/`. Components are not unit tested, because
-what would break in them is canvas drawing and Web Audio scheduling and neither is meaningfully exercised
-in jsdom.
+`routes/stream_tests.rs` drives the audio stream over a real WebSocket: the router bound to a loopback port
+and a `tokio-tungstenite` client. Live audio is published straight into `state.hub`, as the recorder does,
+and `capture.pretend_recording()` (test only) stands in for a running capture where playback should hand
+over to live. It covers the session loop that nothing else reaches: live frames to many listeners in order,
+a listener who stops reading holding nobody up, seek, gaps, pacing by speed, pause and resume, catching up
+and running out, and the message order the page relies on. Tests of the 15 second access check and the idle
+timeout use `#[tokio::test(start_paused = true)]`; wait for the server side in short steps
+(`listeners.count()`), because a paused clock leaps to the next timer while a frame is still crossing the
+loopback interface. A change to `ws/session.rs` gets a case here.
+
+`services/fault_tests/` stages what an unattended install meets: a recordings folder made read only or
+deleted mid segment, a full disk (the one fault staged through a seam, `disk_full` in `segment_writer.rs`),
+a database locked by another connection, deleted, truncated or garbage segment files, index rows with
+impossible values or paths outside the data directory, and startup against a corrupt or read only database.
+Permission cases are Unix only and skip themselves under root. The rules they pin: the live feed never
+waits on the disk; a failed write closes the segment, because a hole would shift every later frame; a
+refused index insert waits in order and is retried at the next close; unreadable audio plays and exports as
+a gap at its true time; the janitor pages past files it cannot delete; nothing follows a relative path out
+of the data directory; and trouble reaches `capture.error` through `RecorderHealth`, logged once per run.
+A new failure mode the service meets in the field gets a case there.
+
+`services/sound_pipeline_tests.rs` generates real audio (room noise, hum, speech like syllables, a click,
+a door) and pushes it through the real recorder into segments and SQLite, then asks the timeline service
+for the sounds. It is the closest CI gets to a microphone, and it pins the documented limits: a voice at a
+tenth of the gain is below what the stored levels resolve, and High or more gain brings a quiet one back.
+
+Frontend tests cover `lib/` and the Zustand slices in `store/` in the node environment. Component tests
+use React Testing Library in jsdom, which a file opts into with `// @vitest-environment jsdom` and
+`import '@/test/dom'` (jest-dom matchers, cleanup, and stand ins for the ResizeObserver and pointer capture
+the component library expects). They replace store actions with spies and test wiring: what a control asks
+for and does with the answer. Canvas components are tested with `recordCanvases` from `@/test/canvas`, a
+fake 2D context that records every `fillRect` with its colour and alpha, plus a hand cranked animation
+frame; jsdom resolves no stylesheet, so colours are the fallbacks passed to `readCssColor`. Web Audio is not
+unit tested. Keep logic that has several cases (such as `lib/soundSearch.ts`) in `lib/` and test it there,
+leaving components thin. `scripts/e2e.mjs` covers what jsdom cannot, in a real browser: it seeds recordings into a fresh data
+directory, starts the built service, and drives headless Chrome over the DevTools protocol with real mouse
+events, reading the canvases back pixel by pixel. It is CI's `browser end to end` job and part of
+`make check` (`make e2e` alone); it needs Chrome and Node 22.13 or newer for `node:sqlite`. Canvases the
+test reads carry an `aria-label`, which it finds them by; keep those if a canvas is reworked. Add a check
+there when a feature's value is in what the page does rather than what a function returns. It also runs
+axe-core (read from `frontend/node_modules`, injected over the protocol) against WCAG 2.1 A and AA at each
+page state, in both themes by toggling the root `dark` class; a violation fails the run and prints the rule,
+the elements and, for contrast, the measured colours. Fix the component or the theme token, not the rule;
+a genuine false positive goes in `AXE_EXCLUSIONS` with its reason. A new page state gets an `audit` call.
+
+`contracts/` holds the wire contract both sides test against, so neither can drift alone. The backend
+generates `server-messages.json`, `responses.json`, `enums.json` and `audio-frames.json` from the real types
+and encoder (`contract_tests.rs`; a difference fails, and `UPDATE_CONTRACTS=1 cargo test contract`
+rewrites them for review). The frontend holds its types to them exactly, key for key and in both directions
+(`src/test/contract.ts`, `src/api/__tests__/contract*.test.ts`), decodes the frames with the real codec, and
+checks that its `api` client sends exactly what `client-messages.json` and `requests.json` say. The backend
+parses every one of those into its real request types, fails on a key it would ignore, and
+`routes/contract_tests.rs` sends each through the router to prove the method and path reach a handler. So a
+renamed field fails on one side, and once the fixture is regenerated, on the other.
+
+Pure functions whose edge cases hand picked examples miss also have property tests: `proptest!` blocks
+beside the Rust code, and `*.props.test.ts` files using `fast-check` beside the frontend tests (the frame
+codec against arbitrary bytes, geometry round trips, byte and date labels, quoting that must read back
+exactly). They found real bugs, so when one fails, read the counterexample it prints before touching the
+property, and pin a real bug as a named test (proptest's replay folder is ignored). Keep them quick:
+default case counts, fewer where a case does IO. The day properties run in the host's zone, and CI's is
+UTC, so CI runs `util::day` again under zones whose clocks change at midnight (Havana, the Azores,
+Santiago, Apia); do the same locally with `TZ=America/Havana cargo test --lib util::day`.
+
+CI runs both suites measuring coverage and fails under a floor: `BACKEND_COVERAGE_FLOOR` in the `Makefile`
+(line coverage, via `cargo llvm-cov`) and `coverage.thresholds` in `frontend/vite.config.ts`. Each floor
+sits a couple of points under what was measured. Raise one when coverage rises; never lower it to get a
+change through. `make coverage` runs both locally with HTML reports. `make mutants` runs `cargo-mutants`,
+which plants one small bug at a time and checks a test fails; it is too slow for CI, so aim it with
+`FILE=`, and restrict the tests it runs for speed (`cargo mutants -f src/ws/session.rs -- --lib -- ws::
+routes::stream_tests`). On `ws/session.rs` every surviving mutant is equivalent: the open mode guards in
+`may_watch_listeners` and `still_allowed` only save a lookup, a deleted `Close` arm ends the same way a
+moment later, and the `RecvError::Closed` branch cannot run while the hub lives, which is the whole process.
 
 Verify audio changes by running the service and listening. Browsers require a user gesture before audio
 starts, so headless checks cannot confirm playback. A useful trick for exercising the DVR without waiting
@@ -297,7 +397,12 @@ No platform specific code beyond the SIGTERM handler: `cpal` covers CoreAudio, A
   `ffprobe`. Needs `libasound2-dev` and `pkg-config`.
 - **Windows x86_64**: built and tested by CI only. Nobody has run it on a Windows desktop. Do not claim
   otherwise. Cross compiling from macOS cannot close this, because bundled SQLite needs a Windows C
-  toolchain, which is why `.github/workflows/ci.yml` runs the suite on a Windows runner.
+  toolchain, which is why `.github/workflows/ci.yml` runs the suite on a Windows runner, one test at a
+  time so a crash in native code names its test. CI found one: cpal 0.16 keeps one device enumerator for
+  the whole process, made in the COM apartment of the first thread to list devices, and tears COM down
+  when that thread ends, so listing from short lived blocking threads crashed the service with an access
+  violation. `audio/device_registry.rs` creates it first on a thread that parks for good
+  (`home_the_device_enumerator`); keep that while cpal works this way.
 
 ## Packaging
 

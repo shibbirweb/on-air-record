@@ -206,4 +206,78 @@ mod tests {
         // A script or a command line client sends no Origin at all.
         assert!(same_origin(&headers(&[("host", "192.168.1.5:8080")])));
     }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Host headers as a browser sends them: a name or an address, with or without a port.
+        fn host() -> impl Strategy<Value = String> {
+            "[a-z0-9]([a-z0-9.-]{0,14}[a-z0-9])?(:[0-9]{1,5})?"
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// A page served from this host is let through whatever the scheme, letter case or trailing
+            /// slash its browser put on the origin, and a page from any other host or port is refused.
+            /// The origin check is open mode's only protection against another website streaming the
+            /// microphone, so it must never let a different authority through, however close it looks.
+            #[test]
+            fn only_this_host_is_the_same_origin(
+                host in host(),
+                other in host(),
+                scheme in prop_oneof![Just("http"), Just("https")],
+                slash in any::<bool>(),
+                upper in any::<bool>(),
+                trick in prop_oneof![
+                    Just(String::new()),
+                    Just(".evil.example".to_string()),
+                    Just("@evil.example".to_string()),
+                    Just(":1".to_string()),
+                    Just("/path".to_string()),
+                ],
+            ) {
+                let spelled = if upper { host.to_ascii_uppercase() } else { host.clone() };
+                let ours = format!("{scheme}://{spelled}{}", if slash { "/" } else { "" });
+                prop_assert!(same_origin(&headers(&[("host", &host), ("origin", &ours)])), "{} refused for {}", ours, host);
+
+                let theirs = format!("{scheme}://{other}{trick}");
+                let same_authority = format!("{other}{trick}").trim_end_matches('/').eq_ignore_ascii_case(&host);
+                prop_assert_eq!(
+                    same_origin(&headers(&[("host", &host), ("origin", &theirs)])),
+                    same_authority,
+                    "{} for host {}", theirs, host
+                );
+            }
+
+            /// Among any other cookies, ours is found by its exact name only: a cookie whose name merely
+            /// starts or ends like ours is never read as the session, and an empty value is no session.
+            #[test]
+            fn the_session_cookie_is_read_by_its_exact_name(
+                others in proptest::collection::vec(("[a-z_]{1,12}", "[A-Za-z0-9]{0,10}"), 0..5),
+                decoys in proptest::collection::vec(prop_oneof![Just("xoar_session"), Just("oar_session_old"), Just("OAR_SESSION")], 0..3),
+                token in proptest::option::of("[A-Za-z0-9]{0,16}"),
+                position in any::<proptest::sample::Index>(),
+            ) {
+                let mut pairs: Vec<String> = others
+                    .iter()
+                    .filter(|(name, _)| name != SESSION_COOKIE)
+                    .map(|(name, value)| format!("{name}={value}"))
+                    .collect();
+                pairs.extend(decoys.iter().map(|name| format!("{name}=decoy")));
+                if let Some(token) = &token {
+                    let at = position.index(pairs.len() + 1);
+                    pairs.insert(at, format!("{SESSION_COOKIE}={token}"));
+                }
+                let header = pairs.join("; ");
+                let found = if header.is_empty() {
+                    session_token(&HeaderMap::new())
+                } else {
+                    session_token(&headers(&[("cookie", &header)]))
+                };
+                prop_assert_eq!(found, token.filter(|token| !token.is_empty()));
+            }
+        }
+    }
 }

@@ -12,6 +12,81 @@ Every release of On Air Record, newest first. The format follows
 - **The whole compose file, to copy.** The README, the setup guide and the Docker Hub page now show the
   complete `compose.yaml` with a note on each line, and an example `.env`, so it can be written by hand
   instead of downloaded. (OAR-105)
+- **Jump between sounds.** New next and previous sound buttons beside the 30 second rewind jump straight
+  to the moments something was heard, starting a second early so each is heard from its beginning, and
+  those moments are marked in teal on the timeline and the day overview. What counts as a sound is judged
+  against the room's own background, so it suits a quiet bedroom and a noisy kitchen alike; admins can
+  make it more or less sensitive under Settings, Finding sounds. (OAR-107)
+
+### Fixed
+
+- **Playback faster or slower than real time is smooth.** At double speed each moment of audio was
+  followed by a moment of silence and the audio skipped now and then, and the playhead moved at normal
+  speed whatever the speed was set to. Both now keep to the chosen speed. (OAR-108)
+- Jumping to the end of the recordings while playing faster than normal joins the live feed at normal
+  speed. Before, the next jump back into the recordings played too fast and skipped. After a network
+  hiccup during faster or slower playback, the audio also no longer arrives in a rush. (OAR-108)
+- Jumping past the end of the recordings while nothing is recording shows playback as stopped, as it
+  already did when playback reached the end on its own. (OAR-108)
+- Raising the volume while muted turns the sound back on, as the mute button already showed. Before, the
+  button said the sound was on while playback stayed silent. (OAR-108)
+- Restore defaults puts the recording sample rate back as well. (OAR-108)
+- When removing an account or resetting its two factor sign in is refused, the reason stays on screen
+  instead of disappearing at once. (OAR-108)
+- A recordings folder with spaces in its name can be typed as it is; the spaces were being removed while
+  typing. (OAR-108)
+- The success message after changing a password goes away when the next attempt fails, rather than
+  showing beside the error. (OAR-108)
+- While recording at a lower bit rate, such as Telephone, the bit rate list in Settings offers every rate
+  the microphone can give again, not only Match the device and the rate in use; and the disk estimate for
+  Match the device uses the microphone's own rate. (OAR-108)
+- On Windows, the service no longer crashes some time after the list of microphones was shown, or when
+  recording starts after it was. (OAR-108)
+- On a phone the control room fits the screen. The row of zoom buttons above the timeline did not wrap,
+  so the whole page was a little wider than the phone and opened slightly zoomed out. (OAR-108)
+- The waveform on the Broadcast card shows what you are hearing again. It was drawn at true size, so a
+  microphone at a normal speaking level left it looking empty; quiet sound is now enlarged to fill the
+  box, loud sound is never cut off, and silence shows as a flat line. (OAR-108)
+- The level meter on the recorder card keeps showing the microphone while you play back a recording or
+  pause. Before, it froze on its last reading as soon as you clicked the timeline. (OAR-108)
+- The storage panel says Forever for recordings kept forever, instead of 0 h. (OAR-108)
+- Where the clocks change at midnight, as in the Azores, Cuba and Chile, the day of the change and the day
+  before it no longer share or lose an hour of recording in the day picker, and such a day is no longer
+  missing from it. (OAR-108)
+- With a sound card that hands over audio in chunks of half a second or more, the recording no longer
+  splits into short segments with small jumps in time between them. (OAR-108)
+- Sizes just under a unit read as the next unit up, such as 1.0 MB rather than 1024.0 KB. (OAR-108)
+- On Windows, the update command shown for an install in a folder whose name has a curly apostrophe, such
+  as one typed on a phone, now works when pasted into PowerShell. (OAR-108)
+- The level meter no longer stays red after recording stops. (OAR-108)
+- Hint and secondary text in the light theme is a shade darker, so it reads clearly against its
+  background. (OAR-108)
+- Screen readers now announce the volume, gain, segment length and start up delay sliders, the on air
+  sign and the bookmark count by name. (OAR-108)
+- **Live audio no longer pauses when storage is slow.** Another program holding the database, such as a
+  backup, used to pause live audio for everyone for up to five seconds each time a recording segment
+  finished, and a disk that stopped responding could stop it altogether. Saving now runs on its own, with
+  a minute of room to catch up, so listeners hear the live feed without a break; if storage stays stuck
+  longer than that, only the recording misses audio, and the recorder panel says so. (OAR-108)
+- **The recorder panel says when recordings stop reaching the disk.** If the recordings folder cannot be
+  written, the disk is full, or the database will not take new recordings, the live feed carries on as
+  before and the panel now says why nothing is being saved, clearing by itself once the problem is fixed.
+  Before, it went on looking like a healthy recorder. (OAR-108)
+- A recording finished while another program, such as a backup, was holding the database is added to the
+  timeline once the database is free, instead of being lost from it. (OAR-108)
+- When a recording file has gone missing or been cut short, playback reports the gap and an export has
+  silence in its place, so everything after it stays at the right time. Before, an export moved the rest
+  of the audio earlier, and a long run of missing files ended playback early or silenced the rest of an
+  export. (OAR-108)
+- After a moment of audio that could not be saved, the recording carries on at the right time. Before,
+  the rest of that stretch played one frame early. (OAR-108)
+- A recording whose folder was deleted while it was being written no longer shows on the timeline as
+  audio that cannot be played. (OAR-108)
+- The clean up of old recordings keeps going past files it cannot delete. Before, a few hundred such files
+  stopped it deleting anything newer, and the disk filled. (OAR-108)
+- When the service cannot start because of a folder or the database, the message names the file or folder
+  to fix, and a database file it cannot write to is refused at start instead of running without saving
+  anything. (OAR-108)
 
 ## [0.8.1] - 2026-09-27
 

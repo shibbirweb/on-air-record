@@ -135,4 +135,44 @@ mod tests {
         let frame = AudioFrame::from_samples(0, 48_000, 1, Vec::new(), true);
         assert_eq!(frame.duration_ms(), 0);
     }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// For any samples, both levels are inside `0..=1`, the peak is the loudest sample and the RMS
+            /// never exceeds it. The meter and the stored envelope scale these straight to pixels and bytes,
+            /// and `i16::MIN` is one step louder than `i16::MAX`, the case a plain division gets wrong.
+            #[test]
+            fn levels_are_normalised_and_ordered(samples in proptest::collection::vec(any::<i16>(), 0..2_000)) {
+                let (rms, peak) = level_of(&samples);
+                prop_assert!((0.0..=1.0).contains(&rms) && (0.0..=1.0).contains(&peak));
+                prop_assert!(rms <= peak + 1e-6, "rms {} above peak {}", rms, peak);
+                let loudest = samples.iter().map(|sample| f32::from(sample.unsigned_abs())).fold(0.0, f32::max);
+                prop_assert!((peak - (loudest / f32::from(i16::MAX)).min(1.0)).abs() < 1e-6);
+            }
+
+            /// A frame's end is its start plus the whole milliseconds its samples last, per channel, at any
+            /// rate and channel count, so the recorder's discontinuity check and the live edge read the same
+            /// clock the frame builder stamped.
+            #[test]
+            fn duration_follows_samples_per_channel(
+                timestamp_ms in -1_000_000_000_000i64..4_000_000_000_000,
+                sample_rate in 0u32..400_000,
+                channels in 0u16..=8,
+                length in 0usize..20_000,
+            ) {
+                let frame = AudioFrame::from_samples(timestamp_ms, sample_rate, channels, vec![0; length], true);
+                let per_channel = length / usize::from(channels.max(1));
+                prop_assert_eq!(frame.sample_count(), per_channel);
+                let expected = if sample_rate == 0 { 0 } else { per_channel as i64 * 1000 / i64::from(sample_rate) };
+                prop_assert_eq!(frame.duration_ms(), expected);
+                prop_assert_eq!(frame.end_timestamp_ms(), timestamp_ms + expected);
+                prop_assert_eq!(frame.to_le_bytes().len(), 2 * length);
+            }
+        }
+    }
 }

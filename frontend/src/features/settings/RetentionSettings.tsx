@@ -56,7 +56,8 @@ export function RetentionSettings() {
   const draft = useSettingsStore((state) => state.draft);
   const edit = useSettingsStore((state) => state.edit);
   const storage = useStorageStore((state) => state.storage);
-  const deviceRate = useStatusStore((state) => state.status?.capture.sampleRate ?? 0);
+  // What "Match the device" records at: the microphone's own rate, whatever is being recorded now.
+  const deviceRate = useStatusStore((state) => state.status?.capture.deviceSampleRate ?? 0);
 
   /**
    * Both overrides mean "the person is driving now"; `null` means follow the stored setting. Deriving the
@@ -93,6 +94,7 @@ export function RetentionSettings() {
   // Project the window being edited, not the one that is saved, so the number moves with the input.
   const projectedHours = forever ? null : (draftHours ?? pending.retentionHours);
   const projectedBytes = projectedHours === null ? null : projectedHours * bytesPerHour;
+  const kilobytesPerSecond = Math.round(bytesPerHour / 3_600_000);
   const usedBytes = storage?.bytes ?? 0;
 
   const applyWindow = (hours: number | null) => {
@@ -228,9 +230,11 @@ export function RetentionSettings() {
         <p className="text-muted-foreground text-xs">
           {projectedBytes === null
             ? 'With no window there is no ceiling to predict. Keep an eye on the free space of the recording disk.'
-            : `Approximate, and an upper bound: the figure assumes the recorder runs without a break for the whole window at ${
-                storage ? Math.round(bytesPerHour / 3_600_000) : 96
-              } kB per second of uncompressed audio.`}
+            : `Approximate, and an upper bound: the figure assumes the recorder runs without a break for the whole window${
+                // The rate the figures above use, whether it came from the chosen bit rate or the server.
+                // A fixed 96 used to stand in until storage loaded, whatever rate was chosen.
+                kilobytesPerSecond > 0 ? ` at ${kilobytesPerSecond} kB per second` : ''
+              } of uncompressed audio.`}
         </p>
 
         {forever && (

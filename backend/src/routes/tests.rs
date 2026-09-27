@@ -4,152 +4,12 @@
 //! a route outside the guard, a cookie not set, a role not checked. Each test builds the full application
 //! on a throwaway data directory and talks to it over HTTP without binding a port.
 
-use std::sync::Arc;
-
-use axum::body::{to_bytes, Body};
-use axum::http::header::{COOKIE, HOST, ORIGIN, SET_COOKIE};
-use axum::http::{Method, Request, StatusCode};
-use axum::Router;
+use axum::http::{Method, StatusCode};
 use serde_json::{json, Value};
-use tower::ServiceExt;
 
-use crate::app::AppState;
-use crate::config::AppConfig;
-
-const HOST_NAME: &str = "recorder.test:8080";
-
-struct TestApp {
-    router: Router,
-    data_dir: std::path::PathBuf,
-}
-
-impl Drop for TestApp {
-    fn drop(&mut self) {
-        // Close the database before deleting its folder. Windows will not delete a file that is still
-        // open, so the router, which owns the application and its connection, has to go first.
-        drop(std::mem::replace(&mut self.router, Router::new()));
-        let _ = std::fs::remove_dir_all(&self.data_dir);
-    }
-}
-
-fn app(name: &str) -> TestApp {
-    let data_dir = std::env::temp_dir().join(format!("oar-routes-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&data_dir);
-    let config = AppConfig {
-        data_dir: data_dir.clone(),
-        static_dir: data_dir.join("no-ui"),
-        ..AppConfig::default()
-    };
-    let state: Arc<AppState> = AppState::bootstrap(config).expect("bootstrap");
-    TestApp {
-        router: super::build(state),
-        data_dir,
-    }
-}
-
-struct Reply {
-    status: StatusCode,
-    /// A session cookie the response set.
-    cookie: Option<String>,
-    /// A two factor challenge cookie the response set.
-    challenge: Option<String>,
-    body: Value,
-}
-
-async fn call(
-    app: &TestApp,
-    method: Method,
-    path: &str,
-    cookie: Option<&str>,
-    body: Option<Value>,
-) -> Reply {
-    call_from(app, method, path, cookie, body, None).await
-}
-
-async fn call_from(
-    app: &TestApp,
-    method: Method,
-    path: &str,
-    cookie: Option<&str>,
-    body: Option<Value>,
-    origin: Option<&str>,
-) -> Reply {
-    let cookie_header = cookie.map(|token| format!("oar_session={token}"));
-    send(app, method, path, cookie_header, body, origin).await
-}
-
-/// Call with the two factor challenge cookie, for the code step of a sign in.
-async fn call_with_challenge(app: &TestApp, path: &str, challenge: &str, body: Value) -> Reply {
-    let cookie_header = Some(format!("oar_challenge={challenge}"));
-    send(app, Method::POST, path, cookie_header, Some(body), None).await
-}
-
-async fn send(
-    app: &TestApp,
-    method: Method,
-    path: &str,
-    cookie_header: Option<String>,
-    body: Option<Value>,
-    origin: Option<&str>,
-) -> Reply {
-    let mut request = Request::builder()
-        .method(method)
-        .uri(path)
-        .header(HOST, HOST_NAME);
-    if let Some(cookie_header) = cookie_header {
-        request = request.header(COOKIE, cookie_header);
-    }
-    if let Some(origin) = origin {
-        request = request.header(ORIGIN, origin);
-    }
-    let request = match body {
-        Some(body) => request
-            .header("content-type", "application/json")
-            .body(Body::from(body.to_string())),
-        None => request.body(Body::empty()),
-    }
-    .expect("request");
-
-    let response = app.router.clone().oneshot(request).await.expect("response");
-    let status = response.status();
-    let set_cookie = |name: &str| {
-        response
-            .headers()
-            .get_all(SET_COOKIE)
-            .iter()
-            .filter_map(|value| value.to_str().ok())
-            .filter_map(|value| value.strip_prefix(&format!("{name}=")))
-            .filter_map(|value| value.split(';').next())
-            .find(|value| !value.is_empty())
-            .map(str::to_string)
-    };
-    let cookie = set_cookie("oar_session");
-    let challenge = set_cookie("oar_challenge");
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-
-    Reply {
-        status,
-        cookie,
-        challenge,
-        body,
-    }
-}
-
-async fn set_up_admin(app: &TestApp) -> String {
-    let reply = call(
-        app,
-        Method::POST,
-        "/api/auth/setup",
-        None,
-        Some(json!({ "email": "owner@example.com", "password": "a long password" })),
-    )
-    .await;
-    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
-    reply.cookie.expect("setup signs the admin in")
-}
+use super::test_support::{
+    app, call, call_from, call_with_challenge, send, set_up_admin, Reply, TestApp,
+};
 
 #[tokio::test]
 async fn an_undecided_install_works_like_before_and_asks_the_question() {
@@ -186,6 +46,8 @@ async fn with_accounts_on_everything_but_the_login_needs_a_session() {
     for path in [
         "/api/status",
         "/api/timeline/range",
+        "/api/timeline/sounds?fromMs=0&toMs=60000",
+        "/api/timeline/sounds/next?fromMs=0",
         "/api/settings",
         "/api/ws/stream",
     ] {
@@ -251,6 +113,8 @@ async fn a_listener_can_listen_but_not_change_anything() {
     for path in [
         "/api/status",
         "/api/timeline/range",
+        "/api/timeline/sounds?fromMs=0&toMs=60000",
+        "/api/timeline/sounds/next?fromMs=0&direction=backward",
         "/api/bookmarks",
         "/api/settings",
     ] {
@@ -261,6 +125,12 @@ async fn a_listener_can_listen_but_not_change_anything() {
     let forbidden = [
         (Method::POST, "/api/capture/stop", None),
         (Method::PATCH, "/api/settings", Some(json!({ "gain": 2.0 }))),
+        // Finding sounds is for everyone; what counts as one is the admins' call.
+        (
+            Method::PATCH,
+            "/api/settings",
+            Some(json!({ "soundSensitivity": "high" })),
+        ),
         (Method::POST, "/api/settings/reset", None),
         (
             Method::POST,
@@ -842,4 +712,245 @@ async fn logging_out_from_the_code_step_forgets_it() {
     )
     .await;
     assert_eq!(after.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn five_wrong_passwords_lock_the_address_out_with_a_429_even_for_the_right_one() {
+    let app = app("throttled");
+    set_up_admin(&app).await;
+    for _ in 0..5 {
+        let refused = call(
+            &app,
+            Method::POST,
+            "/api/auth/login",
+            None,
+            Some(json!({ "email": "owner@example.com", "password": "not the password" })),
+        )
+        .await;
+        assert_eq!(refused.status, StatusCode::UNAUTHORIZED);
+    }
+
+    let locked = call(
+        &app,
+        Method::POST,
+        "/api/auth/login",
+        None,
+        Some(json!({ "email": "owner@example.com", "password": "a long password" })),
+    )
+    .await;
+    assert_eq!(locked.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(locked.body["error"]["code"], "rate_limited");
+    assert!(
+        locked.body["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("try again in"),
+        "the page can say how long to wait: {}",
+        locked.body
+    );
+    assert_eq!(locked.cookie, None, "no session for a locked out address");
+}
+
+/// CLAUDE.md: never add a CORS layer. The Origin check is the open mode's only protection against other
+/// websites, and a CORS header would invite their pages to read the answers.
+#[tokio::test]
+async fn no_answer_ever_invites_another_website_to_read_it() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let app = app("no-cors");
+    let requests = [
+        Request::builder()
+            .method(Method::OPTIONS)
+            .uri("/api/status")
+            .header("host", "recorder.test:8080")
+            .header("origin", "http://elsewhere.example")
+            .header("access-control-request-method", "POST")
+            .body(Body::empty()),
+        Request::builder()
+            .method(Method::GET)
+            .uri("/api/status")
+            .header("host", "recorder.test:8080")
+            .header("origin", "http://elsewhere.example")
+            .body(Body::empty()),
+    ];
+    for request in requests {
+        let request = request.expect("request");
+        let described = format!("{} {}", request.method(), request.uri());
+        let response = app.router.clone().oneshot(request).await.expect("response");
+        let invited: Vec<_> = response
+            .headers()
+            .keys()
+            .filter(|name| name.as_str().starts_with("access-control-"))
+            .map(|name| name.as_str().to_string())
+            .collect();
+        assert!(invited.is_empty(), "{described} answered with {invited:?}");
+    }
+}
+
+/// Every route and method the router serves, with the access it was decided to need. CLAUDE.md: a new
+/// route needs no auth code, only a method that matches its intent, and a GET that reveals admin only data
+/// must be named in the guard's exceptions. This table makes that a decision: a route added to
+/// `routes/mod.rs` without a line here fails the test until somebody says who may call it.
+const ROUTE_ACCESS: &[(&str, &str, &str, Option<crate::models::Access>)] = {
+    use crate::models::Access::{Administer as ADMIN, Listen as LISTEN};
+    &[
+        ("GET", "/health", "/health", None),
+        ("GET", "/auth/state", "/auth/state", None),
+        ("POST", "/auth/open", "/auth/open", None),
+        ("POST", "/auth/setup", "/auth/setup", None),
+        ("POST", "/auth/login", "/auth/login", None),
+        ("POST", "/auth/login/verify", "/auth/login/verify", None),
+        ("POST", "/auth/logout", "/auth/logout", None),
+        ("POST", "/auth/password", "/auth/password", Some(LISTEN)),
+        ("GET", "/auth/two-factor", "/auth/two-factor", Some(LISTEN)),
+        (
+            "POST",
+            "/auth/two-factor/setup",
+            "/auth/two-factor/setup",
+            Some(LISTEN),
+        ),
+        (
+            "POST",
+            "/auth/two-factor/enable",
+            "/auth/two-factor/enable",
+            Some(LISTEN),
+        ),
+        (
+            "POST",
+            "/auth/two-factor/disable",
+            "/auth/two-factor/disable",
+            Some(LISTEN),
+        ),
+        (
+            "POST",
+            "/auth/two-factor/recovery-codes",
+            "/auth/two-factor/recovery-codes",
+            Some(LISTEN),
+        ),
+        ("GET", "/users", "/users", Some(ADMIN)),
+        ("POST", "/users", "/users", Some(ADMIN)),
+        ("PATCH", "/users/{id}", "/users/7", Some(ADMIN)),
+        ("DELETE", "/users/{id}", "/users/7", Some(ADMIN)),
+        (
+            "POST",
+            "/users/{id}/password",
+            "/users/7/password",
+            Some(ADMIN),
+        ),
+        (
+            "DELETE",
+            "/users/{id}/two-factor",
+            "/users/7/two-factor",
+            Some(ADMIN),
+        ),
+        ("GET", "/status", "/status", Some(LISTEN)),
+        ("POST", "/capture/start", "/capture/start", Some(ADMIN)),
+        ("POST", "/capture/stop", "/capture/stop", Some(ADMIN)),
+        ("GET", "/devices", "/devices", Some(LISTEN)),
+        ("POST", "/devices/select", "/devices/select", Some(ADMIN)),
+        ("GET", "/settings", "/settings", Some(LISTEN)),
+        ("PATCH", "/settings", "/settings", Some(ADMIN)),
+        (
+            "GET",
+            "/settings/defaults",
+            "/settings/defaults",
+            Some(LISTEN),
+        ),
+        ("POST", "/settings/reset", "/settings/reset", Some(ADMIN)),
+        ("GET", "/updates", "/updates", Some(ADMIN)),
+        ("POST", "/updates/check", "/updates/check", Some(ADMIN)),
+        (
+            "POST",
+            "/settings/test-recordings-dir",
+            "/settings/test-recordings-dir",
+            Some(ADMIN),
+        ),
+        ("GET", "/timeline/range", "/timeline/range", Some(LISTEN)),
+        ("GET", "/timeline/days", "/timeline/days", Some(LISTEN)),
+        ("GET", "/timeline/peaks", "/timeline/peaks", Some(LISTEN)),
+        ("GET", "/timeline/sounds", "/timeline/sounds", Some(LISTEN)),
+        (
+            "GET",
+            "/timeline/sounds/next",
+            "/timeline/sounds/next",
+            Some(LISTEN),
+        ),
+        ("GET", "/bookmarks", "/bookmarks", Some(LISTEN)),
+        ("POST", "/bookmarks", "/bookmarks", Some(ADMIN)),
+        ("PATCH", "/bookmarks/{id}", "/bookmarks/7", Some(ADMIN)),
+        ("DELETE", "/bookmarks/{id}", "/bookmarks/7", Some(ADMIN)),
+        ("GET", "/sessions", "/sessions", Some(LISTEN)),
+        ("GET", "/storage", "/storage", Some(LISTEN)),
+        ("GET", "/export", "/export", Some(LISTEN)),
+        ("GET", "/export/plan", "/export/plan", Some(LISTEN)),
+        ("GET", "/ws/stream", "/ws/stream", Some(LISTEN)),
+    ]
+};
+
+/// Every (method, route) pair `routes::build` registers, read from its source.
+fn registered_routes() -> Vec<(String, String)> {
+    let source = include_str!("mod.rs");
+    let start = source.find("pub fn build(").expect("the build function");
+    let end = source[start..]
+        .find(".route_layer(")
+        .map(|offset| start + offset)
+        .expect("the guard layer after the routes");
+    let body = &source[start..end];
+    let mut pairs = Vec::new();
+    for call in body.split(".route(").skip(1) {
+        let path = call.split('"').nth(1).expect("a route path").to_string();
+        for (needle, method) in [
+            ("get(", "GET"),
+            ("post(", "POST"),
+            ("patch(", "PATCH"),
+            ("delete(", "DELETE"),
+            ("put(", "PUT"),
+        ] {
+            if call.contains(needle) {
+                pairs.push((method.to_string(), path.clone()));
+            }
+        }
+    }
+    pairs.sort();
+    pairs
+}
+
+#[test]
+fn every_route_has_its_access_decided_in_the_table() {
+    let mut decided: Vec<(String, String)> = ROUTE_ACCESS
+        .iter()
+        .map(|(method, route, _, _)| (method.to_string(), route.to_string()))
+        .collect();
+    decided.sort();
+    let registered = registered_routes();
+    let undecided: Vec<_> = registered
+        .iter()
+        .filter(|pair| !decided.contains(pair))
+        .collect();
+    let gone: Vec<_> = decided
+        .iter()
+        .filter(|pair| !registered.contains(pair))
+        .collect();
+    assert!(
+        undecided.is_empty(),
+        "routes with no access decided in ROUTE_ACCESS: {undecided:?}"
+    );
+    assert!(
+        gone.is_empty(),
+        "ROUTE_ACCESS lists routes that no longer exist: {gone:?}"
+    );
+}
+
+#[test]
+fn the_guard_asks_each_route_for_the_access_decided_for_it() {
+    for (method, route, example, expected) in ROUTE_ACCESS {
+        let method = Method::from_bytes(method.as_bytes()).expect("method");
+        assert_eq!(
+            super::guard::required_access(&method, example),
+            *expected,
+            "{method} {route}"
+        );
+    }
 }

@@ -1,0 +1,252 @@
+{
+  "bodies": {
+    "changePassword": [
+      {
+        "body": {
+          "currentPassword": "an old long password",
+          "newPassword": "a new long password"
+        },
+        "method": "POST",
+        "path": "/auth/password"
+      }
+    ],
+    "createBookmark": [
+      {
+        "body": {
+          "label": "Doorbell",
+          "note": "Parcel for next door",
+          "timestampMs": 1757030460000
+        },
+        "method": "POST",
+        "path": "/bookmarks"
+      },
+      {
+        "body": {
+          "label": "Dog barking",
+          "note": null,
+          "timestampMs": 1757030520000
+        },
+        "method": "POST",
+        "path": "/bookmarks"
+      }
+    ],
+    "createUser": [
+      {
+        "body": {
+          "email": "listener@example.com",
+          "password": "a long enough password",
+          "role": "listener"
+        },
+        "method": "POST",
+        "path": "/users"
+      }
+    ],
+    "disableTwoFactor": [
+      {
+        "body": {
+          "password": "correct horse battery staple"
+        },
+        "method": "POST",
+        "path": "/auth/two-factor/disable"
+      }
+    ],
+    "enableTwoFactor": [
+      {
+        "body": {
+          "code": "123456"
+        },
+        "method": "POST",
+        "path": "/auth/two-factor/enable"
+      }
+    ],
+    "logIn": [
+      {
+        "body": {
+          "email": "owner@example.com",
+          "password": "correct horse battery staple"
+        },
+        "method": "POST",
+        "path": "/auth/login"
+      }
+    ],
+    "regenerateRecoveryCodes": [
+      {
+        "body": {
+          "password": "correct horse battery staple"
+        },
+        "method": "POST",
+        "path": "/auth/two-factor/recovery-codes"
+      }
+    ],
+    "selectDevice": [
+      {
+        "body": {
+          "deviceId": "Scarlett Solo USB"
+        },
+        "method": "POST",
+        "path": "/devices/select"
+      },
+      {
+        "body": {
+          "deviceId": null
+        },
+        "method": "POST",
+        "path": "/devices/select"
+      }
+    ],
+    "setUp": [
+      {
+        "body": {
+          "email": "owner@example.com",
+          "password": "correct horse battery staple"
+        },
+        "method": "POST",
+        "path": "/auth/setup"
+      }
+    ],
+    "setUserPassword": [
+      {
+        "body": {
+          "password": "a replacement password"
+        },
+        "method": "POST",
+        "path": "/users/7/password"
+      }
+    ],
+    "testRecordingsDir": [
+      {
+        "body": {
+          "path": "/srv/recordings"
+        },
+        "method": "POST",
+        "path": "/settings/test-recordings-dir"
+      },
+      {
+        "body": {
+          "path": null
+        },
+        "method": "POST",
+        "path": "/settings/test-recordings-dir"
+      }
+    ],
+    "updateBookmark": [
+      {
+        "body": {
+          "label": "Front door",
+          "note": "Signed for"
+        },
+        "method": "PATCH",
+        "path": "/bookmarks/7"
+      },
+      {
+        "body": {
+          "note": null
+        },
+        "method": "PATCH",
+        "path": "/bookmarks/7"
+      }
+    ],
+    "updateSettings": [
+      {
+        "body": {
+          "autoStart": false,
+          "autoStartDelaySeconds": 20,
+          "checkForUpdates": false,
+          "frameMs": 100,
+          "gain": 1.5,
+          "inputDeviceId": "Scarlett Solo USB",
+          "recordingSampleRate": 16000,
+          "recordingsDir": "/srv/recordings",
+          "retentionHours": 72,
+          "segmentSeconds": 30,
+          "soundSensitivity": "high"
+        },
+        "method": "PATCH",
+        "path": "/settings"
+      },
+      {
+        "body": {
+          "inputDeviceId": null,
+          "recordingSampleRate": null,
+          "recordingsDir": null,
+          "retentionHours": null
+        },
+        "method": "PATCH",
+        "path": "/settings"
+      }
+    ],
+    "updateUserRole": [
+      {
+        "body": {
+          "role": "admin"
+        },
+        "method": "PATCH",
+        "path": "/users/7"
+      }
+    ],
+    "verifyLogin": [
+      {
+        "body": {
+          "code": "123456"
+        },
+        "method": "POST",
+        "path": "/auth/login/verify"
+      }
+    ]
+  },
+  "queries": {
+    "exportPlan": [
+      {
+        "path": "/export/plan",
+        "query": {
+          "fromMs": 1757030400000,
+          "toMs": 1757030460000
+        }
+      }
+    ],
+    "exportUrl": [
+      {
+        "path": "/export",
+        "query": {
+          "fromMs": 1757030400000,
+          "toMs": 1757030460000
+        }
+      }
+    ],
+    "nextSound": [
+      {
+        "path": "/timeline/sounds/next",
+        "query": {
+          "direction": "forward",
+          "fromMs": 1757030400000
+        }
+      },
+      {
+        "path": "/timeline/sounds/next",
+        "query": {
+          "direction": "backward",
+          "fromMs": 1757031305000
+        }
+      }
+    ],
+    "peaks": [
+      {
+        "path": "/timeline/peaks",
+        "query": {
+          "buckets": 400,
+          "fromMs": 1757030400000,
+          "toMs": 1757034000000
+        }
+      }
+    ],
+    "sounds": [
+      {
+        "path": "/timeline/sounds",
+        "query": {
+          "fromMs": 1757030400000,
+          "toMs": 1757034000000
+        }
+      }
+    ]
+  }
+}

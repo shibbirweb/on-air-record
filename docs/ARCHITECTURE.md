@@ -143,8 +143,11 @@ therefore never breaks the frontend contract by accident.
 
 ## 4. Concurrency model
 
-Three threads matter, and the arrows between them are the whole design. The recorder being the single
-publisher into the hub is what guarantees a live listener hears exactly what was written to disk, in order.
+Four threads matter, and the arrows between them are the whole design. The recorder is the single
+publisher into the hub, so a live listener hears frames in capture order, the order they are written to
+disk. It never waits on storage: files and the index belong to a disk thread beside it, behind a queue that
+holds a minute of audio, so a locked database or a stalled disk costs the recording at worst, never the
+broadcast.
 
 ```mermaid
 flowchart TB
@@ -153,6 +156,10 @@ flowchart TB
     end
 
     subgraph recthread["Recorder thread, not tokio"]
+        recorder["publish, then hand to disk<br/>never waits on storage"]
+    end
+
+    subgraph diskthread["Recorder disk thread"]
         writer["SegmentWriter and SQLite insert<br/>every step blocking"]
     end
 
@@ -161,8 +168,9 @@ flowchart TB
         session["One task per WebSocket"]
     end
 
-    callback -- "crossbeam channel<br/>drops oldest when full" --> writer
-    writer -- "the only publisher" --> hub["BroadcastHub"]
+    callback -- "crossbeam channel<br/>drops oldest when full" --> recorder
+    recorder -- "the only publisher" --> hub["BroadcastHub"]
+    recorder -- "try_send, a minute of queue<br/>left out of the recording when full" --> writer
     hub -- "one subscription each" --> session
     http -- "reads state" --> hub
 ```

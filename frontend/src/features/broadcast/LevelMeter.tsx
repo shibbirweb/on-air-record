@@ -20,7 +20,8 @@ export function LevelMeter({ rms, peak, active, className }: LevelMeterProps) {
   const rmsWidth = active ? meterScale(rms) * 100 : 0;
   const peakLeft = active ? meterScale(peak) * 100 : 0;
   // Anything above roughly -3 dBFS is close enough to clipping to warn about.
-  const hot = peak > 0.708;
+  // A stopped meter keeps its last peak for the bar's fade, but it is not clipping anything now.
+  const hot = active && peak > 0.708;
 
   return (
     <div className={cn('space-y-1.5', className)}>

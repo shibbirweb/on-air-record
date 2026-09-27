@@ -13,7 +13,7 @@ MAKEFLAGS += --no-print-directory
 .DEFAULT_GOAL := help
 
 .PHONY: help tools node-version run dev-backend dev-frontend ui build test lint fmt check \
-        version pending release wiki install-preview docker clean
+        e2e coverage coverage-backend mutants version pending release wiki install-preview docker clean
 
 help: ## List these targets
 	@echo 'On Air Record'
@@ -77,15 +77,64 @@ lint: node-version ## Clippy with warnings denied, and oxlint
 fmt: ## Format the Rust code
 	cd backend && cargo fmt
 
-# The same things CI runs, in the same order, so a green run here means a green run there.
+# Line coverage the backend suite must keep: a couple of points under what it measures, so deleting tests
+# or adding untested code fails while ordinary churn does not. Raise it as coverage rises; never lower it
+# to get a change through. What stays uncovered is mostly what needs sound hardware or the internet (the
+# capture thread, device listing, the update check's request) and the command line entry point. The
+# frontend's floors live in frontend/vite.config.ts, beside the rest of its test setup.
+BACKEND_COVERAGE_FLOOR := 88
+
+coverage-backend: ## The backend tests, measuring coverage, failing under the floor
+	@command -v cargo-llvm-cov >/dev/null || { \
+		echo 'Needs cargo-llvm-cov: rustup component add llvm-tools-preview && cargo install cargo-llvm-cov'; \
+		exit 1; }
+	cd backend && cargo llvm-cov --no-report
+	cd backend && cargo llvm-cov report --html
+	cd backend && cargo llvm-cov report --lcov --output-path target/llvm-cov/lcov.info
+	cd backend && cargo llvm-cov report --summary-only --fail-under-lines $(BACKEND_COVERAGE_FLOOR)
+
+coverage: node-version coverage-backend ## Both test suites, measuring coverage, failing under the floors
+	cd frontend && npm run coverage
+	@echo ''
+	@echo 'Reports: backend/target/llvm-cov/html/index.html and frontend/coverage/index.html'
+
+# Mutation testing: cargo-mutants makes one small deliberate bug at a time (a + for a -, a condition
+# turned round, a function returning a default) and checks some test fails. A survivor is a line the
+# tests run without checking. Far too slow for CI, so it is aimed: FILE=src/audio/activity.rs, or by
+# default only the lines that differ from develop.
+mutants: ## Check the tests notice deliberate bugs, in FILE= or in what differs from develop
+	@command -v cargo-mutants >/dev/null || { echo 'Needs cargo-mutants: cargo install cargo-mutants'; exit 1; }
+	@cd backend && if [ -n "$(FILE)" ]; then \
+		echo "cargo mutants --file $(FILE)"; cargo mutants --file $(FILE); \
+	else \
+		mkdir -p target && git diff develop -- . > target/mutants.diff; \
+		echo 'cargo mutants --in-diff target/mutants.diff'; cargo mutants --in-diff target/mutants.diff; \
+	fi
+
+# The real service on seeded recordings, driven through headless Chrome: the buttons, the canvases and
+# the settings card that unit tests cannot reach. Needs Chrome, and Node 22.13 or newer for node:sqlite.
+e2e: ui ## Build the UI and service, then drive them in headless Chrome
+	cd backend && cargo build
+	node scripts/e2e.mjs
+
+# The same things CI runs, in the same order, so a green run here means a green run there. CI measures
+# coverage while it tests; without cargo-llvm-cov installed the backend tests run plainly instead, and the
+# floor is left to CI.
 check: node-version ## Everything CI checks, before you push
 	node scripts/version.mjs check
 	cd backend && cargo fmt --all --check
 	cd backend && cargo clippy --all-targets -- -D warnings
-	cd backend && cargo test
+	@if command -v cargo-llvm-cov >/dev/null; then \
+		$(MAKE) coverage-backend; \
+	else \
+		echo 'cargo-llvm-cov is not installed, so the coverage floor is not checked here'; \
+		cd backend && cargo test; \
+	fi
 	cd frontend && npm run lint
-	cd frontend && npm test
+	cd frontend && npm run coverage
 	cd frontend && npm run build
+	cd backend && cargo build
+	node scripts/e2e.mjs
 	@echo ''
 	@echo 'All clear.'
 

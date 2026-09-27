@@ -83,18 +83,25 @@ async fn main() {
 }
 
 fn init_tracing(log_level: &str) {
-    // `RUST_LOG` wins when it is set, so an operator can turn on a noisy target without editing the
-    // service configuration.
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new(format!(
-            "on_air_record={log_level},tower_http=warn,axum=warn"
-        ))
-    });
+    let filter = log_filter(std::env::var("RUST_LOG").ok().as_deref(), log_level);
 
     tracing_subscriber::registry()
         .with(filter)
         .with(tracing_subscriber::fmt::layer().with_target(false))
         .init();
+}
+
+/// `RUST_LOG` when it is set and parses, so an operator can turn on a noisy target without editing the
+/// service configuration; otherwise the configured level for this crate, and warnings for the web stack.
+fn log_filter(rust_log: Option<&str>, log_level: &str) -> EnvFilter {
+    rust_log
+        .filter(|value| !value.trim().is_empty())
+        .and_then(|value| EnvFilter::try_new(value).ok())
+        .unwrap_or_else(|| {
+            EnvFilter::new(format!(
+                "on_air_record={log_level},tower_http=warn,axum=warn"
+            ))
+        })
 }
 
 /// Resolve on Ctrl+C, and on SIGTERM where the platform has one, so a service manager can stop the
@@ -122,5 +129,36 @@ async fn wait_for_shutdown() {
     tokio::select! {
         _ = interrupt => {}
         _ = terminate => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_configured_level_applies_when_rust_log_is_not_set() {
+        let directives = log_filter(None, "debug").to_string();
+        assert!(directives.contains("on_air_record=debug"), "{directives}");
+        assert!(directives.contains("tower_http=warn"), "{directives}");
+    }
+
+    #[test]
+    fn rust_log_wins_when_it_is_set() {
+        assert_eq!(
+            log_filter(Some("axum=trace"), "info").to_string(),
+            "axum=trace"
+        );
+    }
+
+    #[test]
+    fn an_empty_or_unreadable_rust_log_falls_back_to_the_configured_level() {
+        for rust_log in ["", "   ", "on_air_record=[not a level"] {
+            let directives = log_filter(Some(rust_log), "warn").to_string();
+            assert!(
+                directives.contains("on_air_record=warn"),
+                "{rust_log:?}: {directives}"
+            );
+        }
     }
 }

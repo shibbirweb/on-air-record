@@ -121,7 +121,13 @@ export function BookmarkControls({ getPlayheadMs }: BookmarkControlsProps) {
 
       <Popover open={listOpen} onOpenChange={setListOpen}>
         <PopoverTrigger asChild>
-          <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 gap-1.5 px-2"
+            // The button shows only a number, which says nothing to a screen reader on its own.
+            aria-label={`${bookmarks.length} ${bookmarks.length === 1 ? 'bookmark' : 'bookmarks'}`}
+          >
             <BookmarkIcon className="size-3.5" />
             {bookmarks.length}
           </Button>

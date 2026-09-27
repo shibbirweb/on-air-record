@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { Settings } from '@/api/types';
 import { useAccountsStore } from '@/store/useAccountsStore';
-import { useSettingsStore } from '@/store/useSettingsStore';
+import { EDITABLE_FIELDS, useSettingsStore } from '@/store/useSettingsStore';
 
 /** Describe a retention window the way the panel above does. */
 function windowLabel(hours: number | null | undefined): string {
@@ -87,18 +87,8 @@ export function SettingsActionBar() {
   const atDefaults =
     defaults !== null &&
     pending !== null &&
-    (
-      [
-        'gain',
-        'segmentSeconds',
-        'retentionHours',
-        'autoStart',
-        'autoStartDelaySeconds',
-        'recordingSampleRate',
-        'recordingsDir',
-        'checkForUpdates',
-      ] as const
-    ).every(
+    // The same fields Restore defaults stages, so the button can never offer a reset it would not make.
+    EDITABLE_FIELDS.every(
       (key) => Object.is(pending[key], defaults[key]),
     );
 

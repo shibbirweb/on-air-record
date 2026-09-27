@@ -54,3 +54,58 @@ pub struct ListenerEntry {
     /// listed by what it streams. The UI reports as soon as its socket opens.
     pub player: PlayerState,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn player_states_travel_as_lowercase_words_both_ways() {
+        for (state, word) in [
+            (PlayerState::Idle, "idle"),
+            (PlayerState::Playing, "playing"),
+            (PlayerState::Paused, "paused"),
+        ] {
+            assert_eq!(serde_json::to_value(state).expect("serialise"), word);
+            let parsed: PlayerState =
+                serde_json::from_value(serde_json::json!(word)).expect("parse");
+            assert_eq!(parsed, state);
+        }
+    }
+
+    #[test]
+    fn a_player_state_the_ui_never_sends_is_refused() {
+        for word in ["Playing", "stopped", ""] {
+            assert!(
+                serde_json::from_value::<PlayerState>(serde_json::json!(word)).is_err(),
+                "{word:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_connection_without_an_account_is_a_guest() {
+        let entry = ListenerEntry {
+            id: 1,
+            account: None,
+            address: "192.168.1.20".parse().expect("address"),
+            user_agent: None,
+            connected_at_ms: 0,
+            activity: ListenerActivity::Live,
+            player: PlayerState::Playing,
+        };
+        assert!(entry.account.is_none());
+        let signed_in = ListenerEntry {
+            account: Some(ListenerAccount {
+                email: "kitchen@example.com".to_string(),
+                role: Role::Listener,
+            }),
+            ..entry.clone()
+        };
+        assert_ne!(signed_in, entry);
+        assert_eq!(
+            ListenerActivity::Playback { from_ms: 5 },
+            ListenerActivity::Playback { from_ms: 5 }
+        );
+    }
+}

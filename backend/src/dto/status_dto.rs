@@ -30,7 +30,10 @@ pub struct CaptureDto {
     pub session_id: Option<i64>,
     pub device_id: Option<String>,
     pub device_name: Option<String>,
+    /// The rate being recorded.
     pub sample_rate: u32,
+    /// The rate the microphone runs at, which the recording rates on offer go up to.
+    pub device_sample_rate: u32,
     pub channels: u16,
     pub frame_ms: u32,
     pub started_at_ms: Option<i64>,
@@ -46,6 +49,7 @@ impl From<CaptureSnapshot> for CaptureDto {
             device_id: snapshot.device_id,
             device_name: snapshot.device_name,
             sample_rate: snapshot.sample_rate,
+            device_sample_rate: snapshot.device_sample_rate,
             channels: snapshot.channels,
             frame_ms: snapshot.frame_ms,
             started_at_ms: snapshot.started_at_ms,
@@ -91,5 +95,69 @@ impl StatusResponse {
             server_time_ms: crate::util::time::now_ms(),
             live_edge_ms: state.live_edge_ms(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::CaptureState;
+
+    #[test]
+    fn a_capture_snapshot_carries_every_field_onto_the_wire() {
+        let dto: CaptureDto = CaptureSnapshot {
+            state: CaptureState::Recording,
+            session_id: Some(7),
+            device_id: Some("usb".to_string()),
+            device_name: Some("USB microphone".to_string()),
+            sample_rate: 16_000,
+            device_sample_rate: 48_000,
+            channels: 1,
+            frame_ms: 100,
+            started_at_ms: Some(1_000),
+            dropped_frames: 3,
+            error: None,
+        }
+        .into();
+        let json = serde_json::to_value(dto).expect("serialise");
+        assert_eq!(json["state"], "recording");
+        assert_eq!(json["sessionId"], 7);
+        assert_eq!(json["deviceId"], "usb");
+        assert_eq!(json["deviceName"], "USB microphone");
+        assert_eq!(json["sampleRate"], 16_000, "what is being recorded");
+        assert_eq!(
+            json["deviceSampleRate"], 48_000,
+            "what the microphone runs at"
+        );
+        assert_eq!(json["channels"], 1);
+        assert_eq!(json["frameMs"], 100);
+        assert_eq!(json["startedAtMs"], 1_000);
+        assert_eq!(json["droppedFrames"], 3);
+        assert_eq!(json["error"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn a_failed_capture_says_why() {
+        let dto: CaptureDto = CaptureSnapshot {
+            state: CaptureState::Error,
+            error: Some("audio device error: unplugged".to_string()),
+            ..CaptureSnapshot::default()
+        }
+        .into();
+        let json = serde_json::to_value(dto).expect("serialise");
+        assert_eq!(json["state"], "error");
+        assert_eq!(json["error"], "audio device error: unplugged");
+    }
+
+    #[test]
+    fn levels_carry_the_meter_reading() {
+        let dto: LevelsDto = LevelSnapshot {
+            rms: 0.25,
+            peak: 0.5,
+        }
+        .into();
+        let json = serde_json::to_value(dto).expect("serialise");
+        assert_eq!(json["rms"], 0.25);
+        assert_eq!(json["peak"], 0.5);
     }
 }

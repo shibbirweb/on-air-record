@@ -5,8 +5,19 @@
  * distance from now, so it is expressed that way rather than as an absolute timestamp alone.
  */
 
-import { Gauge, Pause, Play, Radio, RotateCcw, Volume2, VolumeX } from 'lucide-react';
-import { useState } from 'react';
+import {
+  Gauge,
+  Loader2,
+  Pause,
+  Play,
+  Radio,
+  RotateCcw,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +32,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAnimationFrame } from '@/hooks/useAnimationFrame';
 import { formatClock, formatOffsetFromLive } from '@/lib/format';
+import { noSoundNotice, soundSearchFrom } from '@/lib/soundSearch';
+import type { SoundSearchDirection } from '@/lib/soundSearch';
 import { useConnectionStore } from '@/store/useConnectionStore';
 import { useTimelineStore } from '@/store/useTimelineStore';
 import { useTransportStore } from '@/store/useTransportStore';
@@ -31,6 +44,9 @@ type TransportBarProps = {
 
 /** How far behind the live edge before the UI stops calling it live. */
 const LIVE_TOLERANCE_MS = 2500;
+
+/** How long "no earlier sound" and the like stay beside the controls. */
+const NOTICE_MS = 4000;
 
 /** Must match `PLAYBACK_SPEEDS` in `backend/src/ws/session.rs`. */
 const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4] as const;
@@ -53,6 +69,23 @@ export function TransportBar({ getPlayheadMs }: TransportBarProps) {
 
   const connected = useConnectionStore((state) => state.connected);
   const liveEdgeMs = useTimelineStore((state) => state.range?.liveEdgeMs ?? null);
+  const findSound = useTimelineStore((state) => state.findSound);
+  const windowStartMs = useTimelineStore((state) => state.windowStartMs);
+  const followingLive = useTimelineStore((state) => state.followingLive);
+  const bringIntoView = useTimelineStore((state) => state.bringIntoView);
+
+  // Which way a sound is being looked for, so its button can show it is working and a second press does
+  // not start a second search.
+  const [finding, setFinding] = useState<SoundSearchDirection | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (notice === null) {
+      return;
+    }
+    const timer = window.setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   // The playhead moves every frame. Holding it in state at 60 Hz would re render this whole bar, so it is
   // sampled on an animation frame and only committed when the displayed value would actually change.
@@ -95,6 +128,34 @@ export function TransportBar({ getPlayheadMs }: TransportBarProps) {
     seek(anchor - seconds * 1000);
   };
 
+  // Where the search starts is `soundSearchFrom`, tested on its own. The server applies the rest: next
+  // skips the sound just jumped to, previous restarts one well under way.
+  const jumpToSound = async (direction: SoundSearchDirection) => {
+    const fromMs = soundSearchFrom({
+      playheadMs: getPlayheadMs(),
+      cuedMs: requestedPositionMs,
+      windowStartMs,
+      followingLive,
+      liveEdgeMs,
+      nowMs: Date.now(),
+    });
+    setFinding(direction);
+    setNotice(null);
+    try {
+      const sound = await findSound(fromMs, direction);
+      if (sound === null) {
+        setNotice(noSoundNotice(direction));
+        return;
+      }
+      seek(sound.seekMs);
+      bringIntoView(sound.startMs);
+    } catch {
+      setNotice('Could not search for sounds. Try again in a moment.');
+    } finally {
+      setFinding(null);
+    }
+  };
+
   return (
     <div className="flex flex-wrap items-center gap-3">
       <Button
@@ -114,6 +175,36 @@ export function TransportBar({ getPlayheadMs }: TransportBarProps) {
           </Button>
         </TooltipTrigger>
         <TooltipContent>Jump back 30 seconds</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => void jumpToSound('backward')}
+            aria-label="Previous sound"
+            disabled={finding !== null}
+          >
+            {finding === 'backward' ? <Loader2 className="animate-spin" /> : <SkipBack />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Jump to the previous sound</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => void jumpToSound('forward')}
+            aria-label="Next sound"
+            disabled={finding !== null}
+          >
+            {finding === 'forward' ? <Loader2 className="animate-spin" /> : <SkipForward />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Jump to the next sound</TooltipContent>
       </Tooltip>
 
       <Button
@@ -136,6 +227,12 @@ export function TransportBar({ getPlayheadMs }: TransportBarProps) {
         )}
         {endOfRecording && <Badge variant="outline">end of recording</Badge>}
       </div>
+
+      {notice !== null && (
+        <span className="text-muted-foreground text-xs" role="status">
+          {notice}
+        </span>
+      )}
 
       {/* Only meaningful for history: the live feed arrives in real time, so the server forces 1x there. */}
       <Select

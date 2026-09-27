@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAnimationFrame } from '@/hooks/useAnimationFrame';
 import { dayLabel, localDayId } from '@/lib/day';
 import { formatClock } from '@/lib/format';
-import { timeToX, xToTime } from '@/lib/timelineGeometry';
+import { soundBands, timeToX, xToTime } from '@/lib/timelineGeometry';
 import type { TimelineWindow } from '@/lib/timelineGeometry';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 import { useTimelineStore } from '@/store/useTimelineStore';
@@ -47,6 +47,7 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
   const windowStartMs = useTimelineStore((state) => state.windowStartMs);
   const spanMs = useTimelineStore((state) => state.spanMs);
   const dayPeaks = useTimelineStore((state) => state.dayPeaks);
+  const daySounds = useTimelineStore((state) => state.daySounds);
   const range = useTimelineStore((state) => state.range);
   const scrollTo = useTimelineStore((state) => state.scrollTo);
   const minimapStartMs = useTimelineStore((state) => state.minimapWindow().startMs);
@@ -61,6 +62,7 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
     minimapStartMs,
     minimapEndMs,
     dayPeaks,
+    daySounds,
     range,
     requestedPositionMs,
     bookmarks,
@@ -73,6 +75,7 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
       minimapStartMs,
       minimapEndMs,
       dayPeaks,
+      daySounds,
       range,
       requestedPositionMs,
       bookmarks,
@@ -122,6 +125,7 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
       live: readCssColor(container, '--live', '#f33'),
       marker: readCssColor(container, '--foreground', '#fff'),
       bookmark: readCssColor(container, '--primary', '#e8a33d'),
+      sound: readCssColor(container, '--sound', '#2aa'),
     };
 
     const barTop = LABEL_HEIGHT;
@@ -182,6 +186,13 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
         const half = Math.max((amplitude * barHeight * 0.8) / 2, 0.5);
         context.fillRect(x, centreY - half, 1, half * 2);
       }
+    }
+
+    // The day's sounds as a strip along the bottom of the bar: at this size the point is to show where in
+    // the day something happened, so a quiet night reads as its few events at a glance.
+    context.fillStyle = colours.sound;
+    for (const band of soundBands(current.daySounds, view)) {
+      context.fillRect(band.left, barTop + barHeight - 4, band.width, 4);
     }
 
     // Tick marks only at this size. The label would not fit, and the point here is to show where in the
@@ -311,6 +322,8 @@ export function TimelineMinimap({ getPlayheadMs, className }: TimelineMinimapPro
     <div ref={containerRef} className={className}>
       <canvas
         ref={canvasRef}
+        role="img"
+        aria-label="Day overview"
         className={`w-full touch-none rounded-lg border bg-card select-none ${
           grabbing ? 'cursor-grabbing' : 'cursor-grab'
         }`}

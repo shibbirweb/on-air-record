@@ -22,7 +22,9 @@
   --secondary: oklch(0.96 0.003 90);
   --secondary-foreground: oklch(0.28 0.008 285);
   --muted: oklch(0.96 0.003 90);
-  --muted-foreground: oklch(0.55 0.012 285);
+  /* 0.53 rather than the registry's lighter grey: hints, inactive tabs and code snippets sit on --muted
+     and --accent, and anything lighter falls under the 4.5:1 WCAG AA asks of small text there. */
+  --muted-foreground: oklch(0.53 0.012 285);
   --accent: oklch(0.95 0.02 70);
   --accent-foreground: oklch(0.28 0.02 60);
   --destructive: oklch(0.58 0.22 27);
@@ -36,6 +38,8 @@
   --wave: oklch(0.72 0.16 60);
   --wave-muted: oklch(0.82 0.06 60);
   --coverage: oklch(0.88 0.04 60);
+  /* Moments something was heard, shaded on the timeline and minimap. */
+  --sound: oklch(0.6 0.12 190);
 }
 
 .dark {
@@ -63,6 +67,7 @@
   --wave: oklch(0.78 0.16 62);
   --wave-muted: oklch(0.45 0.08 62);
   --coverage: oklch(0.34 0.04 62);
+  --sound: oklch(0.72 0.11 190);
 }
 
 @theme inline {
@@ -95,6 +100,7 @@
   --color-wave: var(--wave);
   --color-wave-muted: var(--wave-muted);
   --color-coverage: var(--coverage);
+  --color-sound: var(--sound);
 }
 
 @layer base {

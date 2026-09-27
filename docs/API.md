@@ -62,11 +62,14 @@ Every failing request returns the same envelope with an appropriate status code.
 | `bad_request` | 400 | Malformed or out of range parameters |
 | `unauthenticated` | 401 | Accounts are on and there is no valid session, or the email or password was wrong |
 | `forbidden` | 403 | A listener asked for an admin route, or the request came from another website |
-| `not_found` | 404 | Unknown device, session, account, or timestamp |
+| `not_found` | 404 | Unknown device, session, account, or timestamp, or a path under `/api` that is not an endpoint |
 | `conflict` | 409 | Action not valid in the current state, for example starting an active capture, or removing the only admin |
 | `rate_limited` | 429 | Too many failed logins from this address; wait out the window the message names |
 | `audio_error` | 503 | The host audio system rejected the operation |
 | `internal` | 500 | Unexpected failure, details are in the server log |
+
+A path under `/api` that matches no endpoint answers `404` with this envelope, whether or not anybody is signed
+in, rather than the web interface's page. A known path asked with the wrong method answers `405`.
 
 ## Login and accounts
 
@@ -241,6 +244,7 @@ The one call the UI polls for the state of the world.
     "deviceId": "MacBook Pro Microphone",
     "deviceName": "MacBook Pro Microphone",
     "sampleRate": 48000,
+    "deviceSampleRate": 48000,
     "channels": 1,
     "frameMs": 100,
     "startedAtMs": 1757030400000,
@@ -254,8 +258,16 @@ The one call the UI polls for the state of the world.
 }
 ```
 
-`capture.state` is one of `idle`, `starting`, `recording`, or `error`. `listeners` counts every open stream
+`capture.state` is one of `idle`, `starting`, `recording`, or `error`. `capture.sampleRate` is the rate
+being recorded, after the recording rate setting; `capture.deviceSampleRate` is the rate the microphone
+itself runs at, which is what the recording rates on offer go up to. They differ when a lower rate is set.
+Both are `0` before the first capture. `listeners` counts every open stream
 socket, whether it is following the live feed, playing back history, or paused.
+
+`capture.error` is why capture failed when `state` is `error`. While `state` is `recording` it is set when
+recordings are not reaching the disk (the recordings folder cannot be written, the disk is full, or the
+database is refusing new segments) and starts `Recording to disk is failing, live audio continues`. The
+live feed is unaffected, and the field clears by itself once recording works again.
 
 ### `POST /api/capture/start`
 
@@ -312,7 +324,8 @@ a new recording session because the sample rate may differ. Returns the status b
   "autoStart": true,
   "autoStartDelaySeconds": 0,
   "frameMs": 100,
-  "checkForUpdates": true
+  "checkForUpdates": true,
+  "soundSensitivity": "medium"
 }
 ```
 
@@ -334,6 +347,7 @@ Accepts any subset of the settings object and returns the full updated object.
 | `autoStartDelaySeconds` | integer | 0 to 600 | On next service start. Seconds auto start waits before opening the device; the HTTP server does not wait |
 | `frameMs` | integer | 20 to 500 | On next capture start |
 | `checkForUpdates` | boolean | | On the next scheduled check. Whether the service asks GitHub every six hours for a newer release; see `GET /api/updates` |
+| `soundSensitivity` | string | `low`, `medium`, `high` | Immediately, for the next sounds request. How far above each room's own background a moment must rise to count as a sound; see `GET /api/timeline/sounds`. Any other word is refused |
 
 ### `GET /api/settings/defaults`
 
@@ -456,6 +470,55 @@ sessions recorded on one day are reported as one entry, however many times the r
 Each value is `0..255`. A zero means either silence or no recording, so the UI reads `coverage` from
 `/api/timeline/range` to tell the two apart.
 
+### `GET /api/timeline/sounds`
+
+The moments something was heard in a window, found from the stored levels with the current
+`soundSensitivity`. Listener access.
+
+| Query parameter | Required | Notes |
+| --- | --- | --- |
+| `fromMs` | yes | Window start, epoch milliseconds |
+| `toMs` | yes | Window end, greater than `fromMs`, at most 32 days after it |
+
+```json
+{
+  "fromMs": 1757030400000,
+  "toMs": 1757034000000,
+  "sensitivity": "medium",
+  "sounds": [
+    { "startMs": 1757031000000, "endMs": 1757031007200, "seekMs": 1757030999000, "peak": 36 }
+  ]
+}
+```
+
+- A sound is a stretch where the level rises clearly above that room's own background: each five minute
+  block gets a noise floor from its levels, and `soundSensitivity` sets how far above it counts. Bursts
+  under 200 ms are ignored, bursts less than 2 s apart merge, sounds under 300 ms are dropped, and a sound
+  never spans a gap in the recording.
+- A sound that starts before the window or ends after it is included whole, and the answer is the same
+  whatever the window, because the recording either side is read too.
+- `seekMs` is where to start playback to hear it from its beginning: a second early, but never inside a
+  gap. `peak` is its loudest level, `0..255`, on the same scale as `peaks`.
+- Only indexed segments are searched, like scrubbing, so the few seconds being recorded now are not.
+
+### `GET /api/timeline/sounds/next`
+
+The sound to jump to from where playback is. Searches all of history, a day at a time, not only a window.
+Listener access.
+
+| Query parameter | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `fromMs` | yes | | Where playback is now, epoch milliseconds |
+| `direction` | no | `forward` | `forward` or `backward` |
+
+```json
+{ "sound": { "startMs": 1757031000000, "endMs": 1757031007200, "seekMs": 1757030999000, "peak": 36 } }
+```
+
+`sound` is `null` when there is none that way. `forward` skips a sound whose `seekMs` is less than 250 ms
+ahead, which is the one just jumped to. `backward` returns the sound playback is in when more than 2 s
+into it, and the one before otherwise, the way a music player's back button treats a track.
+
 ## Export
 
 ### `GET /api/export/plan`
@@ -488,7 +551,8 @@ Streams a canonical 16 bit PCM WAV file with `Content-Length` and a
 Three things are worth knowing about what comes out:
 
 - **Gaps become silence** rather than being skipped, so the file's duration matches the requested range
-  and thirty seconds into the file is thirty seconds after `fromMs`.
+  and thirty seconds into the file is thirty seconds after `fromMs`. Audio whose file is missing or cut
+  short counts as a gap too.
 - **A range spanning several recording rates exports at the lowest of them**, downsampling the rest.
   Upsampling instead would invent detail the audio never had and make the file bigger for nothing. The
   plan reports this as `mixedRates`.
@@ -623,7 +687,7 @@ because its pongs keep it heard.
 | `stream-info` | `sampleRate`, `channels`, `frameMs`, `mode`, `serverTimeMs`, `liveEdgeMs`, `earliestMs`, `capturing` | Sent on connect, and again if capture stops while a listener is attached |
 | `mode` | `mode`, `positionMs` | The session changed between `live`, `playback`, and `paused` |
 | `switched-to-live` | `timestampMs` | Playback caught up with the live edge |
-| `gap` | `fromMs`, `toMs` | No recording exists in this range, playback skipped it |
+| `gap` | `fromMs`, `toMs` | No recording exists in this range, or its files are missing or cut short; playback skipped it |
 | `end-of-recording` | `timestampMs` | Playback reached the newest data while capture is stopped |
 | `level` | `rms`, `peak` | Input meter, emitted about ten times per second in live mode |
 | `speed` | `value` | The playback speed actually in force, after clamping, and whenever the server resets it |

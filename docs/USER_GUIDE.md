@@ -40,6 +40,7 @@ running it on macOS, Linux and Windows. On Linux, the recommended way is its
 - [Choosing which microphone to use](#choosing-which-microphone-to-use)
 - [The timeline](#the-timeline)
 - [Going back to an earlier moment](#going-back-to-an-earlier-moment)
+- [Finding the moments something happened](#finding-the-moments-something-happened)
 - [Playing slower or faster](#playing-slower-or-faster)
 - [Jumping to another day](#jumping-to-another-day)
 - [Bookmarks: naming a moment](#bookmarks-naming-a-moment)
@@ -388,6 +389,38 @@ One thing that surprises people: **the last few seconds of live audio cannot be 
 written to disk in short blocks, and a block only becomes rewindable once it has been finished and closed.
 The most recent seconds are audible live but are not yet on the timeline. They appear a moment later.
 
+## Finding the moments something happened
+
+A recorder left running is mostly quiet. Rather than listening through hours of nothing, let it find the
+moments something was heard.
+
+![The transport controls, with the previous and next sound buttons beside the 30 second rewind](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/transport-sounds.png)
+
+- **Next sound** (the button with a bar after the arrow) jumps to the next moment something was heard,
+  and **Previous sound** to the one before. Playback starts a second before each sound, so you hear it
+  from its beginning.
+- Pressing **Next sound** again moves on to the one after, even though you are still listening to the
+  first.
+- **Previous sound** works like the back button of a music player: a couple of seconds into a sound, it
+  starts that sound again; straight after jumping to one, it goes to the one before.
+- If nothing is playing, they search from the moment you have cued, or from the left edge of the timeline
+  if you have scrolled it. When there is nothing more that way, a short note beside the controls says so.
+
+![The timeline with three sounds marked in teal, and the same moments marked on the day overview beneath](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/timeline-sounds.png)
+
+The sounds are also **marked on the timeline in teal**, with a strip along the bottom so even a short one
+shows when zoomed out, and along the bottom of the whole day overview underneath. A quiet night then shows
+its few events at a glance.
+
+What counts as a sound is judged against **each room's own background**, not a fixed loudness: a noisy
+room needs a louder sound than a quiet one, and the background is re-measured every few minutes, so the
+heating coming on does not flag the rest of the day. Clicks shorter than a third of a second are ignored,
+and words with short pauses between them count as one sound. If it misses things you care about, or marks
+too much, an admin can change the [sound detection](#finding-sounds) setting.
+
+Very quiet sounds on a quiet microphone may not register at all, because the recorder keeps levels at a
+coarse scale. Raising the **input gain** under Settings helps.
+
 ## Playing slower or faster
 
 ![The playback speed menu, offering a quarter speed up to four times speed](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/speed.png)
@@ -477,6 +510,11 @@ playable. Shutting the service down itself is a separate thing, covered in the
 
 The remaining rows are for support purposes. **Dropped frames** should stay at zero; a number climbing
 there means the computer cannot keep up with the audio.
+
+If recordings stop reaching the disk, because the recordings folder cannot be written to, the disk is full
+or another program is holding the database, a red message under these rows says so. Listeners keep hearing
+the live feed meanwhile, but that stretch is not being saved. The message goes away by itself once the
+problem is fixed, and recording carries on without pressing anything.
 
 ## Disk space
 
@@ -569,6 +607,14 @@ recording after a reboot turns out silent while pressing Stop and then Start fix
 microphone was not ready yet when the service started, which is common with USB microphones on a machine
 that runs the service at boot. Ten to thirty seconds is usually plenty. The page itself is available
 straight away; only the recording waits.
+
+### Finding sounds
+
+**Sound detection** decides which moments are marked on the timeline and where the next and previous sound
+buttons jump: **Low** marks only clearly loud moments, such as a door or a raised voice; **Medium**, the
+default, suits ordinary speech in an ordinary room; **High** catches quiet sounds too, at the cost of
+marking more of the background. Like every setting it waits for **Save changes**, and it applies to
+everyone using the recorder.
 
 ### Updates
 

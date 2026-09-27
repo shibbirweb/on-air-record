@@ -105,6 +105,9 @@ of cargo, npm or node owns a given job. `make` on its own lists them.
 | `make check` | Everything CI checks, in the same order. Run this before pushing |
 | `make build` | The UI and then the release binary, in that order |
 | `make test` | Both test suites |
+| `make coverage` | Both test suites measuring coverage, failing under the floors; HTML reports in `backend/target/llvm-cov/html` and `frontend/coverage` |
+| `make e2e` | Build the UI and service, then drive them in headless Chrome |
+| `make mutants` | Mutation testing of the backend: `FILE=src/audio/activity.rs`, or what differs from `develop` |
 | `make lint` | Clippy with warnings denied, and oxlint |
 | `make dev-backend` / `make dev-frontend` | The two development servers, one per terminal |
 | `make pending` | Whether a release is due |
@@ -130,9 +133,12 @@ The underlying commands, for when you want one directly:
 | `cargo check` | Fast type check of the backend |
 | `cargo clippy --all-targets -- -D warnings` | Lint, treated as errors |
 | `cargo fmt` | Format Rust code |
-| `cargo test` | Run backend unit tests |
+| `cargo test` | Run the backend unit, router, stream and property tests |
+| `cargo llvm-cov` | The same, measuring coverage (`cargo install cargo-llvm-cov` first) |
 | `npm run build` | Type check with `tsc` and build the UI |
-| `npm test` | Vitest over the framework free frontend logic |
+| `npm test` | Vitest: the frontend logic, stores, property tests and components |
+| `npm run coverage` | The same, measuring coverage against the floors in `vite.config.ts` |
+| `node scripts/e2e.mjs` | The built service and UI driven through headless Chrome |
 | `npm run lint` | oxlint over the frontend |
 | `cargo build --release --target <triple>` | What the release workflow runs per platform |
 
@@ -249,15 +255,25 @@ spends most of its time drawing a progress bar.
 
 ## Continuous integration and releases
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request:
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request, in two
+stages. First the tests, side by side on Linux:
 
-- **backend**, a matrix over Ubuntu, macOS and Windows doing `cargo fmt --check`,
-  `cargo clippy --all-targets -- -D warnings` and `cargo test`. Ubuntu installs `libasound2-dev`, because
-  `cpal` links against ALSA there.
-- **frontend**, which lints, tests and builds.
-- **versions**, which checks the four recorded version numbers still agree.
-- **installers**, a matrix over the same three platforms that runs the installer from the checkout exactly
-  as a user would, then starts the service it produced and checks `/api/health` answers.
+- **backend tests**: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and the whole suite
+  measuring coverage, which fails under the floor in the `Makefile`. Ubuntu installs `libasound2-dev`,
+  because `cpal` links against ALSA there.
+- **frontend tests**: lint, the whole suite measuring coverage against the floors in `vite.config.ts`, and
+  the build.
+- **browser end to end**: the built service and UI driven through headless Chrome by `scripts/e2e.mjs`.
+
+Both coverage reports are attached to the run as artifacts. Only when all three pass does the second stage
+start:
+
+- **backend** and **frontend**, matrices over macOS and Windows that lint, test and build again.
+- **installers**, a matrix over all three platforms that runs the installer from the checkout exactly as a
+  user would, then starts the service it produced and checks `/api/health` answers.
+- **container image**, built and run, with each way the sound cards can be out of reach staged.
+
+**versions**, which checks the four recorded version numbers still agree, runs alongside the tests.
 
 The Windows legs are the point of both matrices. They cannot be reproduced on macOS, so a change that
 works here can still fail there and CI is the only warning you will get.

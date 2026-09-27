@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
+use crate::error::{AppError, AppResult};
+
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 8080;
 pub const DEFAULT_DATA_DIR: &str = "./data";
@@ -184,9 +186,19 @@ impl AppConfig {
     }
 
     /// Create the directories the service writes to. Called once during startup.
-    pub fn ensure_directories(&self) -> std::io::Result<()> {
-        std::fs::create_dir_all(&self.data_dir)?;
-        std::fs::create_dir_all(self.recordings_dir())?;
+    ///
+    /// The error names the directory, because this is the message an operator sees when the service
+    /// refuses to start, and a bare "File exists" or "Permission denied" leaves them guessing which of
+    /// several paths to fix.
+    pub fn ensure_directories(&self) -> AppResult<()> {
+        for dir in [self.data_dir.clone(), self.recordings_dir()] {
+            std::fs::create_dir_all(&dir).map_err(|error| {
+                AppError::internal(format!(
+                    "could not create the directory {}: {error}",
+                    dir.display()
+                ))
+            })?;
+        }
         Ok(())
     }
 }
@@ -206,28 +218,34 @@ impl AppConfigBuilder {
 
     /// Apply `OAR_*` environment variables. Unparseable values are ignored so a typo degrades to the
     /// default rather than preventing the service from starting.
-    pub fn with_environment(mut self) -> Self {
-        if let Ok(host) = std::env::var("OAR_HOST") {
+    pub fn with_environment(self) -> Self {
+        self.with_env_lookup(|name| std::env::var(name).ok())
+    }
+
+    /// `with_environment` with the lookup handed in, so tests need not change the process environment,
+    /// which every other test in the binary shares.
+    pub fn with_env_lookup(mut self, lookup: impl Fn(&str) -> Option<String>) -> Self {
+        if let Some(host) = lookup("OAR_HOST") {
             if !host.trim().is_empty() {
                 self.config.host = host;
             }
         }
-        if let Ok(port) = std::env::var("OAR_PORT") {
+        if let Some(port) = lookup("OAR_PORT") {
             if let Ok(parsed) = port.trim().parse::<u16>() {
                 self.config.port = parsed;
             }
         }
-        if let Ok(data_dir) = std::env::var("OAR_DATA_DIR") {
+        if let Some(data_dir) = lookup("OAR_DATA_DIR") {
             if !data_dir.trim().is_empty() {
                 self.config.data_dir = PathBuf::from(data_dir);
             }
         }
-        if let Ok(static_dir) = std::env::var("OAR_STATIC_DIR") {
+        if let Some(static_dir) = lookup("OAR_STATIC_DIR") {
             if !static_dir.trim().is_empty() {
                 self.config.static_dir = PathBuf::from(static_dir);
             }
         }
-        if let Ok(log_level) = std::env::var("OAR_LOG_LEVEL") {
+        if let Some(log_level) = lookup("OAR_LOG_LEVEL") {
             if !log_level.trim().is_empty() {
                 self.config.log_level = log_level;
             }
@@ -284,6 +302,85 @@ mod tests {
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 9000);
         assert_eq!(config.log_level, DEFAULT_LOG_LEVEL);
+    }
+
+    fn environment(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let pairs: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        move |name| {
+            pairs
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+        }
+    }
+
+    fn no_flags() -> CliArgs {
+        CliArgs {
+            host: None,
+            port: None,
+            data_dir: None,
+            static_dir: None,
+            log_level: None,
+            command: None,
+        }
+    }
+
+    #[test]
+    fn environment_variables_override_the_defaults() {
+        let config = AppConfigBuilder::new()
+            .with_env_lookup(environment(&[
+                ("OAR_HOST", "127.0.0.1"),
+                ("OAR_PORT", "8099"),
+                ("OAR_DATA_DIR", "/srv/oar"),
+                ("OAR_STATIC_DIR", "/srv/ui"),
+                ("OAR_LOG_LEVEL", "debug"),
+            ]))
+            .with_cli(no_flags())
+            .build();
+        assert_eq!(config.host, "127.0.0.1");
+        assert_eq!(config.port, 8099);
+        assert_eq!(config.data_dir, PathBuf::from("/srv/oar"));
+        assert_eq!(config.static_dir, PathBuf::from("/srv/ui"));
+        assert_eq!(config.log_level, "debug");
+    }
+
+    #[test]
+    fn a_flag_wins_over_the_environment() {
+        let config = AppConfigBuilder::new()
+            .with_env_lookup(environment(&[
+                ("OAR_PORT", "8099"),
+                ("OAR_HOST", "10.0.0.1"),
+            ]))
+            .with_cli(CliArgs {
+                port: Some(9000),
+                ..no_flags()
+            })
+            .build();
+        assert_eq!(config.port, 9000);
+        assert_eq!(
+            config.host, "10.0.0.1",
+            "what no flag names still comes from the environment"
+        );
+    }
+
+    #[test]
+    fn a_value_that_makes_no_sense_leaves_the_default_rather_than_stopping_the_service() {
+        let config = AppConfigBuilder::new()
+            .with_env_lookup(environment(&[
+                ("OAR_PORT", "eighty"),
+                ("OAR_HOST", "   "),
+                ("OAR_DATA_DIR", ""),
+                ("OAR_LOG_LEVEL", " "),
+            ]))
+            .build();
+        let defaults = AppConfig::default();
+        assert_eq!(config.port, defaults.port);
+        assert_eq!(config.host, defaults.host);
+        assert_eq!(config.data_dir, defaults.data_dir);
+        assert_eq!(config.log_level, defaults.log_level);
     }
 
     #[test]

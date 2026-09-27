@@ -1,0 +1,101 @@
+{
+  "historic44kStereo": {
+    "byteLength": 36,
+    "header": {
+      "channels": 2,
+      "flags": 0,
+      "formatCode": 0,
+      "live": false,
+      "magic": 827474255,
+      "sampleCount": 3,
+      "sampleRate": 44100,
+      "timestampMs": 1757030400100,
+      "version": 1
+    },
+    "hex": "4f4152310100020044ac00000300000064402c179901000064009cffd00730f8ff7f0080",
+    "samples": [
+      100,
+      -100,
+      2000,
+      -2000,
+      32767,
+      -32768
+    ]
+  },
+  "historicBeforeTheEpoch": {
+    "byteLength": 28,
+    "header": {
+      "channels": 1,
+      "flags": 0,
+      "formatCode": 0,
+      "live": false,
+      "magic": 827474255,
+      "sampleCount": 2,
+      "sampleRate": 16000,
+      "timestampMs": -86400000,
+      "version": 1
+    },
+    "hex": "4f41523101000100803e00000200000000a4d9faffffffff0500fbff",
+    "samples": [
+      5,
+      -5
+    ]
+  },
+  "live48kMono": {
+    "byteLength": 36,
+    "header": {
+      "channels": 1,
+      "flags": 1,
+      "formatCode": 0,
+      "live": true,
+      "magic": 827474255,
+      "sampleCount": 6,
+      "sampleRate": 48000,
+      "timestampMs": 1757030400000,
+      "version": 1
+    },
+    "hex": "4f4152310100010180bb00000600000000402c179901000000000100ffff0040ff7f0080",
+    "samples": [
+      0,
+      1,
+      -1,
+      16384,
+      32767,
+      -32768
+    ]
+  },
+  "liveEmpty": {
+    "byteLength": 24,
+    "header": {
+      "channels": 1,
+      "flags": 1,
+      "formatCode": 0,
+      "live": true,
+      "magic": 827474255,
+      "sampleCount": 0,
+      "sampleRate": 48000,
+      "timestampMs": 1757030400200,
+      "version": 1
+    },
+    "hex": "4f4152310100010180bb000000000000c8402c1799010000",
+    "samples": []
+  },
+  "liveLargestSafeTimestamp": {
+    "byteLength": 26,
+    "header": {
+      "channels": 1,
+      "flags": 1,
+      "formatCode": 0,
+      "live": true,
+      "magic": 827474255,
+      "sampleCount": 1,
+      "sampleRate": 48000,
+      "timestampMs": 9007199254740991,
+      "version": 1
+    },
+    "hex": "4f4152310100010180bb000001000000ffffffffffff1f000100",
+    "samples": [
+      1
+    ]
+  }
+}

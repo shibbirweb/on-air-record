@@ -18,12 +18,32 @@ pub struct Database {
 
 impl Database {
     /// Open the database at `path`, apply the connection pragmas, and run pending migrations.
+    ///
+    /// Any failure names the file. SQLite's own messages ("file is not a database", "attempt to write a
+    /// readonly database") never say which file they mean, and this is what an operator reads when the
+    /// service will not start.
     pub fn open(path: &Path) -> AppResult<Self> {
+        Self::open_at(path).map_err(|error| {
+            AppError::internal(format!(
+                "could not open the database {}: {error}",
+                path.display()
+            ))
+        })
+    }
+
+    fn open_at(path: &Path) -> AppResult<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
         let connection = Connection::open(path)?;
+        // SQLite quietly falls back to read only when the file cannot be written. Carrying on would start
+        // a service that plays old audio but indexes nothing it records, so refuse here instead.
+        if connection.is_readonly(rusqlite::MAIN_DB)? {
+            return Err(AppError::internal(
+                "the file is read only, and the service has to write to it",
+            ));
+        }
         configure(&connection)?;
 
         let database = Self {
@@ -89,5 +109,27 @@ mod tests {
             })
             .expect("query");
         assert_eq!(tables, 3);
+    }
+
+    #[test]
+    fn a_file_database_is_opened_in_wal_mode_with_foreign_keys_on() {
+        // WAL is what lets the recorder write while listeners read, and an in memory database cannot use
+        // it, so this needs a real file.
+        let dir = std::env::temp_dir().join(format!("oar-db-wal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("folder");
+        let database = Database::open(&dir.join("on-air-record.sqlite")).expect("open");
+        let (mode, foreign_keys): (String, i64) = database
+            .with_connection(|conn| {
+                let mode = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+                let keys = conn.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+                Ok((mode, keys))
+            })
+            .expect("pragmas");
+        drop(database);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(mode.to_lowercase(), "wal");
+        assert_eq!(foreign_keys, 1, "bookmarks and segments rely on it");
     }
 }

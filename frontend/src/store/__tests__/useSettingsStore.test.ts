@@ -16,6 +16,7 @@ const STORED: Settings = {
   recordingsDir: null,
   effectiveRecordingsDir: '/srv/oar/recordings',
   checkForUpdates: true,
+  soundSensitivity: 'medium',
 };
 
 const DEFAULTS: Settings = { ...STORED };

@@ -48,6 +48,14 @@ impl SegmentRepository {
         Self { database }
     }
 
+    /// The connection every repository of this application shares, so a fault test can shorten its busy
+    /// timeout. At the production five seconds, a test of what a locked database does would spend most
+    /// of its time waiting.
+    #[cfg(test)]
+    pub(crate) fn database(&self) -> &Arc<Database> {
+        &self.database
+    }
+
     pub fn insert(&self, draft: &SegmentDraft) -> AppResult<i64> {
         self.database.with_connection(|conn| {
             conn.execute(
@@ -220,14 +228,34 @@ impl SegmentRepository {
 
     /// Segments that ended before `cutoff_ms`, which the janitor is about to delete.
     pub fn find_expired(&self, cutoff_ms: i64, limit: i64) -> AppResult<Vec<Segment>> {
+        self.find_expired_after(cutoff_ms, None, limit)
+    }
+
+    /// The next page of expired segments, oldest first, after the `(ended_at_ms, id)` of the last one
+    /// already seen.
+    ///
+    /// Paged by position rather than by always taking the oldest, because a segment whose file cannot be
+    /// deleted keeps its row: taking the oldest again would return the same stuck rows on every pass and
+    /// never reach the rest.
+    pub fn find_expired_after(
+        &self,
+        cutoff_ms: i64,
+        after: Option<(i64, i64)>,
+        limit: i64,
+    ) -> AppResult<Vec<Segment>> {
+        let (after_ended_ms, after_id) = after.unwrap_or((i64::MIN, i64::MIN));
         self.database.with_connection(|conn| {
             let sql = format!(
                 "SELECT {SELECT_COLUMNS} FROM segments
                  WHERE ended_at_ms < ?1
-                 ORDER BY ended_at_ms ASC LIMIT ?2"
+                   AND (ended_at_ms > ?2 OR (ended_at_ms = ?2 AND id > ?3))
+                 ORDER BY ended_at_ms ASC, id ASC LIMIT ?4"
             );
             let mut statement = conn.prepare(&sql)?;
-            let rows = statement.query_map(rusqlite::params![cutoff_ms, limit], map_segment)?;
+            let rows = statement.query_map(
+                rusqlite::params![cutoff_ms, after_ended_ms, after_id, limit],
+                map_segment,
+            )?;
 
             let mut segments = Vec::new();
             for row in rows {

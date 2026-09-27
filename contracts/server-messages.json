@@ -1,0 +1,129 @@
+{
+  "end-of-recording": [
+    {
+      "timestampMs": 1757032200000,
+      "type": "end-of-recording"
+    }
+  ],
+  "error": [
+    {
+      "code": "bad_request",
+      "message": "could not parse the control message: unknown variant `explode`",
+      "type": "error"
+    }
+  ],
+  "gap": [
+    {
+      "fromMs": 1757030520000,
+      "toMs": 1757031300000,
+      "type": "gap"
+    }
+  ],
+  "level": [
+    {
+      "peak": 0.5,
+      "rms": 0.125,
+      "type": "level"
+    }
+  ],
+  "listeners": [
+    {
+      "listeners": [
+        {
+          "activity": "live",
+          "address": "192.168.1.20",
+          "connectedAtMs": 1757033400000,
+          "email": "owner@example.com",
+          "fromMs": null,
+          "id": 1,
+          "player": "playing",
+          "role": "admin",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+        },
+        {
+          "activity": "playback",
+          "address": "::1",
+          "connectedAtMs": 1757033500000,
+          "email": null,
+          "fromMs": 1757030400000,
+          "id": 2,
+          "player": "paused",
+          "role": null,
+          "userAgent": null
+        },
+        {
+          "activity": "paused",
+          "address": "10.0.0.7",
+          "connectedAtMs": 1757033600000,
+          "email": "listener@example.com",
+          "fromMs": null,
+          "id": 3,
+          "player": "idle",
+          "role": "listener",
+          "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)"
+        }
+      ],
+      "type": "listeners"
+    }
+  ],
+  "listeners-hidden": [
+    {
+      "type": "listeners-hidden"
+    }
+  ],
+  "mode": [
+    {
+      "mode": "playback",
+      "positionMs": 1757030460000,
+      "type": "mode"
+    },
+    {
+      "mode": "paused",
+      "positionMs": 1757030461500,
+      "type": "mode"
+    }
+  ],
+  "pong": [
+    {
+      "clientTimeMs": 1757034000000,
+      "serverTimeMs": 1757034000012,
+      "type": "pong"
+    }
+  ],
+  "speed": [
+    {
+      "type": "speed",
+      "value": 1.5
+    }
+  ],
+  "stream-info": [
+    {
+      "capturing": true,
+      "channels": 1,
+      "earliestMs": 1756944000000,
+      "frameMs": 100,
+      "liveEdgeMs": 1757034000000,
+      "mode": "live",
+      "sampleRate": 48000,
+      "serverTimeMs": 1757034000250,
+      "type": "stream-info"
+    },
+    {
+      "capturing": false,
+      "channels": 2,
+      "earliestMs": null,
+      "frameMs": 100,
+      "liveEdgeMs": null,
+      "mode": "playback",
+      "sampleRate": 44100,
+      "serverTimeMs": 1757034000250,
+      "type": "stream-info"
+    }
+  ],
+  "switched-to-live": [
+    {
+      "timestampMs": 1757034000000,
+      "type": "switched-to-live"
+    }
+  ]
+}
