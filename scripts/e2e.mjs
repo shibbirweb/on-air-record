@@ -116,7 +116,7 @@ async function scenario(DatabaseSync, { seedRecordings }, body) {
     const plan = seed(DatabaseSync, join(dataDir, 'on-air-record.sqlite'), seedRecordings);
     await withService(dataDir, () => body(plan));
   } finally {
-    rmSync(dataDir, { recursive: true, force: true });
+    removeTemporary(dataDir);
   }
 }
 
@@ -302,7 +302,8 @@ async function withChrome(body) {
       `--user-data-dir=${profile}`,
       'about:blank',
     ],
-    { env: ENV, stdio: 'ignore' },
+    // Detached, so Chrome leads a process group of its own and stopping it can reach its helpers too.
+    { env: ENV, stdio: 'ignore', detached: true },
   );
   const exited = new Promise((done) => chrome.on('exit', done));
   try {
@@ -323,11 +324,46 @@ async function withChrome(body) {
       page.close();
     }
   } finally {
-    chrome.kill();
-    // Chrome goes on writing its cache for a moment after being told to stop; deleting its profile
-    // before it has exited fails with a folder that is not empty.
+    // The renderer, GPU, network and crash reporting helpers can outlive the browser process and go on
+    // writing into the profile, so the whole group is stopped and waited for, not just the browser.
+    stopProcessGroup(chrome);
     await exited;
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    await processGroupGone(chrome.pid);
+    removeTemporary(profile);
+  }
+}
+
+/** Stop a detached child and everything it started, falling back to the child alone where groups are not
+ * signalled this way (Windows). */
+function stopProcessGroup(child) {
+  try {
+    process.kill(-child.pid, 'SIGTERM');
+  } catch {
+    child.kill();
+  }
+}
+
+/** Wait, for a few seconds at most, until no process of the group is left. */
+async function processGroupGone(pid) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      process.kill(-pid, 0);
+    } catch {
+      return;
+    }
+    await sleep(100);
+  }
+}
+
+/**
+ * Delete a temporary folder without letting a straggling writer fail the run. A folder left behind is not
+ * a failed check, and the verdict comes from the checks alone; on a CI runner it is discarded anyway.
+ */
+function removeTemporary(folder) {
+  try {
+    rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch (error) {
+    console.warn(`note: could not remove ${folder} (${error.code ?? error.message}), leaving it behind`);
   }
 }
 
@@ -666,7 +702,7 @@ async function checkExport(page) {
     }
   } finally {
     // Chrome can still be tidying up after a download it reported finished, as with its profile below.
-    rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    removeTemporary(folder);
   }
 }
 
