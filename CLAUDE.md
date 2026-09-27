@@ -329,6 +329,10 @@ ships `tzdata` because days are local; keep both. Its `HEALTHCHECK` is `on-air-r
 whether capture is running, on purpose. `make docker` builds it, and CI builds and runs it on every push,
 including each access failure staged with `mknod`. After a release, `verify-image` pulls it signed out on
 amd64 and arm64 and runs it with a loopback card; keep it signed out, or a still private package passes.
+Never hand an image name, or anything else containing `shibbirweb`, between jobs as a job output: GitHub
+drops outputs holding a secret's value, and `DOCKERHUB_USERNAME` is one. That emptied the image list up to
+0.8.0, so verify-image passed checking nothing and the Docker Hub page never published; pass a flag and
+rebuild names from `IMAGE`/`DOCKERHUB_IMAGE`, and fail on an empty list.
 The GID is read from the devices (`stat -c %g /dev/snd/timer`), never looked up by the name `audio`, in the
 setup guide, the README, `compose.yaml`'s header and CI's passthrough step; change all four together. The
 guide's Docker section is built around the three things passthrough needs (device present, device allowed,
@@ -337,11 +341,10 @@ group) and a symptom to fix table; keep a new failure mode in that table rather 
 device, owner GIDs against `/proc/self/status`) and appends the fix to capture errors; a new row in the
 table that the service can detect belongs in its `diagnose` too. It must only ever open a control device,
 never a PCM one, so checking never takes the microphone.
-`packaging/DOCKERHUB.md` is the whole Docker Hub page (Docker Hub reads nothing from GitHub), published on
-every release by `dockerhub-description.yml`, which `release.yml` calls. It rewrites the page's master
-links to the release tag and, while Docker Hub has no `latest`, names `beta` in place of the
-`<!-- before-stable -->` marker, so keep links pointing at master and keep that marker. Keep the page in
-step with the guide's Docker section, with absolute links only.
+`packaging/DOCKERHUB.md` is the whole Docker Hub page (Docker Hub reads nothing from GitHub), published by
+`dockerhub-description.yml` when it changes on master, or by hand; it is deliberately not part of a release.
+The page is for stable users, so its links point at master and name `latest`. Keep it in step with the
+guide's Docker section, with absolute links only.
 
 ## Docs and the wiki
 
