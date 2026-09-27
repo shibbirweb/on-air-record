@@ -571,13 +571,13 @@ jobs:
   # The last word on the image, as the verify job is on the archives, and on each architecture's own
   # hardware, since an arm64 image that pulls but will not start is exactly what a Raspberry Pi user would
   # meet. It never signs in: the tagging job did, and a signed in pull succeeds against a package that is
-  # still private, which is how GitHub publishes every new package. Everything here is what somebody
+  # still private, which new packages can be. Everything here is what somebody
   # following the setup guide does: pull each tag from each registry, run it with a sound card passed
   # through as the guide says, and check it answers, hears the card, and stops cleanly.
   #
   # Like verify, this runs after publishing, so a failure means the release is out and its image is not
-  # usable as documented. The first image ever published fails here until the ghcr.io package is made
-  # public, and says so; that failure is the point.
+  # usable as documented. A private ghcr.io package fails here, and says how to make it public; that
+  # failure is the point.
   verify-image:
     name: verify the image (${{ matrix.arch }})
     needs: [version, image-tags]
@@ -607,11 +607,20 @@ jobs:
           docker logout ghcr.io > /dev/null 2>&1 || true
           docker logout > /dev/null 2>&1 || true
 
+          # Exactly one digest out of whatever inspect prints: its --format output has no trailing newline,
+          # and anything else it writes to stdout must not be mistaken for part of the answer. Empty when
+          # the registry did not answer, which the callers treat as a failure rather than a match.
+          digest_of() {
+            docker buildx imagetools inspect "$1" --format '{{.Manifest.Digest}}' | grep -oE 'sha256:[0-9a-f]{64}' | head -n 1
+          }
+
+          reference=""
+          reference_image=""
           for image in $IMAGES; do
             if ! docker pull "$image:$VERSION"; then
               case "$image" in
                 ghcr.io/*)
-                  echo "::error::$image:$VERSION cannot be pulled without signing in. GitHub publishes every new package as private: open https://github.com/users/shibbirweb/packages/container/on-air-record/settings, Change visibility, Public, then re-run this job."
+                  echo "::error::$image:$VERSION cannot be pulled without signing in, so the package is private: open https://github.com/users/shibbirweb/packages/container/on-air-record/settings, Change visibility, Public, then re-run this job."
                   ;;
                 *)
                   echo "::error::$image:$VERSION cannot be pulled without signing in. Check the repository exists on Docker Hub and is public."
@@ -619,17 +628,25 @@ jobs:
               esac
               exit 1
             fi
-            expected="$(docker buildx imagetools inspect "$image:$VERSION" --format '{{.Manifest.Digest}}')"
+            expected="$(digest_of "$image:$VERSION")"
+            [ -n "$expected" ] || { echo "::error::$image:$VERSION pulled, but inspecting it returned no digest"; exit 1; }
             for tag in $TAGS; do
-              found="$(docker buildx imagetools inspect "$image:$tag" --format '{{.Manifest.Digest}}')"
-              [ "$found" = "$expected" ] || { echo "::error::$image:$tag points at $found, not the $VERSION image $expected"; exit 1; }
+              found="$(digest_of "$image:$tag")"
+              [ "$found" = "$expected" ] || { echo "::error::$image:$tag points at '$found', not the $VERSION image $expected"; exit 1; }
               echo "$image:$tag -> $found"
             done
-          done
 
-          # Every registry has to hold the one image, not merely one with the same tag.
-          digests="$(for image in $IMAGES; do docker buildx imagetools inspect "$image:$VERSION" --format '{{.Manifest.Digest}}'; done | sort -u | wc -l)"
-          [ "$digests" -eq 1 ] || { echo "::error::the registries hold different images under $VERSION"; exit 1; }
+            # Every registry has to hold the one image, not merely one with the same tag. Compared with the
+            # digest just read, so each registry is asked once, and both values are named if they differ.
+            if [ -z "$reference" ]; then
+              reference="$expected"
+              reference_image="$image"
+            elif [ "$expected" != "$reference" ]; then
+              echo "::error::$image:$VERSION is $expected but $reference_image:$VERSION is $reference: the registries hold different images"
+              exit 1
+            fi
+          done
+          echo "every registry holds $reference under every tag"
 
       # The runner has no sound card; the kernel's loopback card stands in, as in CI. A runner that cannot
       # load it is a warning, because the image is not what is broken then.

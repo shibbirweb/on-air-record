@@ -1395,12 +1395,12 @@ Publishing starts [`.github/workflows/release.yml`](../.github/workflows/release
    same one, then runs it from each with a loopback sound card passed through as this guide says, and checks
    it answers as that version, offers the card as a microphone, and stops cleanly.
 
-**The first image ever pushed is private.** GitHub makes every new package private whatever the
-repository is, so after the first release that carries an image, open the package from the repository's
-**Packages** list, then **Package settings**, **Change visibility**, **Public**. Until then `docker pull`
-asks for a login. This is needed once, not per release. The **verify the image** jobs fail on that first
-release, on purpose, with an error linking to the setting; once it is public, re-run the failed jobs from
-the run's page.
+**If the image cannot be pulled without signing in,** the ghcr.io package is private. New packages can
+start out private; this one was public from its first release, 0.8.0-beta.1, but the setting is worth
+knowing. Open the package from the repository's **Packages** list, then **Package settings**, **Change
+visibility**, **Public**. The **verify the image** jobs pull without signing in precisely to catch this,
+and fail with an error linking to the setting; once it is public, re-run the failed jobs from the run's
+page.
 
 **Docker Hub needs two repository secrets,** set once:
 
