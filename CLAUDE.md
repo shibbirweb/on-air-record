@@ -344,7 +344,9 @@ never a PCM one, so checking never takes the microphone.
 `packaging/DOCKERHUB.md` is the whole Docker Hub page (Docker Hub reads nothing from GitHub), published by
 `dockerhub-description.yml` when it changes on master, or by hand; it is deliberately not part of a release.
 The page is for stable users, so its links point at master and name `latest`. Keep it in step with the
-guide's Docker section, with absolute links only.
+guide's Docker section, with absolute links only. The README, the guide and the page each carry the whole
+compose file after a `<!-- full-compose-file` marker; CI's "Docs carry the real compose file" step compares them with
+`packaging/compose.yaml` through `docker compose config`, so change all four together.
 
 ## Docs and the wiki
 

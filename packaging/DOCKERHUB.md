@@ -37,6 +37,46 @@ the settings page.
 To pull from Docker Hub rather than ghcr.io, change the `image` line in `compose.yaml` to
 `shibbirweb/on-air-record:latest`.
 
+### The whole compose file
+
+To write it by hand instead of downloading it, save this as `compose.yaml` in an empty folder, create
+`.env` beside it as above, and run `docker compose up -d`:
+
+<!-- full-compose-file: CI checks this says the same as packaging/compose.yaml -->
+```yaml
+name: on-air-record                        # so the volume is always called on-air-record_data
+
+services:
+  on-air-record:
+    image: shibbirweb/on-air-record:latest # or ghcr.io/shibbirweb/on-air-record:latest
+    container_name: on-air-record
+    restart: unless-stopped                # starts again with the machine
+    ports:
+      - "${OAR_PORT:-8080}:8080"           # the host's port on the left, set in .env
+    devices:
+      - /dev/snd:/dev/snd                  # the sound cards, as a device, never a volume
+    group_add:
+      - "${AUDIO_GID:-29}"                 # the number of the group that owns /dev/snd
+    environment:
+      TZ: "${TZ:-UTC}"                     # recordings are filed by local calendar day
+      # OAR_CHANNEL: beta                  # when following the beta tag
+      # OAR_LOG_LEVEL: debug               # more detail, when reporting a problem
+    volumes:
+      - data:/data                         # recordings, settings and accounts
+    stop_grace_period: 30s                 # time to save the recording in progress when stopped
+
+volumes:
+  data:
+```
+
+And `.env` beside it, with your own values:
+
+```sh
+AUDIO_GID=29
+TZ=Europe/London
+# OAR_PORT=9000
+```
+
 ### Without Compose
 
 ```sh
