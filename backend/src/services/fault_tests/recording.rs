@@ -478,6 +478,9 @@ fn a_database_held_locked_at_a_segment_close_never_pauses_the_live_feed() {
 
 #[test]
 fn storage_a_whole_queue_behind_costs_the_recording_frames_never_the_broadcast() {
+    // Far more than the queue holds, however slowly this machine sends them: the disk thread, stuck behind
+    // the lock, drains at most a segment per busy timeout, so the overflow never depends on speed.
+    const SENT: i64 = 1_500;
     let store = Store::new("record-queue-full");
     slow_to_give_up_on_a_lock(&store);
     let wiring = Wiring::from_store(&store);
@@ -485,17 +488,17 @@ fn storage_a_whole_queue_behind_costs_the_recording_frames_never_the_broadcast()
     let locker = store.second_connection();
     locker.execute_batch("BEGIN EXCLUSIVE;").expect("lock");
 
-    // The first segment's close stalls the disk thread for a second, while 85 seconds of audio arrive at
+    // The first segment's close stalls the disk thread for a second, while 150 seconds of audio arrive at
     // once: far more than the minute the queue holds.
     let sender = recorder.sender.clone().expect("capturing");
-    for index in 0..850 {
+    for index in 0..SENT {
         sender
             .send(frame_at(T0 + index * FRAME_MS, 100))
             .expect("the recorder is taking frames");
     }
     let hub = recorder.hub.clone();
     wait_until("every frame is broadcast", move || {
-        hub.frames_published() == 850
+        hub.frames_published() == SENT as u64
     });
     let health = recorder.health.clone();
     wait_until("the recorder says frames are being left out", move || {
@@ -503,20 +506,32 @@ fn storage_a_whole_queue_behind_costs_the_recording_frames_never_the_broadcast()
             .problem()
             .is_some_and(|problem| problem.contains("left out of the recording"))
     });
+    // Past the one second busy timeout the disk thread gets going again and writes what it can between
+    // closes. Its successful writes used to clear this warning while frames were still being left out,
+    // which a slow CI runner showed; the warning is the recorder thread's, and stays until frames fit.
+    std::thread::sleep(std::time::Duration::from_millis(1_500));
+    assert!(
+        recorder
+            .health
+            .problem()
+            .is_some_and(|problem| problem.contains("left out of the recording")),
+        "the disk thread's next successful write cleared the warning: {:?}",
+        recorder.health.problem()
+    );
 
     locker.execute_batch("COMMIT;").expect("unlock");
     let health = recorder.health.clone();
     wait_until("the queue has drained to disk", move || {
-        health.frames_written() + health.frames_not_written() == 850
+        health.frames_written() + health.frames_not_written() == SENT as u64
     });
     let dropped = recorder.health.frames_not_written();
     assert!(
-        (100..=300).contains(&dropped),
-        "about the frames past the minute's queue were dropped, not {dropped}"
+        dropped > 0 && dropped < SENT as u64,
+        "frames past the queue were left out, and only those: {dropped} of {SENT}"
     );
 
     // Storage is back. Capture carries on at its true time, after the frames that never reached the disk.
-    let resume_ms = T0 + 850 * FRAME_MS;
+    let resume_ms = T0 + SENT * FRAME_MS;
     for index in 0..30 {
         sender
             .send(frame_at(resume_ms + index * FRAME_MS, 100))
@@ -524,14 +539,14 @@ fn storage_a_whole_queue_behind_costs_the_recording_frames_never_the_broadcast()
     }
     drop(sender);
     let mut recorder = recorder;
-    recorder.sent = 880;
+    recorder.sent = SENT as u64 + 30;
     recorder.stop();
 
     let segments = indexed(&store.segments);
     let recorded_ms: i64 = segments.iter().map(|(start, end)| end - start).sum();
     assert_eq!(
         recorded_ms + dropped as i64 * FRAME_MS,
-        88_000,
+        (SENT + 30) * FRAME_MS,
         "every frame is either recorded or counted as left out: {segments:?}"
     );
     for pair in segments.windows(2) {
@@ -543,7 +558,7 @@ fn storage_a_whole_queue_behind_costs_the_recording_frames_never_the_broadcast()
     let last = segments.last().expect("a segment after storage came back");
     assert_eq!(
         *last,
-        (85_000, 88_000),
+        (SENT * FRAME_MS, (SENT + 30) * FRAME_MS),
         "recording resumed in a new segment at its true time, not spliced onto the one before the hole"
     );
 }

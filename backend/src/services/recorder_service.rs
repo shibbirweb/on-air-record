@@ -62,20 +62,25 @@ pub struct RecorderContext {
 /// The recorder keeps the live feed going whatever the disk does, which is right, but it means nothing
 /// else notices when recording stops working: without this, a recorder that has not written a byte for
 /// hours still reports `recording` with no error, and the operator finds out when they go looking for the
-/// audio. Writing and indexing are tracked apart because they recover apart; a successful write must not
-/// clear an index that is still refusing rows, or the error would flicker on and off every segment.
+/// audio. Writing, indexing and the disk queue overflowing are tracked apart because they recover apart: a
+/// successful write must not clear an index that is still refusing rows, nor frames still being left out
+/// because the queue is full, or the error would flicker on and off while the problem went on.
 #[derive(Debug, Default)]
 pub struct RecorderHealth {
     frames_written: AtomicU64,
     frames_not_written: AtomicU64,
     writing: Mutex<Option<String>>,
     indexing: Mutex<Option<String>>,
+    /// Owned by the recorder thread: set when the disk queue is full, cleared only when frames fit again.
+    overflow: Mutex<Option<String>>,
 }
 
 impl RecorderHealth {
     /// What is wrong right now, worded for the recorder panel, or `None` while all is well.
     pub fn problem(&self) -> Option<String> {
-        let current = read_slot(&self.writing).or_else(|| read_slot(&self.indexing))?;
+        let current = read_slot(&self.overflow)
+            .or_else(|| read_slot(&self.writing))
+            .or_else(|| read_slot(&self.indexing))?;
         Some(format!(
             "Recording to disk is failing, live audio continues: {current}"
         ))
@@ -97,6 +102,7 @@ impl RecorderHealth {
         self.frames_not_written.store(0, Ordering::Relaxed);
         replace_slot(&self.writing, None);
         replace_slot(&self.indexing, None);
+        replace_slot(&self.overflow, None);
     }
 
     fn frame_written(&self) {
@@ -252,7 +258,10 @@ fn run(
                     Ok(()) => {
                         if behind {
                             behind = false;
-                            tracing::info!("the disk has caught up, frames are recorded again");
+                            report_recovery(
+                                &context.health.overflow,
+                                "keeping up with the recording",
+                            );
                         }
                     }
                     Err(TrySendError::Full(_)) => {
@@ -263,7 +272,7 @@ fn run(
                         if !behind {
                             behind = true;
                             report_failure(
-                                &context.health.writing,
+                                &context.health.overflow,
                                 "storage has not kept up for a minute, so frames are being left out of the recording".to_string(),
                             );
                         }
