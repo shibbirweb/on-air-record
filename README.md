@@ -1,5 +1,22 @@
 # On Air Record
 
+[![Stable build](https://img.shields.io/github/actions/workflow/status/shibbirweb/on-air-record/ci.yml?branch=master&label=stable%20build&logo=githubactions&logoColor=white)](https://github.com/shibbirweb/on-air-record/actions/workflows/ci.yml?query=branch%3Amaster)
+[![Beta build](https://img.shields.io/github/actions/workflow/status/shibbirweb/on-air-record/ci.yml?branch=develop&label=beta%20build&logo=githubactions&logoColor=white)](https://github.com/shibbirweb/on-air-record/actions/workflows/ci.yml?query=branch%3Adevelop)
+[![Stable release](https://img.shields.io/github/v/release/shibbirweb/on-air-record?label=stable&sort=semver)](https://github.com/shibbirweb/on-air-record/releases/latest)
+[![Beta release](https://img.shields.io/github/v/release/shibbirweb/on-air-record?include_prereleases&label=beta&sort=semver)](https://github.com/shibbirweb/on-air-record/releases)
+[![Downloads](https://img.shields.io/github/downloads/shibbirweb/on-air-record/total?label=downloads)](https://github.com/shibbirweb/on-air-record/releases)
+
+[![Docker Hub](https://img.shields.io/docker/v/shibbirweb/on-air-record?sort=semver&label=docker%20hub&logo=docker&logoColor=white)](https://hub.docker.com/r/shibbirweb/on-air-record)
+[![Docker pulls](https://img.shields.io/docker/pulls/shibbirweb/on-air-record?logo=docker&logoColor=white)](https://hub.docker.com/r/shibbirweb/on-air-record)
+[![Image size](https://img.shields.io/docker/image-size/shibbirweb/on-air-record/latest?logo=docker&logoColor=white)](https://hub.docker.com/r/shibbirweb/on-air-record/tags)
+[![GitHub Container Registry](https://img.shields.io/badge/ghcr.io-shibbirweb%2Fon--air--record-2088FF?logo=github)](https://github.com/shibbirweb/on-air-record/pkgs/container/on-air-record)
+[![Image architectures](https://img.shields.io/badge/image-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](docs/SETUP.md#docker-on-linux)
+
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-informational)](docs/SETUP.md#which-way-to-install)
+[![Rust](https://img.shields.io/badge/rust-1.82%2B-B7410E?logo=rust)](docs/SETUP.md#building-from-source)
+[![License: MIT](https://img.shields.io/github/license/shibbirweb/on-air-record)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/shibbirweb/on-air-record/develop)](https://github.com/shibbirweb/on-air-record/commits/develop)
+
 A cross platform audio broadcast and DVR service written in Rust, with a browser based control room UI
 built in React. The service captures audio from a microphone on the host machine, streams it live to any
 browser on the local network, records it continuously to disk, and lets you scrub back to any point in the
