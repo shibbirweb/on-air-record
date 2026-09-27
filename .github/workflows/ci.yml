@@ -426,6 +426,47 @@ jobs:
           [ "$code" = "0" ] || { docker logs on-air-record; echo "docker stop ended it with exit code $code"; exit 1; }
           echo "the image runs, reports itself, and stops cleanly"
 
+      # When the sound cards cannot be reached, the service says which of the three requirements in the
+      # setup guide is missing and what to change. Each case is staged with mknod, so the kernel returns the
+      # real EPERM or EACCES, then the service is started as its own user with setpriv, exactly as the image
+      # runs it. No sound hardware is involved, so every runner can do this.
+      - name: Diagnose each way the sound cards can be out of reach
+        run: |
+          set -eu
+          stage() {
+            name="$1"; setup="$2"; expected="$3"; shift 3
+            if [ -n "$setup" ]; then
+              docker run -d --name access-case -p 8097:8080 --user root --entrypoint sh "$@" on-air-record:ci \
+                -c "$setup && exec setpriv --reuid=10001 --regid=999 --init-groups on-air-record" > /dev/null
+            else
+              docker run -d --name access-case -p 8097:8080 "$@" on-air-record:ci > /dev/null
+            fi
+            for _ in $(seq 1 60); do
+              if curl -fsS http://127.0.0.1:8097/api/health > /dev/null 2>&1; then break; fi
+              sleep 0.5
+            done
+            answer="$(curl -s -X POST -H 'Origin: http://127.0.0.1:8097' http://127.0.0.1:8097/api/capture/start)"
+            docker rm -f access-case > /dev/null
+            echo "$name: $answer"
+            if [ -n "$expected" ]; then
+              echo "$answer" | grep -qF "$expected" || { echo "::error::$name: expected the advice '$expected'"; exit 1; }
+            else
+              # Everything a container controls is right, so there must be no advice, only the device error.
+              if echo "$answer" | grep -qE 'group_add|devices:|--device|AUDIO_GID|SELinux'; then
+                echo "::error::$name: advice given where none was due"; exit 1
+              fi
+            fi
+          }
+          nodes='mkdir /dev/snd && mknod -m 660 /dev/snd/controlC0 c 116 0 && mknod -m 660 /dev/snd/timer c 116 33'
+
+          stage "not passed in" "" "/dev/snd was not passed in"
+          stage "mounted as a volume" "$nodes && chmod 666 /dev/snd/*" "which happens when it is mounted as a volume"
+          stage "wrong group" "$nodes && chgrp 63 /dev/snd/*" "Set AUDIO_GID=63 in .env"
+          stage "no sound card" "mkdir /dev/snd && mknod -m 660 /dev/snd/timer c 116 33 && chgrp 29 /dev/snd/*" \
+            "holds no sound card" --device-cgroup-rule='c 116:* rmw'
+          stage "everything right" "$nodes && chgrp 29 /dev/snd/*" "" --device-cgroup-rule='c 116:* rmw'
+          echo "every access problem is named, and a correct setup gets no advice"
+
       # What the image is for: a sound card on the host, passed through the way the compose file does it,
       # with the host's audio group number, has to show up as a microphone. A runner has no sound card, so
       # the kernel's loopback card stands in for one. Loading it depends on the runner's kernel packages,

@@ -1389,13 +1389,18 @@ Publishing starts [`.github/workflows/release.yml`](../.github/workflows/release
    `linux/arm64`, each on its own native runner, and pushes it to `ghcr.io/shibbirweb/on-air-record`
    tagged with the version, and to Docker Hub as `shibbirweb/on-air-record` when its secrets are set up
    (below). A beta also moves `beta`; a stable release moves `latest`, `beta` and its minor line, like
-   `0.7`. Then it runs the published image, checks it answers as that version, and checks Docker Hub holds
-   the identical image.
+   `0.7`.
+8. Verifies the image the way a user gets it, on an amd64 and an arm64 runner, **without signing in**:
+   pulls it from both registries, checks every tag points at the new image and both registries hold the
+   same one, then runs it from each with a loopback sound card passed through as this guide says, and checks
+   it answers as that version, offers the card as a microphone, and stops cleanly.
 
 **The first image ever pushed is private.** GitHub makes every new package private whatever the
 repository is, so after the first release that carries an image, open the package from the repository's
 **Packages** list, then **Package settings**, **Change visibility**, **Public**. Until then `docker pull`
-asks for a login. This is needed once, not per release.
+asks for a login. This is needed once, not per release. The **verify the image** jobs fail on that first
+release, on purpose, with an error linking to the setting; once it is public, re-run the failed jobs from
+the run's page.
 
 **Docker Hub needs two repository secrets,** set once:
 
@@ -1439,8 +1444,9 @@ locally instead.
 Separately, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request:
 formatting, linting and the full test suite on macOS, Linux and Windows, the frontend checks, a check that
 the four recorded versions still agree, a run of the installers on all three platforms that starts the
-service they produce and confirms it answers, and a build of the container image that runs it, passes a
-loopback sound card into it, and stops it. Those Windows jobs are the only thing standing behind the
+service they produce and confirms it answers, and a build of the container image that runs it, stages
+each way the sound cards can be out of reach and checks the service names the right fix, passes a loopback
+sound card into it, and stops it. Those Windows jobs are the only thing standing behind the
 Windows build, since it cannot be produced or tested from a Mac.
 
 ## Setup problems

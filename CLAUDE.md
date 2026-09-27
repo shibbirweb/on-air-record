@@ -325,7 +325,9 @@ real microphone, only checked in CI with a loopback card. The image sets `OAR_CO
 install kind `docker` so update notices say to pull rather than run an installer. It runs as uid 10001 and
 ships `tzdata` because days are local; keep both. Its `HEALTHCHECK` is `on-air-record health`
 (`health_probe.rs`), a std only HTTP probe of `/api/health` that opens no database; it reports liveness, not
-whether capture is running, on purpose. `make docker` builds it, and CI builds and runs it on every push.
+whether capture is running, on purpose. `make docker` builds it, and CI builds and runs it on every push,
+including each access failure staged with `mknod`. After a release, `verify-image` pulls it signed out on
+amd64 and arm64 and runs it with a loopback card; keep it signed out, or a still private package passes.
 The GID is read from the devices (`stat -c %g /dev/snd/timer`), never looked up by the name `audio`, in the
 setup guide, the README, `compose.yaml`'s header and CI's passthrough step; change all four together. The
 guide's Docker section is built around the three things passthrough needs (device present, device allowed,

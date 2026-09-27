@@ -517,6 +517,10 @@ jobs:
       packages: write
     env:
       DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    # Handed to verify-image, so it checks exactly what was tagged rather than working it out again.
+    outputs:
+      tags: ${{ steps.tag.outputs.tags }}
+      images: ${{ steps.tag.outputs.images }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -539,6 +543,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Tag both architectures under the version
+        id: tag
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
@@ -560,45 +565,130 @@ jobs:
             docker buildx imagetools create "$@"
             docker buildx imagetools inspect "$image:$VERSION"
           done
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "images=$images" >> "$GITHUB_OUTPUT"
 
-      # The same last word the verify job gives the archives: pull what was just published, the way a user
-      # would, and check it comes up as the version it is tagged as and knows it is in a container.
-      - name: Run the published image
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
+  # The last word on the image, as the verify job is on the archives, and on each architecture's own
+  # hardware, since an arm64 image that pulls but will not start is exactly what a Raspberry Pi user would
+  # meet. It never signs in: the tagging job did, and a signed in pull succeeds against a package that is
+  # still private, which is how GitHub publishes every new package. Everything here is what somebody
+  # following the setup guide does: pull each tag from each registry, run it with a sound card passed
+  # through as the guide says, and check it answers, hears the card, and stops cleanly.
+  #
+  # Like verify, this runs after publishing, so a failure means the release is out and its image is not
+  # usable as documented. The first image ever published fails here until the ghcr.io package is made
+  # public, and says so; that failure is the point.
+  verify-image:
+    name: verify the image (${{ matrix.arch }})
+    needs: [version, image-tags]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TAGS: ${{ needs.image-tags.outputs.tags }}
+      IMAGES: ${{ needs.image-tags.outputs.images }}
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Pull every tag anonymously
         run: |
           set -eu
-          docker run -d --name on-air-record -p 8099:8080 "$IMAGE:$VERSION"
-          answered=0
-          for _ in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8099/api/health -o health.json 2>/dev/null; then answered=1; break; fi
-            sleep 1
+          # A fresh runner holds no credentials, but make sure of it, since this step means nothing
+          # otherwise.
+          docker logout ghcr.io > /dev/null 2>&1 || true
+          docker logout > /dev/null 2>&1 || true
+
+          for image in $IMAGES; do
+            if ! docker pull "$image:$VERSION"; then
+              case "$image" in
+                ghcr.io/*)
+                  echo "::error::$image:$VERSION cannot be pulled without signing in. GitHub publishes every new package as private: open https://github.com/users/shibbirweb/packages/container/on-air-record/settings, Change visibility, Public, then re-run this job."
+                  ;;
+                *)
+                  echo "::error::$image:$VERSION cannot be pulled without signing in. Check the repository exists on Docker Hub and is public."
+                  ;;
+              esac
+              exit 1
+            fi
+            expected="$(docker buildx imagetools inspect "$image:$VERSION" --format '{{.Manifest.Digest}}')"
+            for tag in $TAGS; do
+              found="$(docker buildx imagetools inspect "$image:$tag" --format '{{.Manifest.Digest}}')"
+              [ "$found" = "$expected" ] || { echo "::error::$image:$tag points at $found, not the $VERSION image $expected"; exit 1; }
+              echo "$image:$tag -> $found"
+            done
           done
-          if [ "$answered" -ne 1 ]; then
-            echo "the published image never answered"
-            docker logs on-air-record || true
-            exit 1
-          fi
-          cat health.json; echo
-          grep -q "\"version\":\"$VERSION\"" health.json || { echo "health reported the wrong version"; exit 1; }
-          curl -fsS http://127.0.0.1:8099/api/updates | grep -q '"kind":"docker"' \
-            || { echo "the image does not know it is a container, so admins would be told to run an installer"; exit 1; }
-          docker exec on-air-record on-air-record health
-          docker stop on-air-record > /dev/null
-          echo "image $IMAGE:$VERSION verified"
 
-      # Docker Hub has to hold the very same image, not merely one with the same tag: same manifest digest,
-      # and pulling it runs the version it is tagged as.
-      - name: Check Docker Hub serves the same image
-        if: env.DOCKERHUB == 'true'
+          # Every registry has to hold the one image, not merely one with the same tag.
+          digests="$(for image in $IMAGES; do docker buildx imagetools inspect "$image:$VERSION" --format '{{.Manifest.Digest}}'; done | sort -u | wc -l)"
+          [ "$digests" -eq 1 ] || { echo "::error::the registries hold different images under $VERSION"; exit 1; }
+
+      # The runner has no sound card; the kernel's loopback card stands in, as in CI. A runner that cannot
+      # load it is a warning, because the image is not what is broken then.
+      - name: Load a loopback sound card
+        id: card
+        run: |
+          if sudo modprobe snd-aloop 2>/dev/null \
+             || { sudo apt-get update > /dev/null \
+                  && sudo apt-get install -y "linux-modules-extra-$(uname -r)" > /dev/null \
+                  && sudo modprobe snd-aloop; }; then
+            ls -ln /dev/snd
+            echo "loaded=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::This runner could not load snd-aloop, so the published image ran without a sound card on ${{ matrix.arch }}."
+            echo "loaded=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run it from each registry, as the setup guide does
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          CARD: ${{ steps.card.outputs.loaded }}
         run: |
           set -eu
-          ghcr="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{.Manifest.Digest}}')"
-          hub="$(docker buildx imagetools inspect "$DOCKERHUB_IMAGE:$VERSION" --format '{{.Manifest.Digest}}')"
-          echo "ghcr.io $ghcr, Docker Hub $hub"
-          [ "$ghcr" = "$hub" ] || { echo "the two registries hold different images under $VERSION"; exit 1; }
-          reported="$(docker run --rm "$DOCKERHUB_IMAGE:$VERSION" --version | awk '{print $2}')"
-          [ "$reported" = "$VERSION" ] || { echo "the Docker Hub image reports $reported"; exit 1; }
-          echo "image $DOCKERHUB_IMAGE:$VERSION verified"
+          for image in $IMAGES; do
+            echo "::group::$image:$VERSION"
+            set -- -d --name on-air-record -p 8099:8080 --stop-timeout 30 -e TZ=Europe/London
+            if [ "$CARD" = "true" ]; then
+              # The same two flags the guide gives, with the number read from the devices the same way.
+              set -- "$@" --device /dev/snd --group-add "$(stat -c %g /dev/snd/timer)"
+            fi
+            docker run "$@" "$image:$VERSION"
+
+            answered=0
+            for _ in $(seq 1 60); do
+              if curl -fsS http://127.0.0.1:8099/api/health -o health.json 2>/dev/null; then answered=1; break; fi
+              sleep 1
+            done
+            if [ "$answered" -ne 1 ]; then
+              docker logs on-air-record || true
+              echo "::error::$image:$VERSION never answered on ${{ matrix.arch }}"
+              exit 1
+            fi
+            cat health.json; echo
+            grep -q "\"version\":\"$VERSION\"" health.json || { echo "::error::$image:$VERSION reports another version"; exit 1; }
+            curl -fsS http://127.0.0.1:8099/api/updates | grep -q '"kind":"docker"' \
+              || { echo "::error::$image does not report itself as a container"; exit 1; }
+            docker exec on-air-record on-air-record health
+            [ "$(docker exec on-air-record id -u)" = "10001" ] || { echo "::error::$image runs as the wrong user"; exit 1; }
+
+            if [ "$CARD" = "true" ]; then
+              devices="$(curl -fsS http://127.0.0.1:8099/api/devices)"
+              echo "$devices"
+              echo "$devices" | grep -q 'Loopback' \
+                || { docker logs on-air-record; echo "::error::the sound card passed in is not offered as a microphone by $image"; exit 1; }
+            fi
+
+            docker stop on-air-record > /dev/null
+            code="$(docker inspect --format '{{.State.ExitCode}}' on-air-record)"
+            docker rm on-air-record > /dev/null
+            [ "$code" = "0" ] || { echo "::error::$image stopped with exit code $code"; exit 1; }
+            echo "::endgroup::"
+            echo "$image:$VERSION verified on ${{ matrix.arch }}"
+          done
