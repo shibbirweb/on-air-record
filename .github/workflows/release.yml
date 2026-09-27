@@ -568,6 +568,20 @@ jobs:
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
           echo "images=$images" >> "$GITHUB_OUTPUT"
 
+  # Docker Hub's page for the image, refreshed with every release so it always describes the newest one.
+  # After image-tags, because a stable release moves `latest` there, and the page checks for `latest` to
+  # decide whether to name it. Skipped without the Docker Hub secrets, like the push itself.
+  dockerhub-description:
+    name: Docker Hub page
+    needs: [version, image-tags]
+    if: needs.version.outputs.publish == 'true' && contains(needs.image-tags.outputs.images, 'docker.io/')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dockerhub-description.yml
+    secrets: inherit
+    with:
+      tag: ${{ needs.version.outputs.artifact_tag }}
+
   # The last word on the image, as the verify job is on the archives, and on each architecture's own
   # hardware, since an arm64 image that pulls but will not start is exactly what a Raspberry Pi user would
   # meet. It never signs in: the tagging job did, and a signed in pull succeeds against a package that is

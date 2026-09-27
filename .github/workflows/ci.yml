@@ -470,7 +470,9 @@ jobs:
       # What the image is for: a sound card on the host, passed through the way the compose file does it,
       # with the host's audio group number, has to show up as a microphone. A runner has no sound card, so
       # the kernel's loopback card stands in for one. Loading it depends on the runner's kernel packages,
-      # so a runner that cannot is a warning, not a failure: the image is not what is broken then.
+      # so a runner that cannot is a warning, not a failure: the image is not what is broken then. GitHub's
+      # hosted runners could not load it as of 0.8.0, so this only proves anything on a runner whose kernel
+      # has sound support; passthrough with a real microphone was checked by hand on an Ubuntu server.
       - name: Pass a sound card through
         run: |
           set -eu

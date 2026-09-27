@@ -1392,8 +1392,10 @@ Publishing starts [`.github/workflows/release.yml`](../.github/workflows/release
    `0.7`.
 8. Verifies the image the way a user gets it, on an amd64 and an arm64 runner, **without signing in**:
    pulls it from both registries, checks every tag points at the new image and both registries hold the
-   same one, then runs it from each with a loopback sound card passed through as this guide says, and checks
-   it answers as that version, offers the card as a microphone, and stops cleanly.
+   same one, then runs it from each, and checks it answers as that version and stops cleanly. It also tries
+   to pass a loopback sound card through as this guide says, but GitHub's own runners cannot load one, so
+   that part only warns there; passthrough with a real microphone was checked by hand on an Ubuntu server.
+9. Publishes the Docker Hub page, described below.
 
 **If the image cannot be pulled without signing in,** the ghcr.io package is private. New packages can
 start out private; this one was public from its first release, 0.8.0-beta.1, but the setting is worth
@@ -1414,13 +1416,16 @@ Until both are set, releases still publish to `ghcr.io` and the image tags job w
 skipped. Releases published before the secrets existed are not pushed there afterwards; Docker Hub starts
 at the next release.
 
-**The Docker Hub page** is [`packaging/DOCKERHUB.md`](../packaging/DOCKERHUB.md), published by
+**The Docker Hub page** is [`packaging/DOCKERHUB.md`](../packaging/DOCKERHUB.md), published on every
+release, beta or stable, by
 [`.github/workflows/dockerhub-description.yml`](../.github/workflows/dockerhub-description.yml). Docker
-Hub reads nothing from GitHub, so that file is the whole page. It is written for stable users, naming
-`latest` and the compose file on `master`, so it publishes when a change to it reaches `master`, usually
-with a stable release; run the workflow from the Actions tab to publish it sooner. It runs apart from
-releases, so a token without Delete fails it alone, with a `Forbidden` error, and never a release. When a
-Docker behaviour changes, update that page as well as the Docker section above.
+Hub reads nothing from GitHub, so that file is the whole page. It is rendered for the release it goes out
+with: links to `master` become links to that release's tag, so the compose file and guides it points at
+exist and match that version, and while Docker Hub has no `latest` image, before the first stable release,
+the page names `beta` instead and says how to point the compose file at it. To publish it again without a
+release, run the workflow from the Actions tab with a release tag, such as `v0.8.0`. A token without the
+Delete scope makes that job fail with `Forbidden` after everything else has published. When a Docker
+behaviour changes, update that page as well as the Docker section above.
 
 Expect ten to fifteen minutes, most of it compiling. The release exists and is visible the whole time; the
 files appear at the end. Notes you wrote yourself are left exactly as they are.
@@ -1453,8 +1458,9 @@ Separately, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on ev
 formatting, linting and the full test suite on macOS, Linux and Windows, the frontend checks, a check that
 the four recorded versions still agree, a run of the installers on all three platforms that starts the
 service they produce and confirms it answers, and a build of the container image that runs it, stages
-each way the sound cards can be out of reach and checks the service names the right fix, passes a loopback
-sound card into it, and stops it. Those Windows jobs are the only thing standing behind the
+each way the sound cards can be out of reach and checks the service names the right fix, and stops it. It
+also tries to pass a loopback sound card in, which GitHub's own runners cannot load, so that step only
+warns there. Those Windows jobs are the only thing standing behind the
 Windows build, since it cannot be produced or tested from a Mac.
 
 ## Setup problems
