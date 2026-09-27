@@ -5,6 +5,24 @@ Every release of On Air Record, newest first. The format follows
 [Semantic Versioning](https://semver.org/). Each release's section is also used as its notes on the
 [releases page](https://github.com/shibbirweb/on-air-record/releases).
 
+## [Unreleased]
+
+### Added
+
+- **A page on Docker Hub.** The image's page there, `shibbirweb/on-air-record`, now describes it instead of
+  standing blank: what it does, the Docker Compose and `docker run` quick starts, what each tag means, how
+  the container gets the microphone, and every environment variable. From now on it is kept up to date
+  whenever the instructions change. (OAR-101)
+
+### Changed
+
+- **Docker is now the recommended way to run it on Linux,** and the README and setup guide lead with it
+  there. It takes away what usually goes wrong with a direct install: there is no audio group to join and
+  no `sudo` mistake that leaves recordings it cannot save, it starts again with the machine without a
+  service to set up, it updates with two commands, and a Raspberry Pi on a 64 bit OS gets a ready made
+  build. The installer stays the way on macOS and Windows. The setup guide also lists every environment
+  variable the container reads, and which ones to leave alone. (OAR-98)
+
 ## [0.8.0] - 2026-09-27
 
 ### Added
