@@ -222,8 +222,11 @@ jobs:
       - name: Lint
         run: cargo clippy --all-targets -- -D warnings
 
+      # One test at a time on Windows. A crash in native code there (the bundled SQLite, or cpal talking to
+      # WASAPI through COM) kills the whole test binary, and only a serial run's output names the test that
+      # was running; in parallel the log just ends. It costs about half a minute.
       - name: Test
-        run: cargo test
+        run: cargo test ${{ matrix.os == 'windows-latest' && '-- --test-threads=1' || '' }}
 
   # The platform stage for the frontend. The UI runs in the browser, but its toolchain does not: oxlint
   # and the Vite bundler ship native binaries per platform, and a developer on Windows or a Mac runs these
