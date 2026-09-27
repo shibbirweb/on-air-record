@@ -16,20 +16,30 @@ const DATE_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
   hour12: false,
 });
 
+/**
+ * A `Date` for a timestamp, or `null` when there is none or it is past the roughly 275 thousand years
+ * either side of 1970 a `Date` can hold. `Intl` throws on an invalid date rather than returning a
+ * placeholder, and these labels are drawn every animation frame, so one wild timestamp would otherwise
+ * take the readout down with it.
+ */
+function toDate(timestampMs: number | null | undefined): Date | null {
+  if (timestampMs === null || timestampMs === undefined || !Number.isFinite(timestampMs)) {
+    return null;
+  }
+  const date = new Date(timestampMs);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 /** `14:23:05`, the label used on the timeline and the playhead. */
 export function formatClock(timestampMs: number | null | undefined): string {
-  if (timestampMs === null || timestampMs === undefined || !Number.isFinite(timestampMs)) {
-    return '--:--:--';
-  }
-  return TIME_FORMAT.format(new Date(timestampMs));
+  const date = toDate(timestampMs);
+  return date ? TIME_FORMAT.format(date) : '--:--:--';
 }
 
 /** `Sep 5, 14:23:05`, used where the day matters. */
 export function formatDateTime(timestampMs: number | null | undefined): string {
-  if (timestampMs === null || timestampMs === undefined || !Number.isFinite(timestampMs)) {
-    return 'unknown';
-  }
-  return DATE_TIME_FORMAT.format(new Date(timestampMs));
+  const date = toDate(timestampMs);
+  return date ? DATE_TIME_FORMAT.format(date) : 'unknown';
 }
 
 /** `01:02:03` for an elapsed span. */
@@ -61,13 +71,23 @@ export function formatOffsetFromLive(offsetMs: number): string {
 
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 
+/**
+ * `1.5 KB`, `345.0 MB`. The unit is chosen by dividing rather than by a logarithm: below one byte a
+ * logarithm goes negative and names no unit at all, and it cannot see that a value just under a unit
+ * rounds up to it, which would print `1024.0 KB` where `1.0 MB` belongs.
+ */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return '0 B';
   }
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), BYTE_UNITS.length - 1);
-  const value = bytes / 1024 ** exponent;
-  return `${value.toFixed(exponent === 0 ? 0 : 1)} ${BYTE_UNITS[exponent]}`;
+  const shown = (value: number, exponent: number) => value.toFixed(exponent === 0 ? 0 : 1);
+  let exponent = 0;
+  let value = bytes;
+  while (exponent < BYTE_UNITS.length - 1 && Number(shown(value, exponent)) >= 1024) {
+    value /= 1024;
+    exponent += 1;
+  }
+  return `${shown(value, exponent)} ${BYTE_UNITS[exponent]}`;
 }
 
 /** Convert a normalised amplitude to dBFS for the meter scale. */

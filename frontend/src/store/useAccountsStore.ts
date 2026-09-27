@@ -71,6 +71,20 @@ export function pruneRoleDraft(draft: RoleDraft, users: User[]): RoleDraft {
   return pruned;
 }
 
+/**
+ * Run a change to an account and return why it was refused, if it was. The caller reports it only after
+ * the refresh that follows, because a refresh that loads clears the error and would otherwise wipe the
+ * refusal off the screen before anybody saw it.
+ */
+async function attempt(change: () => Promise<unknown>): Promise<string | null> {
+  try {
+    await change();
+    return null;
+  } catch (cause) {
+    return describe(cause);
+  }
+}
+
 export const useAccountsStore = create<AccountsState>((set, get) => ({
   users: [],
   loading: false,
@@ -136,22 +150,18 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
   },
 
   remove: async (userId) => {
-    try {
-      await api.deleteUser(userId);
-      set({ error: null });
-    } catch (cause) {
-      set({ error: describe(cause) });
-    }
+    const problem = await attempt(() => api.deleteUser(userId));
     await get().refresh();
+    if (problem !== null) {
+      set({ error: problem });
+    }
   },
 
   resetTwoFactor: async (userId) => {
-    try {
-      await api.resetUserTwoFactor(userId);
-      set({ error: null });
-    } catch (cause) {
-      set({ error: describe(cause) });
-    }
+    const problem = await attempt(() => api.resetUserTwoFactor(userId));
     await get().refresh();
+    if (problem !== null) {
+      set({ error: problem });
+    }
   },
 }));

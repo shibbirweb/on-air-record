@@ -53,13 +53,23 @@ export class StreamSocket {
     socket.binaryType = 'arraybuffer';
     this.socket = socket;
 
+    // Each handler first checks the socket is still the current one. A socket the page closed keeps
+    // firing for a while (frames already in flight, then its close event), and by then a newer socket may
+    // own the connection state: a late close from the old one would report a disconnect, flush the engine
+    // and even null out the new socket and open a third.
     socket.onopen = () => {
+      if (this.socket !== socket) {
+        return;
+      }
       this.reconnectAttempts = 0;
       this.startKeepalive();
       this.handlers.onOpen();
     };
 
     socket.onmessage = (event: MessageEvent<string | ArrayBuffer>) => {
+      if (this.socket !== socket) {
+        return;
+      }
       if (typeof event.data === 'string') {
         try {
           this.handlers.onMessage(JSON.parse(event.data) as ServerMessage);
@@ -76,6 +86,9 @@ export class StreamSocket {
     };
 
     socket.onclose = () => {
+      if (this.socket !== socket) {
+        return;
+      }
       this.stopKeepalive();
       this.socket = null;
       this.handlers.onClose();

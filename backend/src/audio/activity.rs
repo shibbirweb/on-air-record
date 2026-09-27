@@ -133,7 +133,10 @@ pub fn detect(runs: &[EnvelopeRun<'_>], sensitivity: SoundSensitivity) -> Vec<So
                 .get(&slot_start_ms.div_euclid(FLOOR_BLOCK_MS))
                 .copied()
                 .unwrap_or(0);
-            if *value < threshold(floor, sensitivity) {
+            // The threshold saturates at 255, so on its own it would let a floor of 255 count every slot
+            // as loud: an input pinned at full scale all day would be one endless sound. A level that has
+            // not risen above its floor has not risen at all.
+            if *value < threshold(floor, sensitivity) || *value <= floor {
                 end_burst(&mut burst, &mut merging, &mut sounds);
                 continue;
             }
@@ -441,5 +444,189 @@ mod tests {
         let part = detect_in(&day[4..7], SoundSensitivity::Medium);
         assert_eq!(whole, part);
         assert_eq!(whole.len(), 1);
+    }
+
+    #[test]
+    fn a_microphone_clipping_all_day_is_not_one_endless_sound() {
+        // Found by `a_steady_level_is_never_a_sound`: at a floor of 255 the threshold saturates to 255 too,
+        // so every slot of a pinned input counted as loud and the whole recording became one sound.
+        let runs = [background(0, 600, 255)];
+        for sensitivity in [
+            SoundSensitivity::Low,
+            SoundSensitivity::Medium,
+            SoundSensitivity::High,
+        ] {
+            assert!(detect_in(&runs, sensitivity).is_empty(), "{sensitivity:?}");
+        }
+    }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        const SENSITIVITIES: [SoundSensitivity; 3] = [
+            SoundSensitivity::Low,
+            SoundSensitivity::Medium,
+            SoundSensitivity::High,
+        ];
+
+        /// An envelope built from stretches of steady level, some at a background and some at any level
+        /// at all, so bursts of every length and loudness appear, including single slot flickers.
+        fn envelope(max_chunks: usize) -> impl Strategy<Value = Vec<u8>> {
+            (
+                any::<u8>(),
+                proptest::collection::vec(
+                    (proptest::bool::weighted(0.3), any::<u8>(), 1usize..40),
+                    0..max_chunks,
+                ),
+            )
+                .prop_map(|(background, chunks)| {
+                    chunks
+                        .into_iter()
+                        .flat_map(|(loud, level, slots)| {
+                            std::iter::repeat_n(if loud { level } else { background }, slots)
+                        })
+                        .collect()
+                })
+        }
+
+        /// Up to four runs in time order, each after the last either within the continuity tolerance or
+        /// after a real gap, starting anywhere a clock could read.
+        fn recording(max_chunks: usize) -> impl Strategy<Value = Vec<(i64, Vec<u8>)>> {
+            (
+                -1_000_000_000_000i64..4_000_000_000_000,
+                proptest::collection::vec(
+                    (
+                        prop_oneof![0i64..=CONTINUITY_TOLERANCE_MS, 501i64..900_000],
+                        envelope(max_chunks),
+                    ),
+                    1..5,
+                ),
+            )
+                .prop_map(|(first_start_ms, runs)| {
+                    let mut next_start_ms = first_start_ms;
+                    runs.into_iter()
+                        .map(|(gap_ms, values)| {
+                            let start_ms = next_start_ms + gap_ms;
+                            next_start_ms = start_ms + values.len() as i64 * SLOT;
+                            (start_ms, values)
+                        })
+                        .collect()
+                })
+        }
+
+        /// The continuous stretches the detector treats as unbroken, as `(start_ms, end_ms)`.
+        fn stretches(runs: &[(i64, Vec<u8>)]) -> Vec<(i64, i64)> {
+            let mut found: Vec<(i64, i64)> = Vec::new();
+            for (start_ms, values) in runs {
+                let end_ms = start_ms + values.len() as i64 * SLOT;
+                match found.last_mut() {
+                    Some(last) if *start_ms - last.1 <= CONTINUITY_TOLERANCE_MS => last.1 = end_ms,
+                    _ => found.push((*start_ms, end_ms)),
+                }
+            }
+            found
+        }
+
+        /// Every slot of every run, as `(slot_start_ms, value)`.
+        fn slots(runs: &[(i64, Vec<u8>)]) -> impl Iterator<Item = (i64, u8)> + '_ {
+            runs.iter().flat_map(|(start_ms, values)| {
+                values
+                    .iter()
+                    .enumerate()
+                    .map(move |(index, value)| (start_ms + index as i64 * SLOT, *value))
+            })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// Whatever was recorded, the sounds come back in time order and apart, each long enough to
+            /// count, inside one unbroken stretch of recording, with a jump point a second early but never
+            /// in a gap, and a peak that really is a level heard inside it. The timeline draws these as
+            /// bands and jumps between them, so an overlap, a band in a gap or a seek into nothing would
+            /// all be visible to somebody listening back.
+            #[test]
+            fn sounds_are_ordered_apart_and_inside_the_recording(runs in recording(80)) {
+                let stretches = stretches(&runs);
+                let all_slots: Vec<(i64, u8)> = slots(&runs).collect();
+                for sensitivity in SENSITIVITIES {
+                    let sounds = detect_in(&runs, sensitivity);
+                    for pair in sounds.windows(2) {
+                        prop_assert!(pair[0].end_ms < pair[1].start_ms, "{:?} {:?}", pair, sensitivity);
+                    }
+                    for sound in &sounds {
+                        prop_assert!(sound.end_ms - sound.start_ms >= MIN_SOUND_MS, "{:?}", sound);
+                        let stretch = stretches
+                            .iter()
+                            .find(|(start_ms, end_ms)| *start_ms <= sound.start_ms && sound.end_ms <= *end_ms);
+                        prop_assert!(stretch.is_some(), "{:?} is not inside one stretch of {:?}", sound, stretches);
+                        let (stretch_start_ms, _) = *stretch.expect("checked");
+                        prop_assert_eq!(sound.seek_ms, (sound.start_ms - LEAD_IN_MS).max(stretch_start_ms));
+
+                        let from = all_slots.partition_point(|(at_ms, _)| *at_ms < sound.start_ms);
+                        let to = all_slots.partition_point(|(at_ms, _)| *at_ms + SLOT <= sound.end_ms);
+                        let inside = &all_slots[from..to.max(from)];
+                        let first = inside.first().filter(|(at_ms, _)| *at_ms == sound.start_ms);
+                        let last = inside.last().filter(|(at_ms, _)| *at_ms + SLOT == sound.end_ms);
+                        prop_assert!(first.is_some() && last.is_some(), "{:?} does not start and end on slots", sound);
+                        let edges = first.expect("checked").1.max(last.expect("checked").1);
+                        let loudest = inside.iter().map(|(_, value)| *value).max().expect("checked");
+                        prop_assert!(sound.peak >= edges && sound.peak <= loudest, "{:?}", sound);
+                    }
+                }
+            }
+
+            /// A level that never changes is the background, not a sound, whatever the level and however
+            /// the recording is split into runs. This is what keeps a hum, a fan, or an input pinned at
+            /// full scale from lighting up the whole timeline.
+            #[test]
+            fn a_steady_level_is_never_a_sound(
+                level in any::<u8>(),
+                shape in recording(20),
+            ) {
+                let runs: Vec<(i64, Vec<u8>)> = shape
+                    .into_iter()
+                    .map(|(start_ms, values)| (start_ms, vec![level; values.len()]))
+                    .collect();
+                for sensitivity in SENSITIVITIES {
+                    prop_assert!(detect_in(&runs, sensitivity).is_empty(), "level {} at {:?}", level, sensitivity);
+                }
+            }
+
+            /// Raising the sensitivity never loses a sound: everything found at Low is inside something
+            /// found at Medium, and everything at Medium inside something at High. The setting is described
+            /// to people as "how readily", so a sound that disappeared when they asked for more would be a
+            /// broken promise, and it would mean the thresholds had stopped being ordered.
+            #[test]
+            fn more_sensitivity_never_loses_a_sound(runs in recording(80)) {
+                let low = detect_in(&runs, SoundSensitivity::Low);
+                let medium = detect_in(&runs, SoundSensitivity::Medium);
+                let high = detect_in(&runs, SoundSensitivity::High);
+                for (fewer, more) in [(&low, &medium), (&medium, &high)] {
+                    for sound in fewer.iter() {
+                        let covered = more
+                            .iter()
+                            .any(|wider| wider.start_ms <= sound.start_ms && sound.end_ms <= wider.end_ms);
+                        prop_assert!(covered, "{:?} is not inside any of {:?}", sound, more);
+                    }
+                }
+            }
+
+            /// The line a slot must cross is always above the floor it is measured against, unless the floor
+            /// is already at the top of the scale, and it never falls as the floor rises or the setting
+            /// becomes less sensitive.
+            #[test]
+            fn thresholds_sit_above_the_floor_and_are_ordered(floor in any::<u8>()) {
+                let [low, medium, high] = SENSITIVITIES.map(|sensitivity| threshold(floor, sensitivity));
+                prop_assert!(high <= medium && medium <= low);
+                prop_assert!(high > floor || floor == u8::MAX);
+                if floor < u8::MAX {
+                    for sensitivity in SENSITIVITIES {
+                        prop_assert!(threshold(floor + 1, sensitivity) >= threshold(floor, sensitivity));
+                    }
+                }
+            }
+        }
     }
 }

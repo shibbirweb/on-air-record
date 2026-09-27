@@ -30,8 +30,12 @@ pub fn generate_secret() -> Vec<u8> {
 }
 
 /// The time step a moment falls in.
+///
+/// Floored all the way, as RFC 6238 defines it: truncating division would make the step either side of
+/// the epoch sixty seconds long. Only a clock set before 1970 reaches that, but the step is what the
+/// replay guard compares, so it should mean the same thing everywhere.
 pub fn step_at(now_ms: i64) -> i64 {
-    now_ms.div_euclid(1000) / STEP_SECONDS
+    now_ms.div_euclid(1000).div_euclid(STEP_SECONDS)
 }
 
 /// The code for one time step (RFC 4226 section 5.3), as a number, so leading zeros are the caller's to
@@ -248,5 +252,128 @@ mod tests {
         assert_eq!(first.len(), SECRET_BYTES);
         assert_ne!(first, generate_secret());
         assert_eq!(grouped("ABCDEFGHIJ"), "ABCD EFGH IJ");
+    }
+
+    #[test]
+    fn steps_before_1970_are_thirty_seconds_long_too() {
+        // Found by `every_step_lasts_thirty_seconds`: truncating division folded the thirty seconds either
+        // side of the epoch into step zero, a sixty second step, where RFC 6238 floors.
+        assert_eq!(step_at(-1_000), -1);
+        assert_eq!(step_at(-30_000), -1);
+        assert_eq!(step_at(-30_001), -2);
+        assert_eq!(step_at(29_999), 0);
+    }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Any moment from 1900 to 2200.
+        fn moment() -> impl Strategy<Value = i64> {
+            -2_208_988_800_000i64..7_258_118_400_000
+        }
+
+        fn secret() -> impl Strategy<Value = Vec<u8>> {
+            proptest::collection::vec(any::<u8>(), SECRET_BYTES..=SECRET_BYTES)
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// Whatever the key and the step, the code prints as exactly six ASCII digits, which is all an
+            /// authenticator app can show and all `verify` will take.
+            #[test]
+            fn every_code_is_six_digits(key in proptest::collection::vec(any::<u8>(), 0..80), step in any::<i64>()) {
+                let printed = format!("{:06}", code_at(&key, step));
+                prop_assert_eq!(printed.len(), 6);
+                prop_assert!(printed.bytes().all(|byte| byte.is_ascii_digit()));
+            }
+
+            /// Steps tile time: each lasts exactly thirty seconds and the next begins where it ends, before
+            /// the epoch as after it. The replay guard compares steps, so a step twice as long anywhere
+            /// would let a code be used for a minute, and a gap would make one refuse a valid code.
+            #[test]
+            fn every_step_lasts_thirty_seconds(now_ms in any::<i64>().prop_map(|value| value / 4)) {
+                let step = step_at(now_ms);
+                let start_ms = step * STEP_SECONDS * 1000;
+                prop_assert!(start_ms <= now_ms && now_ms < start_ms + STEP_SECONDS * 1000, "{} is not in step {}", now_ms, step);
+                prop_assert_eq!(step_at(now_ms + STEP_SECONDS * 1000), step + 1);
+            }
+
+            /// The code shown for a moment is accepted at that moment, typed with or without spaces, and
+            /// matches a step no more than one away whose code it really is. A phone and a recorder that
+            /// agree on the time must always agree on the code.
+            #[test]
+            fn the_current_code_is_accepted(key in secret(), now_ms in moment(), space_at in 0usize..7) {
+                let code = format!("{:06}", code_at(&key, step_at(now_ms)));
+                let mut typed = code.clone();
+                typed.insert(space_at.min(6), ' ');
+                for attempt in [code.clone(), typed] {
+                    let step = verify(&key, &attempt, now_ms, None);
+                    prop_assert!(step.is_some(), "{:?} refused", attempt);
+                    let step = step.expect("checked");
+                    prop_assert!((step - step_at(now_ms)).abs() <= 1);
+                    prop_assert_eq!(format!("{:06}", code_at(&key, step)), code.clone());
+                }
+            }
+
+            /// Once a code's step has been used, that code is never accepted again for that step or an
+            /// earlier one, whatever the time, which is the whole of the replay protection.
+            #[test]
+            fn a_used_step_is_never_accepted_again(key in secret(), now_ms in moment(), later_ms in 0i64..120_000) {
+                let code = format!("{:06}", code_at(&key, step_at(now_ms)));
+                let used = verify(&key, &code, now_ms, None).expect("accepted the first time");
+                if let Some(again) = verify(&key, &code, now_ms + later_ms, Some(used)) {
+                    prop_assert!(again > used, "step {} accepted again as {}", used, again);
+                }
+            }
+
+            /// A code from further than one step away is refused, unless by chance it is also the code of
+            /// a step inside the window, one time in about a million per step.
+            #[test]
+            fn a_code_from_further_away_is_refused(key in secret(), now_ms in moment(), away in prop_oneof![-50i64..=-2, 2i64..=50]) {
+                let now = step_at(now_ms);
+                let stale = code_at(&key, now + away);
+                prop_assume!((now - 1..=now + 1).all(|step| code_at(&key, step) != stale));
+                prop_assert_eq!(verify(&key, &format!("{stale:06}"), now_ms, None), None);
+            }
+
+            /// Anything typed at all is either refused or accepted as a code, never a panic, and nothing
+            /// but six digits (spaces aside) is ever accepted.
+            #[test]
+            fn any_typing_is_answered(key in secret(), now_ms in moment(), typed in ".{0,12}") {
+                if verify(&key, &typed, now_ms, None).is_some() {
+                    let digits: String = typed.chars().filter(|c| !c.is_whitespace()).collect();
+                    prop_assert!(digits.len() == 6 && digits.bytes().all(|byte| byte.is_ascii_digit()));
+                }
+            }
+
+            /// The key shown for typing in by hand reads back to exactly the secret, grouped or not, and is
+            /// as long as RFC 4648 says: an authenticator app that decoded a different key would show codes
+            /// the recorder never accepts, and nobody could finish turning on two factor sign in.
+            #[test]
+            fn the_typed_key_reads_back_to_the_secret(key in proptest::collection::vec(any::<u8>(), 0..64)) {
+                let encoded = base32_encode(&key);
+                prop_assert_eq!(encoded.len(), (key.len() * 8).div_ceil(5));
+                prop_assert_eq!(base32_decode(&encoded), key.clone());
+                prop_assert_eq!(base32_decode(&grouped(&encoded)), key);
+                prop_assert!(grouped(&encoded).split(' ').all(|group| group.len() <= 4));
+            }
+
+            /// Whatever the issuer and account are called, they cannot break out of the label: the URI
+            /// keeps one `?`, the label one `:`, and the same five parameters. An account name holding `&`
+            /// or `?` must not be able to set the secret or the period an app reads.
+            #[test]
+            fn names_cannot_escape_the_label(issuer in ".{0,16}", account in ".{0,24}", key in secret()) {
+                let uri = otpauth_uri(&issuer, &account, &key);
+                let rest = uri.strip_prefix("otpauth://totp/").expect("the scheme and type");
+                let (label, query) = rest.split_once('?').expect("a query");
+                prop_assert!(!query.contains('?') && !label.contains('/') && !label.contains('#'));
+                prop_assert_eq!(label.matches(':').count(), 1);
+                let names: Vec<&str> = query.split('&').map(|pair| pair.split('=').next().unwrap_or("")).collect();
+                prop_assert_eq!(names, vec!["secret", "issuer", "algorithm", "digits", "period"]);
+                prop_assert!(uri.is_ascii());
+            }
+        }
     }
 }

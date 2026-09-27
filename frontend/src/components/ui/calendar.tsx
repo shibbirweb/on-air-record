@@ -30,11 +30,12 @@ function Calendar({ className, classNames, showOutsideDays = true, ...props }: C
         nav: 'flex items-center justify-between absolute inset-x-0 top-0 h-8 px-1 pointer-events-none',
         button_previous: cn(
           buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
-          'pointer-events-auto disabled:opacity-30',
+          // react-day-picker marks a month arrow at the limit with aria-disabled, not disabled.
+          'pointer-events-auto aria-disabled:opacity-30',
         ),
         button_next: cn(
           buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
-          'pointer-events-auto disabled:opacity-30',
+          'pointer-events-auto aria-disabled:opacity-30',
         ),
         month_grid: 'w-full border-collapse',
         weekdays: 'flex',

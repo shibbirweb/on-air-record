@@ -18,6 +18,13 @@ use crate::error::{AppError, AppResult};
 /// request is a mistake rather than a use case.
 const MAX_WINDOW_MS: i64 = 32 * 24 * 3_600_000;
 
+/// The width of a requested window. Saturating, because both ends come straight from the query string:
+/// a plain subtraction of extreme values would panic in a debug build and, in a release build, wrap to a
+/// negative width that slips under [`MAX_WINDOW_MS`] into a scan of every segment.
+fn window_ms(from_ms: i64, to_ms: i64) -> i64 {
+    to_ms.saturating_sub(from_ms)
+}
+
 /// `GET /api/timeline/range`
 pub async fn range(State(state): State<Arc<AppState>>) -> AppResult<Json<TimelineRangeResponse>> {
     Ok(Json(state.timeline.range()?.into()))
@@ -40,7 +47,7 @@ pub async fn peaks(
     if query.to_ms <= query.from_ms {
         return Err(AppError::bad_request("toMs must be greater than fromMs"));
     }
-    if query.to_ms - query.from_ms > MAX_WINDOW_MS {
+    if window_ms(query.from_ms, query.to_ms) > MAX_WINDOW_MS {
         return Err(AppError::bad_request(
             "the requested window is too wide, ask for at most 32 days at a time",
         ));
@@ -60,7 +67,7 @@ pub async fn sounds(
     State(state): State<Arc<AppState>>,
     Query(query): Query<SoundsQuery>,
 ) -> AppResult<Json<SoundsResponse>> {
-    if query.to_ms - query.from_ms > MAX_WINDOW_MS {
+    if window_ms(query.from_ms, query.to_ms) > MAX_WINDOW_MS {
         return Err(AppError::bad_request(
             "the requested window is too wide, ask for at most 32 days at a time",
         ));

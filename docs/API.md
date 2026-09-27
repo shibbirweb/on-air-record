@@ -62,11 +62,14 @@ Every failing request returns the same envelope with an appropriate status code.
 | `bad_request` | 400 | Malformed or out of range parameters |
 | `unauthenticated` | 401 | Accounts are on and there is no valid session, or the email or password was wrong |
 | `forbidden` | 403 | A listener asked for an admin route, or the request came from another website |
-| `not_found` | 404 | Unknown device, session, account, or timestamp |
+| `not_found` | 404 | Unknown device, session, account, or timestamp, or a path under `/api` that is not an endpoint |
 | `conflict` | 409 | Action not valid in the current state, for example starting an active capture, or removing the only admin |
 | `rate_limited` | 429 | Too many failed logins from this address; wait out the window the message names |
 | `audio_error` | 503 | The host audio system rejected the operation |
 | `internal` | 500 | Unexpected failure, details are in the server log |
+
+A path under `/api` that matches no endpoint answers `404` with this envelope, whether or not anybody is signed
+in, rather than the web interface's page. A known path asked with the wrong method answers `405`.
 
 ## Login and accounts
 

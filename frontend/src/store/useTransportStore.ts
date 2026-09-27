@@ -117,8 +117,14 @@ export const useTransportStore = create<TransportState>((set, get) => ({
 
   setVolume: (volume) => {
     const clamped = Math.min(Math.max(volume, 0), 1);
-    set({ volume: clamped, muted: clamped === 0 ? get().muted : false });
+    // Raising the volume while muted means "I want to hear this", so it unmutes the engine as well as
+    // the button, or the icon would say the sound is on while the engine kept it silent.
+    const unmutes = clamped > 0 && get().muted;
+    set({ volume: clamped, muted: unmutes ? false : get().muted });
     get().controller?.setVolume(clamped);
+    if (unmutes) {
+      get().controller?.setMuted(false);
+    }
   },
 
   toggleMuted: () => {

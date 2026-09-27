@@ -21,8 +21,10 @@ export const EDITABLE_FIELDS = [
   'retentionHours',
   'autoStart',
   'autoStartDelaySeconds',
+  'recordingSampleRate',
   'recordingsDir',
   'checkForUpdates',
+  'soundSensitivity',
 ] as const satisfies readonly (keyof SettingsPatch)[];
 
 export type EditableField = (typeof EDITABLE_FIELDS)[number];

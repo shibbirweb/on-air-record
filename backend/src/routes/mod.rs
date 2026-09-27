@@ -6,7 +6,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use axum::http::StatusCode;
+use axum::extract::OriginalUri;
+use axum::http::{Method, StatusCode};
 use axum::middleware::from_fn_with_state;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
@@ -110,6 +111,7 @@ pub fn build(state: Arc<AppState>) -> Router {
         .route("/export/plan", get(export_controller::plan))
         .route("/ws/stream", get(stream_controller::stream))
         .route_layer(from_fn_with_state(state.clone(), guard::guard))
+        .fallback(unknown_endpoint)
         .with_state(state.clone());
 
     // No CORS layer, on purpose. The UI is served from this same origin and the Vite dev server proxies
@@ -168,4 +170,13 @@ npm run build</pre>
     );
 
     (StatusCode::SERVICE_UNAVAILABLE, body)
+}
+
+/// Any path under `/api` that no route matches.
+///
+/// Without it such a request fell through to the web interface and answered 200 with the page's HTML, so a
+/// mistyped or retired endpoint looked like success to its caller and failed later, as JSON that would not
+/// parse. It sits outside the guard: saying a path does not exist reveals nothing, signed in or not.
+async fn unknown_endpoint(method: Method, OriginalUri(uri): OriginalUri) -> crate::error::AppError {
+    crate::error::AppError::not_found(format!("there is no {method} {} in this API", uri.path()))
 }

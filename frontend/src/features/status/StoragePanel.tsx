@@ -26,7 +26,10 @@ export function StoragePanel() {
         <dd className="tabular">{formatDuration(historyMs)}</dd>
 
         <dt className="text-muted-foreground">Retention</dt>
-        <dd className="tabular">{storage?.retentionHours ?? 0} h</dd>
+        <dd className="tabular">
+          {/* Null is the keep forever choice in the retention settings, not "nothing kept". */}
+          {storage?.retentionHours === null ? 'Forever' : `${storage?.retentionHours ?? 0} h`}
+        </dd>
 
         <dt className="text-muted-foreground">Oldest</dt>
         <dd className="tabular">{formatDateTime(storage?.oldestMs)}</dd>

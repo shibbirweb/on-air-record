@@ -305,8 +305,11 @@ export class AudioEngine {
     // without polling the audio thread.
     this.anchorContextTime = this.nextStartTime;
     this.anchorMediaMs = frame.timestampMs;
+    this.anchorSpeed = this.speed;
 
-    this.nextStartTime += buffer.duration;
+    // A buffer at double speed is over in half its length, so the next one starts then. Spacing them by
+    // their real time length would leave a gap after each at speed and pile up lead until a resync.
+    this.nextStartTime += buffer.duration / this.speed;
     this.scheduledFrames += 1;
   }
 

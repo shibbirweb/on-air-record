@@ -18,6 +18,36 @@ Every release of On Air Record, newest first. The format follows
   against the room's own background, so it suits a quiet bedroom and a noisy kitchen alike; admins can
   make it more or less sensitive under Settings, Finding sounds. (OAR-107)
 
+### Fixed
+
+- **Playback faster or slower than real time is smooth.** At double speed each moment of audio was
+  followed by a moment of silence and the audio skipped now and then, and the playhead moved at normal
+  speed whatever the speed was set to. Both now keep to the chosen speed. (OAR-108)
+- Jumping to the end of the recordings while playing faster than normal joins the live feed at normal
+  speed. Before, the next jump back into the recordings played too fast and skipped. After a network
+  hiccup during faster or slower playback, the audio also no longer arrives in a rush. (OAR-108)
+- Jumping past the end of the recordings while nothing is recording shows playback as stopped, as it
+  already did when playback reached the end on its own. (OAR-108)
+- Raising the volume while muted turns the sound back on, as the mute button already showed. Before, the
+  button said the sound was on while playback stayed silent. (OAR-108)
+- Restore defaults puts the recording sample rate back as well. (OAR-108)
+- When removing an account or resetting its two factor sign in is refused, the reason stays on screen
+  instead of disappearing at once. (OAR-108)
+- A recordings folder with spaces in its name can be typed as it is; the spaces were being removed while
+  typing. (OAR-108)
+- The success message after changing a password goes away when the next attempt fails, rather than
+  showing beside the error. (OAR-108)
+- The storage panel says Forever for recordings kept forever, instead of 0 h. (OAR-108)
+- Where the clocks change at midnight, as in the Azores, Cuba and Chile, the day of the change and the day
+  before it no longer share or lose an hour of recording in the day picker, and such a day is no longer
+  missing from it. (OAR-108)
+- Sizes just under a unit read as the next unit up, such as 1.0 MB rather than 1024.0 KB. (OAR-108)
+- On Windows, the update command shown for an install in a folder whose name has a curly apostrophe, such
+  as one typed on a phone, now works when pasted into PowerShell. (OAR-108)
+- The level meter no longer stays red after recording stops. (OAR-108)
+- Screen readers now announce the volume, gain, segment length and start up delay sliders, the on air
+  sign and the bookmark count by name. (OAR-108)
+
 ## [0.8.1] - 2026-09-27
 
 ### Added

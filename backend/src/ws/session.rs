@@ -107,7 +107,34 @@ fn tick_period(frame_ms: u32, speed: f32) -> std::time::Duration {
     std::time::Duration::from_millis(millis).max(MIN_TICK)
 }
 
+/// The interval that paces playback, at `speed`.
+///
+/// Every one is built here, because each speed change replaces it and a fresh interval would otherwise
+/// fall back to Tokio's default of bursting to catch up: after a stalled network the cursor would sprint,
+/// delivering a burst of audio the client cannot play in order.
+fn playback_ticker(frame_ms: u32, speed: f32) -> tokio::time::Interval {
+    let mut ticker = tokio::time::interval(tick_period(frame_ms, speed));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ticker
+}
+
 type Sink = SplitSink<WebSocket, Message>;
+
+/// Return to real time on joining the live feed, which arrives at real time so any other speed means
+/// nothing, and tell the client. False when the socket is finished.
+async fn back_to_real_time(
+    sink: &mut Sink,
+    speed: &mut f32,
+    ticker: &mut tokio::time::Interval,
+    frame_ms: u32,
+) -> bool {
+    if *speed == 1.0 {
+        return true;
+    }
+    *speed = 1.0;
+    *ticker = playback_ticker(frame_ms, *speed);
+    send_message(sink, ServerMessage::Speed { value: *speed }).await
+}
 
 /// Outcome of driving playback forward, which decides what the loop does next.
 enum PlaybackStep {
@@ -178,10 +205,7 @@ impl StreamSession {
 
         let frame_ms = effective_frame_ms(&state);
         let mut speed = 1.0f32;
-        let mut ticker = tokio::time::interval(tick_period(frame_ms, speed));
-        // A stalled network must not make the cursor sprint to catch up afterwards, which would deliver a
-        // burst of audio the client cannot play in order.
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut ticker = playback_ticker(frame_ms, speed);
 
         if !send_message(&mut sink, stream_info(&state, mode)).await {
             return;
@@ -355,15 +379,10 @@ impl StreamSession {
                             resume_mode = StreamMode::Live;
                             live_rx = Some(state.hub.subscribe());
 
-                            // The live feed arrives in real time, so any other speed is meaningless.
-                            if speed != 1.0 {
-                                speed = 1.0;
-                                ticker = tokio::time::interval(tick_period(frame_ms, speed));
-                                if !send_message(&mut sink, ServerMessage::Speed { value: speed })
-                                    .await
-                                {
-                                    break;
-                                }
+                            if !back_to_real_time(&mut sink, &mut speed, &mut ticker, frame_ms)
+                                .await
+                            {
+                                break;
                             }
 
                             let edge = state.live_edge_ms().unwrap_or_else(now_ms);
@@ -488,12 +507,8 @@ async fn handle_command(
             *resume_mode = StreamMode::Live;
             *live_rx = Some(state.hub.subscribe());
 
-            if *speed != 1.0 {
-                *speed = 1.0;
-                *ticker = tokio::time::interval(tick_period(frame_ms, *speed));
-                if !send_message(sink, ServerMessage::Speed { value: *speed }).await {
-                    return false;
-                }
+            if !back_to_real_time(sink, speed, ticker, frame_ms).await {
+                return false;
             }
 
             let edge = state.live_edge_ms().unwrap_or_else(now_ms);
@@ -505,7 +520,7 @@ async fn handle_command(
             if applied != *speed {
                 *speed = applied;
                 // Replacing the interval rather than resetting it, because the period itself changed.
-                *ticker = tokio::time::interval(tick_period(frame_ms, applied));
+                *ticker = playback_ticker(frame_ms, applied);
             }
 
             send_message(sink, ServerMessage::Speed { value: applied }).await
@@ -529,24 +544,39 @@ async fn handle_command(
 
             match step {
                 PlaybackStep::SocketClosed => false,
+                // The same messages, in the same order, as when playback runs out on a later tick. The page
+                // resets itself to real time on `switched-to-live`, so a faster speed kept here would pace
+                // the next seek for a page playing at normal speed and overrun its buffer.
                 PlaybackStep::CaughtUp => {
                     *cursor = None;
                     *mode = StreamMode::Live;
                     *resume_mode = StreamMode::Live;
                     *live_rx = Some(state.hub.subscribe());
+                    if !back_to_real_time(sink, speed, ticker, frame_ms).await {
+                        return false;
+                    }
                     let edge = state.live_edge_ms().unwrap_or_else(now_ms);
-                    send_message(sink, ServerMessage::SwitchedToLive { timestamp_ms: edge }).await
+                    if !send_message(sink, ServerMessage::SwitchedToLive { timestamp_ms: edge })
+                        .await
+                    {
+                        return false;
+                    }
+                    send_message(sink, mode_message(*mode, edge)).await
                 }
                 PlaybackStep::Exhausted => {
                     *mode = StreamMode::Paused;
-                    send_message(
+                    let at_ms = timestamp_ms.max(state.live_edge_ms().unwrap_or(timestamp_ms));
+                    if !send_message(
                         sink,
                         ServerMessage::EndOfRecording {
-                            timestamp_ms: timestamp_ms
-                                .max(state.live_edge_ms().unwrap_or(timestamp_ms)),
+                            timestamp_ms: at_ms,
                         },
                     )
                     .await
+                    {
+                        return false;
+                    }
+                    send_message(sink, mode_message(*mode, at_ms)).await
                 }
                 PlaybackStep::Continue => true,
             }
@@ -909,6 +939,17 @@ mod tests {
         assert_eq!(tick_period(100, 4.0), std::time::Duration::from_millis(25));
         // Slower than real time means waiting longer between frames.
         assert_eq!(tick_period(100, 0.5), std::time::Duration::from_millis(200));
+    }
+
+    #[tokio::test]
+    async fn every_playback_ticker_waits_out_a_stall_instead_of_bursting_to_catch_up() {
+        for speed in PLAYBACK_SPEEDS {
+            assert_eq!(
+                playback_ticker(100, speed).missed_tick_behavior(),
+                tokio::time::MissedTickBehavior::Delay,
+                "at {speed}"
+            );
+        }
     }
 
     #[test]

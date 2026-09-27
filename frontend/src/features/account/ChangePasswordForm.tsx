@@ -25,6 +25,9 @@ export function ChangePasswordForm() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    // Cleared before anything else, so a new attempt that fails validation does not leave the last
+    // success showing beside its error.
+    setDone(false);
     const problem = current === '' ? 'Enter your current password.' : passwordProblem(next, confirmation);
     if (problem) {
       setError(problem);
@@ -33,7 +36,6 @@ export function ChangePasswordForm() {
 
     setBusy(true);
     setError(null);
-    setDone(false);
     try {
       await changePassword(current, next);
       // Clear the fields so the new password is not left sitting in the page.

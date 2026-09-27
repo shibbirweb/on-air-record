@@ -33,6 +33,7 @@ export function SettingsPanel() {
         </div>
         <Slider
           id="gain"
+          aria-label="Input gain"
           value={[pending.gain]}
           min={0}
           max={4}
@@ -51,6 +52,7 @@ export function SettingsPanel() {
         </div>
         <Slider
           id="segment"
+          aria-label="Segment length"
           value={[pending.segmentSeconds]}
           min={5}
           max={60}
@@ -85,6 +87,7 @@ export function SettingsPanel() {
         </div>
         <Slider
           id="auto-start-delay"
+          aria-label="Start up delay"
           value={[pending.autoStartDelaySeconds]}
           min={0}
           max={120}
