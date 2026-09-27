@@ -1,0 +1,58 @@
+# On Air Record under Docker Compose, on a Linux host with the microphone plugged in.
+#
+# Docker Desktop on macOS and Windows cannot pass a microphone into a container, so use the installers
+# there. On Linux, in an empty folder:
+#
+#   curl -fsSLO https://raw.githubusercontent.com/shibbirweb/on-air-record/master/packaging/compose.yaml
+#   audio_gid="$(stat -c %g /dev/snd/timer)"
+#   zone="$(timedatectl show -p Timezone --value 2>/dev/null || readlink -f /etc/localtime | sed 's|.*/zoneinfo/||')"
+#   printf 'AUDIO_GID=%s\nTZ=%s\n' "$audio_gid" "$zone" > .env
+#   docker compose up -d
+#
+# then open http://<this machine>:8080. The .env file is read on every `docker compose` command, so the
+# two values are worked out once. docs/SETUP.md, "Docker on Linux", explains each line below and has a
+# table of what to do when no microphone is listed; nearly always it is a permission, fixed here.
+
+# Fixed, so the volume is always called on-air-record_data whatever the folder is called.
+name: on-air-record
+
+services:
+  on-air-record:
+    # `latest` is the newest stable release. For betas use `beta` and set OAR_CHANNEL below, so the update
+    # notice names the beta image; to stay on one version, name it, like 0.7.0. The same image is on Docker
+    # Hub as shibbirweb/on-air-record, if you would rather pull from there.
+    image: ghcr.io/shibbirweb/on-air-record:latest
+    container_name: on-air-record
+    restart: unless-stopped
+    ports:
+      # Change the number on the left to serve on another port. The one on the right stays 8080.
+      - "${OAR_PORT:-8080}:8080"
+    devices:
+      # Every sound card the host has. The microphone is then chosen on the app's settings page. It must be
+      # here, not under volumes: a device mounted as a volume shows up but cannot be opened.
+      - /dev/snd:/dev/snd
+    group_add:
+      # The number of the group that owns the files in /dev/snd, so the service may open them. A number,
+      # never the name `audio`: the name would be looked up inside the container, where it means 29, and
+      # the host's may be 63 or anything else. 29 is only the fallback, right on Debian, Ubuntu and
+      # Raspberry Pi OS. Do not replace this with `privileged: true` or `user: root`; it is all that is
+      # needed. If `stat -c %g /dev/snd/*` shows two numbers, list both, one per line.
+      - "${AUDIO_GID:-29}"
+    environment:
+      # Recordings are filed under the local calendar day, so this has to be the zone you live in.
+      TZ: "${TZ:-UTC}"
+      # OAR_CHANNEL: beta
+      # More detail in the log, for reporting a problem: error, warn, info, debug or trace.
+      # OAR_LOG_LEVEL: debug
+      # docs/SETUP.md, "Environment variables", lists every variable, and the ones the image sets that
+      # should be left alone.
+    volumes:
+      # Recordings, settings and accounts. A named volume is owned by the container's user from the start;
+      # to use a folder instead, see docs/SETUP.md.
+      - data:/data
+    # Stopping closes and indexes the segment being written. Docker's default of ten seconds can cut that
+    # short and lose the last few seconds.
+    stop_grace_period: 30s
+
+volumes:
+  data:

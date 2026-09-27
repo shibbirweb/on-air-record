@@ -54,6 +54,9 @@ pub enum Command {
     /// Manage accounts when the web interface cannot be used
     #[command(subcommand)]
     Auth(AuthCommand),
+    /// Ask the running service whether it is answering, and exit 0 if it is. The container image's
+    /// health check
+    Health,
 }
 
 #[derive(Debug, Subcommand)]

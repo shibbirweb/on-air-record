@@ -97,6 +97,30 @@ describe('updatePlan', () => {
     expect(command.split('\n').at(-1)).toBe('sudo systemctl restart on-air-record');
   });
 
+  it('pulls the image rather than offering a download inside a container', () => {
+    const plan = updatePlan(
+      status({ kind: 'docker', dir: null, os: 'linux', target: 'aarch64-unknown-linux-gnu' }),
+      RELEASE,
+    );
+    expect(plan.steps.map((step) => step.command)).toEqual(['docker compose pull\ndocker compose up -d']);
+    expect(plan.download).toBeNull();
+    expect(plan.note).toContain('docker pull ghcr.io/shibbirweb/on-air-record:latest');
+    expect(plan.note).toContain('docker pull shibbirweb/on-air-record:latest from Docker Hub');
+    expect(plan.note).toContain('change it to 0.7.0');
+  });
+
+  it('names the beta image for a container following betas', () => {
+    const plan = updatePlan(
+      {
+        ...status({ kind: 'docker', dir: null, os: 'linux', target: 'x86_64-unknown-linux-gnu' }),
+        channel: 'beta',
+      },
+      RELEASE,
+    );
+    expect(plan.note).toContain('ghcr.io/shibbirweb/on-air-record:beta');
+    expect(plan.note).toContain('docker pull shibbirweb/on-air-record:beta');
+  });
+
   it('points anything else at the download for this machine', () => {
     const plan = updatePlan(
       status({ kind: 'manual', dir: null, os: 'macos', target: 'aarch64-apple-darwin' }),

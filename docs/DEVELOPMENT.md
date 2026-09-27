@@ -281,8 +281,25 @@ that the binary inside the archive reports the version the archive is named for.
 publishing because there is nothing to install until the assets exist, so a failure means an already
 public release is broken and has to be deleted and cut again.
 
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs when a release is **published
-from the GitHub web interface**, and attaches one archive per target with a `sha256` alongside. The web UI
+Releases are started and published by workflows; see [SETUP.md](SETUP.md#publishing-a-release) for the
+steps. Five take part:
+
+| Workflow | Runs | Does |
+| --- | --- | --- |
+| `beta.yml` Beta release | By hand, on develop | Bumps to the next beta and opens the release pull request into develop |
+| `beta-publish.yml` Publish beta | When CI passes on a push to develop | Publishes an untagged beta version as a pre-release and calls `release.yml` |
+| `stable.yml` Stable release | By hand, on develop | Finishes a published beta with nothing untried since, dates the changelog, and opens the release pull request into develop |
+| `stable-promote.yml` Promote stable | When CI passes on a push to develop | Opens the develop to master pull request for an untagged stable version |
+| `stable-publish.yml` Publish stable | When CI passes on a push to master | Publishes an untagged stable version as the latest release and calls `release.yml` |
+
+The automatic ones act only on a CI run that passed, on the exact commit it passed on, and end with a note
+in their summary when there is nothing to do, which is most of the time. The publishing ones call
+`release.yml` rather than relying on its release trigger, because GitHub starts no workflow for a release
+published with the built in token.
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs when a release is **published**,
+by one of those workflows or from the GitHub web interface, and attaches one archive per target with a
+`sha256` alongside. The web UI
 is built once in its own job and shared, so all four archives ship identical assets. Trigger it manually
 with `workflow_dispatch` to rehearse the build without publishing anything.
 

@@ -11,6 +11,7 @@ use std::sync::{Arc, RwLock};
 
 use crossbeam_channel::bounded;
 
+use crate::audio::device_access;
 use crate::audio::{self, CaptureHandle, CaptureOptions, FrameEncoder, SegmentLayout};
 use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
@@ -110,6 +111,7 @@ impl CaptureService {
         let capture = match audio::capture::spawn(options, sender) {
             Ok(handle) => handle,
             Err(error) => {
+                let error = with_container_advice(error);
                 self.set_state(CaptureState::Error, Some(error.to_string()));
                 return Err(error);
             }
@@ -207,6 +209,11 @@ impl CaptureService {
     ) {
         let settings = self.settings.current();
         if !settings.auto_start {
+            // Nothing will try the device until somebody presses Start, so say now what would stop it. With
+            // auto start on, the failed start below carries the same advice, and saying it twice is noise.
+            if let Some(problem) = device_access::check_container() {
+                tracing::warn!(advice = %problem.advice(), "the sound cards cannot be reached from this container");
+            }
             tracing::info!("auto start is disabled, waiting for a manual start");
             return;
         }
@@ -303,5 +310,23 @@ impl CaptureService {
             Ok(mut guard) => *guard = snapshot,
             Err(_) => tracing::error!("capture snapshot lock was poisoned"),
         }
+    }
+}
+
+/// A device error in a container gets the reason and the fix appended, when the container's view of
+/// `/dev/snd` shows one. cpal only says the device has "no usable input config", which is true of every
+/// access problem alike; this error is what the recorder panel shows, so the fix belongs in it.
+fn with_container_advice(error: AppError) -> AppError {
+    match error {
+        AppError::Audio(message) => match device_access::check_container() {
+            // cpal's messages usually end in a full stop already.
+            Some(problem) => AppError::Audio(format!(
+                "{}. {}",
+                message.trim_end_matches('.'),
+                problem.advice()
+            )),
+            None => AppError::Audio(message),
+        },
+        other => other,
     }
 }

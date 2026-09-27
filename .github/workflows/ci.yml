@@ -360,3 +360,141 @@ jobs:
           if (-not (Test-Path 'on-air-record\on-air-record.exe')) { throw 'the program was not installed' }
           if (-not (Select-String -Path 'on-air-record\config' -Pattern '^OAR_PORT=8098$' -Quiet)) { throw 'port was not saved' }
           Write-Host "installed: $(& '.\on-air-record\on-air-record.exe' --version)"
+
+  # The image is only pushed when a release is published, and a Dockerfile that had stopped building would
+  # be found out then, in public. This builds it on every push and runs it the way the setup guide does,
+  # less the sound card a runner does not have: the service must come up without one, as it does anywhere.
+  image:
+    name: container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: on-air-record:ci
+          cache-from: type=gha,scope=image-ci
+          cache-to: type=gha,mode=max,scope=image-ci
+
+      - name: Run it and stop it
+        run: |
+          set -eu
+          docker run -d --name on-air-record -p 8099:8080 -e TZ=Europe/London on-air-record:ci
+          answered=0
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8099/api/health -o health.json 2>/dev/null; then answered=1; break; fi
+            sleep 1
+          done
+          if [ "$answered" -ne 1 ]; then
+            echo "the image never answered"
+            docker logs on-air-record || true
+            exit 1
+          fi
+          cat health.json; echo
+          grep -q '"status":"ok"' health.json || { echo "health did not report ok"; exit 1; }
+
+          # Without this the update notice would tell a container's admin to run the installer inside it.
+          curl -fsS http://127.0.0.1:8099/api/updates | grep -q '"kind":"docker"' \
+            || { echo "the image does not report itself as a container"; exit 1; }
+
+          # Never root, and zone data present, or TZ is ignored and every recording lands on a UTC day.
+          [ "$(docker exec on-air-record id -u)" = "10001" ] || { echo "the image runs as the wrong user"; exit 1; }
+          docker exec on-air-record test -f /usr/share/zoneinfo/Europe/London \
+            || { echo "the image has no zone data"; exit 1; }
+          docker exec on-air-record test -f /data/on-air-record.sqlite \
+            || { echo "the database was not created in the data volume"; exit 1; }
+
+          # The health check Docker runs, run by hand rather than waited for, since its first scheduled
+          # run is thirty seconds out. It has to pass against the running service and fail where nothing
+          # is listening, or it is not checking anything.
+          docker inspect --format '{{json .Config.Healthcheck}}' on-air-record | grep -q '"health"' \
+            || { echo "the image declares no health check"; exit 1; }
+          docker exec on-air-record on-air-record health
+          if docker run --rm on-air-record:ci health; then
+            echo "the health check passed with no service running"
+            exit 1
+          fi
+
+          # PID 1 gets SIGTERM from docker stop and must shut down cleanly within the grace period rather
+          # than being killed at the end of it, which would lose the segment being written.
+          docker stop -t 30 on-air-record > /dev/null
+          code="$(docker inspect --format '{{.State.ExitCode}}' on-air-record)"
+          [ "$code" = "0" ] || { docker logs on-air-record; echo "docker stop ended it with exit code $code"; exit 1; }
+          echo "the image runs, reports itself, and stops cleanly"
+
+      # When the sound cards cannot be reached, the service says which of the three requirements in the
+      # setup guide is missing and what to change. Each case is staged with mknod, so the kernel returns the
+      # real EPERM or EACCES, then the service is started as its own user with setpriv, exactly as the image
+      # runs it. No sound hardware is involved, so every runner can do this.
+      - name: Diagnose each way the sound cards can be out of reach
+        run: |
+          set -eu
+          stage() {
+            name="$1"; setup="$2"; expected="$3"; shift 3
+            if [ -n "$setup" ]; then
+              docker run -d --name access-case -p 8097:8080 --user root --entrypoint sh "$@" on-air-record:ci \
+                -c "$setup && exec setpriv --reuid=10001 --regid=999 --init-groups on-air-record" > /dev/null
+            else
+              docker run -d --name access-case -p 8097:8080 "$@" on-air-record:ci > /dev/null
+            fi
+            for _ in $(seq 1 60); do
+              if curl -fsS http://127.0.0.1:8097/api/health > /dev/null 2>&1; then break; fi
+              sleep 0.5
+            done
+            answer="$(curl -s -X POST -H 'Origin: http://127.0.0.1:8097' http://127.0.0.1:8097/api/capture/start)"
+            docker rm -f access-case > /dev/null
+            echo "$name: $answer"
+            if [ -n "$expected" ]; then
+              echo "$answer" | grep -qF "$expected" || { echo "::error::$name: expected the advice '$expected'"; exit 1; }
+            else
+              # Everything a container controls is right, so there must be no advice, only the device error.
+              if echo "$answer" | grep -qE 'group_add|devices:|--device|AUDIO_GID|SELinux'; then
+                echo "::error::$name: advice given where none was due"; exit 1
+              fi
+            fi
+          }
+          nodes='mkdir /dev/snd && mknod -m 660 /dev/snd/controlC0 c 116 0 && mknod -m 660 /dev/snd/timer c 116 33'
+
+          stage "not passed in" "" "/dev/snd was not passed in"
+          stage "mounted as a volume" "$nodes && chmod 666 /dev/snd/*" "which happens when it is mounted as a volume"
+          stage "wrong group" "$nodes && chgrp 63 /dev/snd/*" "Set AUDIO_GID=63 in .env"
+          stage "no sound card" "mkdir /dev/snd && mknod -m 660 /dev/snd/timer c 116 33 && chgrp 29 /dev/snd/*" \
+            "holds no sound card" --device-cgroup-rule='c 116:* rmw'
+          stage "everything right" "$nodes && chgrp 29 /dev/snd/*" "" --device-cgroup-rule='c 116:* rmw'
+          echo "every access problem is named, and a correct setup gets no advice"
+
+      # What the image is for: a sound card on the host, passed through the way the compose file does it,
+      # with the host's audio group number, has to show up as a microphone. A runner has no sound card, so
+      # the kernel's loopback card stands in for one. Loading it depends on the runner's kernel packages,
+      # so a runner that cannot is a warning, not a failure: the image is not what is broken then. GitHub's
+      # hosted runners could not load it as of 0.8.0, so this only proves anything on a runner whose kernel
+      # has sound support; passthrough with a real microphone was checked by hand on an Ubuntu server.
+      - name: Pass a sound card through
+        run: |
+          set -eu
+          if ! { sudo modprobe snd-aloop 2>/dev/null \
+                 || { sudo apt-get update > /dev/null \
+                      && sudo apt-get install -y "linux-modules-extra-$(uname -r)" > /dev/null \
+                      && sudo modprobe snd-aloop; }; }; then
+            echo "::warning::This runner could not load snd-aloop, so sound card passthrough went untested."
+            exit 0
+          fi
+          ls -l /dev/snd
+          # Read from the device files, exactly as the setup guide tells users to.
+          audio_gid="$(stat -c %g /dev/snd/timer)"
+          docker run -d --name with-card -p 8098:8080 \
+            --device /dev/snd:/dev/snd --group-add "$audio_gid" on-air-record:ci
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8098/api/health > /dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          devices="$(curl -fsS http://127.0.0.1:8098/api/devices)"
+          echo "$devices"
+          docker stop -t 30 with-card > /dev/null
+          echo "$devices" | grep -q 'Loopback' \
+            || { docker logs with-card; echo "the passed through sound card is not offered as a microphone"; exit 1; }
+          echo "a host sound card reaches the service inside the container"

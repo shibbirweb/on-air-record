@@ -75,6 +75,7 @@ impl UpdateService {
             .ok()
             .and_then(|path| path.parent().map(PathBuf::from));
         let install = detect_install(
+            std::env::var("OAR_CONTAINER").ok().as_deref(),
             std::env::var("INVOCATION_ID").ok().as_deref(),
             program_dir.as_deref(),
         );

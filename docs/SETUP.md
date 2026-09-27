@@ -23,8 +23,10 @@ flowchart LR
 ## Contents
 
 - [What you need](#what-you-need)
-- [The quick way](#the-quick-way)
-- [Linux: microphone access](#linux-microphone-access)
+- [Which way to install](#which-way-to-install)
+- [Docker on Linux](#docker-on-linux), recommended on Linux
+- [The quick way](#the-quick-way), the installer for macOS and Windows
+- [Linux: microphone access](#linux-microphone-access), for the installer on Linux
 - [Stopping it](#stopping-it)
 - [Step 1: download](#step-1-download)
 - [Step 2: run it](#step-2-run-it)
@@ -55,9 +57,388 @@ flowchart LR
   figure out for you on its settings page.
 - A network the listeners are also on.
 
-Nothing else. There is no database to install, no runtime, no web server. The whole thing is one file.
+Nothing else. There is no database to install, no runtime, no web server. The whole thing is one file, or,
+on Linux, one Docker image.
+
+## Which way to install
+
+Choose by the machine the microphone is plugged into:
+
+| The host | Use |
+| --- | --- |
+| Linux, including a Raspberry Pi on a 64 bit OS | [Docker](#docker-on-linux), recommended |
+| macOS | [The quick way](#the-quick-way), the installer |
+| Windows | [The quick way](#the-quick-way), the installer |
+| Linux without Docker, or a Raspberry Pi on a 32 bit OS | [The quick way](#the-quick-way), after [Linux: microphone access](#linux-microphone-access); a 32 bit Pi needs [building from source](#building-from-source) |
+
+## Docker on Linux
+
+**On Linux, this is the recommended way to run On Air Record.** Every release is published as a container
+image, `ghcr.io/shibbirweb/on-air-record`, for 64 bit Intel and AMD machines and for 64 bit ARM, which
+includes a Raspberry Pi running a 64 bit OS. It is the same program as the downloads, with nothing added.
+Compared with [the installer](#the-quick-way) on Linux, it takes away the parts that usually go wrong:
+
+- **No permissions to set up on your account.** The container is given the sound devices itself, so there
+  is no [audio group](#linux-microphone-access) to join, no logging out and back in, and no
+  [`sudo` mistake](#do-not-run-it-with-sudo) that leaves recordings it cannot save.
+- **It starts again with the machine,** with no systemd unit to write.
+- **Updating is two commands,** which admins are shown in the app when a new version is out.
+- **A Raspberry Pi gets a ready made build** instead of [building from source](#building-from-source).
+- **Everything it keeps is in one volume,** so nothing else on the machine changes, and removing it
+  removes all of it.
+
+The one cost is installing Docker, once.
+
+### What you need for Docker
+
+- **A Linux host.** Docker Desktop on macOS and Windows runs containers inside a small virtual machine that
+  has no sound hardware, so there is nothing to pass through and the app would list no microphones. On a
+  Mac or a Windows PC, use [the quick way](#the-quick-way) instead.
+- **Docker Engine, not Docker Desktop.** Docker Desktop for Linux also runs containers in a virtual machine,
+  with the same result. Install Docker Engine with the Compose plugin by
+  [Docker's instructions](https://docs.docker.com/engine/install/) for your distribution; they cover
+  Ubuntu, Debian, Fedora and Raspberry Pi OS. Afterwards `docker compose version` should answer.
+- **Permission to run `docker`,** either with `sudo` in front of each command or by being in the `docker`
+  group. Membership of that group is as good as `root` on the machine, so `sudo` is the careful choice on a
+  shared one.
+
+The same image, with the same tags, is on Docker Hub as `shibbirweb/on-air-record`. Either works wherever
+an image is named below. This page uses `ghcr.io` because Docker Hub limits how often one address may
+download without signing in, which a shared network can run into.
+
+Nearly every problem with this setup is a permission problem, and each one looks the same from the web
+page: no microphones listed. The next part explains the three things that have to be right, so that the
+steps after it make sense and the table at the end can tell which one is wrong.
+
+### How the container gets the microphone
+
+Linux keeps each sound card behind files in `/dev/snd`. They belong to `root` and to one group, usually
+called `audio`, and only that group may open them:
+
+```
+$ ls -ln /dev/snd
+crw-rw---- 1 0 29 116,  7 Sep 27 09:12 controlC1
+crw-rw---- 1 0 29 116,  6 Sep 27 09:12 pcmC1D0c
+crw-rw---- 1 0 29 116, 33 Sep 27 09:12 timer
+```
+
+The `29` is the group's number. The program in the container can only record when all three of these hold:
+
+| | What it needs | Given by | If it is missing |
+| --- | --- | --- | --- |
+| 1 | The device files exist inside the container | `devices: /dev/snd` | `/dev/snd` does not exist in the container |
+| 2 | The container is allowed to use devices at all | `devices:`, and only `devices:` | The files are there, but opening them says `Operation not permitted` |
+| 3 | The program is in the group that owns the files | `group_add:` with that group's **number** | The files are there, but opening them says `Permission denied` |
+
+Three things follow from that:
+
+- **The group has to be given by number, not by name.** The container has its own list of group names,
+  and its `audio` is 29. The host's `audio` is 29 on Debian, Ubuntu and Raspberry Pi OS, but 63 on Fedora
+  and something else again on Arch. `group_add: audio` would quietly give the container the wrong one. The
+  steps below read the number from the device files themselves, which is right by definition.
+- **Your own account does not need to be in the `audio` group,** unlike running the program directly. Docker
+  opens nothing as you; the program inside runs as its own user, number 10001, and is given the group. You
+  only need to be allowed to run `docker`, either through the `docker` group or with `sudo`. Using `sudo`
+  here does not cause [the ownership problem it causes for a direct install](#do-not-run-it-with-sudo),
+  because the files it creates belong to the container's user either way.
+- **`/dev/snd` must be passed as a device, not as a volume.** `-v /dev/snd:/dev/snd` makes the files
+  appear, which looks right, but Docker only permits a container to open devices it was given with
+  `--device` or `devices:`.
+
+### Before you start: check the host
+
+These need no special permissions, so they give a straight answer whichever account you use:
+
+```sh
+uname -s                          # must say Linux
+docker compose version            # Docker with the Compose plugin
+cat /proc/asound/cards            # the sound cards Linux has found
+ls -d /proc/asound/card*/pcm*c    # the ones that can record: one line per microphone input
+stat -c '%g' /dev/snd/* | sort -u # the group number that owns them: expect exactly one number
+```
+
+- **`/proc/asound/cards` is empty, or no `pcm...c` lines,** means Linux itself has not found a microphone.
+  Nothing in Docker can fix that: check the cable, try another USB port, and look at `dmesg` for a driver
+  message.
+- **The last command prints two numbers,** which is unusual. Note both; the compose file can be given more
+  than one, see [the table below](#permission-problems-what-you-see-and-what-fixes-it).
+
+`arecord -l` is the usual way to list microphones, but it runs as you, and when your account is not in the
+`audio` group it lists nothing even though the card is there. That is fine for Docker, for the reason
+above; `/proc/asound/cards` is the check that is not misled by it.
+
+### With Docker Compose
+
+In an empty folder:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/shibbirweb/on-air-record/master/packaging/compose.yaml
+
+# The group number that owns the sound devices, and your time zone
+audio_gid="$(stat -c %g /dev/snd/timer)"
+zone="$(timedatectl show -p Timezone --value 2>/dev/null || readlink -f /etc/localtime | sed 's|.*/zoneinfo/||')"
+printf 'AUDIO_GID=%s\nTZ=%s\n' "$audio_gid" "$zone" > .env
+cat .env
+
+docker compose up -d
+```
+
+`cat .env` should show a number and a place, such as `AUDIO_GID=29` and `TZ=Europe/London`. If
+`AUDIO_GID` is empty, `/dev/snd` does not exist on this machine: go back to the checks above.
+
+That `.env` file sits beside `compose.yaml` and every `docker compose` command reads it, so this is done
+once. It holds the two things the container cannot work out for itself:
+
+- **`AUDIO_GID`** is the number from [the table above](#how-the-container-gets-the-microphone), handed to
+  the container with `group_add`.
+- **`TZ`, your time zone.** Recordings are filed by calendar day, and a container otherwise thinks it is in
+  UTC, so a recording made at 1 a.m. in Dhaka would land on the previous day.
+
+Add `OAR_PORT=9000` to `.env` to serve on another port. The service inside still listens on 8080; only the
+host's side changes.
+
+The container never runs as `root`. It restarts with the host unless you stop it, and its recordings,
+settings and accounts live in a volume called `on-air-record_data`, which survives removing and recreating
+the container.
+
+### Check that it can hear
+
+Before opening the page, confirm all three requirements from inside the running container:
+
+```sh
+docker exec on-air-record ls -ln /dev/snd     # 1: the device files, with the group number from .env
+docker exec on-air-record id                  # 3: that number must be in the groups list
+curl -s http://localhost:8080/api/devices     # the microphones the service can actually open
+```
+
+The last one answers until logins are set up, so run it first, on the host, with your port if you changed
+it. An empty list, `{"devices":[]}`, with the
+first two looking right means something is holding the microphone or it is not a recording device; see
+the table below. A list with names in it means it works: open `http://<this machine's address>:8080`,
+answer the question about logins, and pick the microphone on the settings page.
+
+Then let it run for a minute and check the timeline shows audio, not just that the recorder panel says
+**Recording**. New audio appears once each block of recording, 10 seconds by default, is written.
+
+### Without Compose
+
+The same thing as one command, with the same three requirements: `--device` for the first two, and
+`--group-add` with the number for the third:
+
+```sh
+docker run -d --name on-air-record --restart unless-stopped \
+  -p 8080:8080 \
+  --device /dev/snd \
+  --group-add "$(stat -c %g /dev/snd/timer)" \
+  -e TZ="$(timedatectl show -p Timezone --value 2>/dev/null || readlink -f /etc/localtime | sed 's|.*/zoneinfo/||')" \
+  -v on-air-record_data:/data \
+  --stop-timeout 30 \
+  ghcr.io/shibbirweb/on-air-record:latest
+```
+
+`--stop-timeout 30` gives it time to close and index the recording it is writing when it is stopped.
+Docker's default of ten seconds can cut that short and lose the last few seconds.
+
+### Environment variables
+
+There are two places to set things, and they are easy to confuse.
+
+**In `.env`, beside `compose.yaml`.** `docker compose` reads these on the host to fill in the compose
+file. The container never sees them directly.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `AUDIO_GID` | `29` | The number of the group that owns `/dev/snd`, given to the container with `group_add` so it may open the sound devices. See [how the container gets the microphone](#how-the-container-gets-the-microphone). |
+| `TZ` | `UTC` | Your time zone, such as `Europe/London`, passed into the container as `TZ`. |
+| `OAR_PORT` | `8080` | The port on the host: the left side of the port mapping. The service inside stays on 8080. |
+
+**In the container.** Set these under `environment:` in `compose.yaml`, or with `-e NAME=value` on
+`docker run`. They are what the program itself reads:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `TZ` | `UTC` | The time zone recordings are filed by. Recordings are kept by local calendar day, so this must be the zone you live in. |
+| `OAR_CHANNEL` | `beta` in a beta image, `stable` otherwise | Which releases the update notices offer, `stable` or `beta`. Set it to `beta` when following the `beta` tag, because a stable image reached through that tag otherwise offers only stable releases. |
+| `OAR_LOG_LEVEL` | `info` | How much the log says: `error`, `warn`, `info`, `debug` or `trace`. Use `debug` when reporting a problem. |
+| `RUST_LOG` | not set | A detailed logging filter that replaces `OAR_LOG_LEVEL` when set, such as `on_air_record=debug,tower_http=info`. |
+
+The image sets a few more. Leave them as they are:
+
+| Variable | Set to | Why leave it |
+| --- | --- | --- |
+| `OAR_PORT` | `8080` | The port inside the container. To serve on another port, change `OAR_PORT` in `.env` instead, which moves only the host's side. Changing this one needs the right side of the port mapping changed to match, and gains nothing. |
+| `OAR_HOST` | `0.0.0.0` | Which connections inside the container are accepted. Port mapping arrives from outside the container's loopback, so `127.0.0.1` makes it unreachable, and the health check still says `healthy`, because it asks from inside. To limit who can reach it, publish the port on one host address instead, such as `127.0.0.1:8080:8080`. |
+| `OAR_DATA_DIR` | `/data` | Where recordings, settings and accounts are kept, which is where the volume is mounted. Anywhere else is inside the container and lost when it is recreated. |
+| `OAR_CONTAINER` | `docker` | Tells the service it runs in a container, so update notices say to pull the new image, and a microphone it cannot reach is explained in terms of `devices:` and `group_add`. |
+| `OAR_STATIC_DIR` | not set | A folder holding a web interface to serve instead of the one built into the program. Only for working on the interface. |
+
+`OAR_PORT` appears in both lists on purpose, with different meanings: in `.env` it is only the host's port,
+and `docker compose` does not pass it into the container. For example, a beta follower who wants more
+detail in the log adds this to `compose.yaml`:
+
+```yaml
+    environment:
+      TZ: "${TZ:-UTC}"
+      OAR_CHANNEL: beta
+      OAR_LOG_LEVEL: debug
+```
+
+After changing `compose.yaml` or `.env`, run `docker compose up -d` to recreate the container;
+`docker compose restart` keeps the old settings.
+
+### Permission problems: what you see and what fixes it
+
+**The service diagnoses most of these itself.** In a container it looks at its own `/dev/snd` and says
+which requirement is missing and what to change, using the group number it found:
+
+```
+auto start failed, the service is running without capture error=audio device error: device 'default' has
+no usable input config: ... The container is not in the group that owns /dev/snd (group 63). Set
+AUDIO_GID=63 in .env and run docker compose up -d, or with docker run add --group-add 63.
+```
+
+That text appears in `docker compose logs` when recording starts automatically, and in the recorder panel
+when **Start** is pressed. With automatic start switched off it is logged once when the container starts.
+The table covers the same cases, and the ones it cannot see from inside, such as a muted input. Find the
+row that matches, then use the fix beside it.
+After changing `compose.yaml` or `.env`, run `docker compose up -d`, which recreates the container;
+`docker compose restart` does not pick up changes to either.
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| No microphones, and `docker exec on-air-record ls /dev/snd` says there is no such directory | The devices were not passed in | Check the `devices:` lines in `compose.yaml`, or add `--device /dev/snd` |
+| No microphones, the files are there, and the log says `Operation not permitted` | `/dev/snd` was mounted as a volume, not passed as a device | Remove any `/dev/snd` line under `volumes:` and use `devices:` |
+| No microphones, the files are there, and the log says `Permission denied` | The container is not in the group that owns them | Compare `ls -ln /dev/snd` on the host with `docker exec on-air-record id`, put the right number in `AUDIO_GID`, `docker compose up -d` |
+| A microphone plugged in after the container started is missing | The device files are copied in when the container starts | `docker compose restart` |
+| The microphone is listed, but starting says `Device or resource busy` | Another program is recording from it; most sound cards allow one at a time | Stop the other program. On a desktop, PipeWire or PulseAudio may hold it while any app records |
+| It records, but the timeline shows a flat line | The capture input is muted or turned down in the host's mixer, not a permission problem | On the host, install `alsa-utils` if needed, then `alsamixer -c <card number>` (the number from `/proc/asound/cards`): F4 for the capture controls, Space to switch capture on, arrow keys to raise it. `sudo alsactl store` keeps it after a reboot |
+| The container stops as soon as it starts, over and over, with `could not start the service error=io error: Permission denied` | It cannot write its data folder | See [the data folder](#the-data-folder-and-permissions) below |
+| `stat` printed two group numbers | The device files do not all share one group | List both under `group_add:` in `compose.yaml`, one per line |
+
+#### SELinux, on Fedora, RHEL and similar
+
+With SELinux enforcing, a folder mounted from the host needs relabelling before a container may write to
+it: add `:Z` to the volume, as in `- /srv/on-air-record:/data:Z`. Only do that for a folder used by this
+container alone; `:Z` on a home folder or a system folder breaks other programs' access to it.
+
+If the group numbers match and the log still says `Permission denied` on the sound devices, check for a
+denial with `sudo ausearch -m avc -ts recent`. If it names the sound devices, adding
+`security_opt: ["label:disable"]` to the service lifts SELinux for this container. That has not been tried
+on a real SELinux host here, so treat it as a lead rather than a known fix.
+
+#### Rootless Docker and Podman
+
+Rootless Docker and rootless Podman give containers their own range of user and group numbers, so the
+host's audio group number usually means nothing inside, and `group_add` with it does not reach the devices.
+Rootless Podman can pass your own groups through instead with `--group-add keep-groups`, which needs your
+account in the host's `audio` group. Neither has been tried here; ordinary Docker, run by the system
+service, is the tested way.
+
+#### Shortcuts not to take
+
+Each of these makes the microphone appear, which is why they get suggested. Each has a cost the proper fix
+does not:
+
+- **`privileged: true` or `--privileged`** gives the container every device on the machine, including the
+  disks, and turns off most of what keeps it contained. The three requirements above are the whole of what
+  it needs.
+- **`user: root`**, or `--user 0`, runs the service as root, which also makes everything it writes belong
+  to root. Being root skips requirement 3, but `group_add` already covers it.
+- **`chmod 666 /dev/snd/*`** on the host lets every program and every account on the machine open the
+  microphone, and is undone at the next reboot or replug anyway, so it breaks again later.
+- **`group_add: audio`**, by name, picks the container's idea of the audio group, which is right on some
+  distributions and silently wrong on others.
+
+### The data folder and permissions
+
+The service runs as user number 10001 and must be able to write its data folder. The named volume in
+`compose.yaml` is set up that way from the start, so it needs nothing. A folder of your own, such as one on
+a larger disk, has to be given to that user before the container starts:
+
+```yaml
+    volumes:
+      - /srv/on-air-record:/data
+```
+
+```sh
+sudo mkdir -p /srv/on-air-record
+sudo chown -R 10001:10001 /srv/on-air-record
+```
+
+Without the `chown`, the container stops as soon as it starts, over and over, and `docker compose logs`
+shows `could not start the service error=io error: Permission denied`. Three kinds of disk need something
+different:
+
+- **A USB drive formatted as exFAT or NTFS** has no owners to change, so `chown` fails with `Operation not
+  permitted`. Mount it with the owner set instead, by adding `uid=10001,gid=10001` to its mount options in
+  `/etc/fstab`, or reformat it as ext4.
+- **A network share over NFS** usually refuses `chown` from the client. Change the owner on the server
+  that exports it.
+- **With SELinux,** add `:Z` as [described above](#selinux-on-fedora-rhel-and-similar).
+
+**Running as your own user instead.** Rather than giving the folder to 10001, the container can run as
+you, with `user: "1000:1000"` under the service in `compose.yaml` (`id -u` and `id -g` give your numbers).
+Everything it writes then belongs to you. That replaces the image's own user, and with it the image's own
+audio group, so `group_add` stays exactly as it is and is now the only way the container reaches the
+microphone.
+
+A recordings folder chosen on the settings page follows the same rules: it has to be inside `/data`, or
+inside another folder mounted into the container the same way and owned by the user it runs as, or it is
+lost when the container is recreated.
+
+### Day to day
+
+Run these in the folder with `compose.yaml`:
+
+```sh
+docker compose logs -f         # watch the log
+docker compose ps              # is it running, and is it healthy
+docker compose stop            # stop it; it closes and indexes the recording in progress
+docker compose start           # start it again
+```
+
+**Health.** The image checks itself every 30 seconds by asking the service's `/api/health`, so
+`docker compose ps` and `docker ps` show it as `healthy`, or `unhealthy` after three failed checks in a
+row. Healthy means the service is up and answering, not that it is recording: one still waiting for you
+to pick a microphone is healthy. To see the recent checks, or to run one yourself:
+
+```sh
+docker inspect --format '{{json .State.Health}}' on-air-record
+docker exec on-air-record on-air-record health
+```
+
+Docker on its own only reports an unhealthy container; `restart: unless-stopped` restarts it when the
+program exits, not when a check fails. Monitoring tools and orchestrators that act on health read the same
+status.
+
+**Updating.** Admins are shown these same steps in the app when a new version is out:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+`latest` always points at the newest stable release. To stay on one version, change the `image` line to
+name it, such as `ghcr.io/shibbirweb/on-air-record:0.7.0`, and change it again when you want to move.
+
+**Betas.** Change the `image` line to end in `:beta`, and uncomment `OAR_CHANNEL: beta` below it so the
+update notices follow betas too. `beta` always points at the newest release of any kind, the same as the
+installer's `--beta`, so you get the stable release too once a beta becomes one.
+
+**A forgotten admin password,** or a lost phone, is reset through the program inside the container:
+
+```sh
+docker exec on-air-record on-air-record auth reset-password you@example.com
+docker exec on-air-record on-air-record auth reset-2fa you@example.com
+```
+
+**Uninstalling:** `docker compose down` removes the container. The recordings stay in the volume until you
+also run `docker volume rm on-air-record_data`, which **deletes them all**.
 
 ## The quick way
+
+The installer, for macOS and Windows, and for Linux when Docker is not an option. On Linux,
+[Docker](#docker-on-linux) is the simpler choice.
 
 One command does all three steps below. Run it from whatever folder you want the installation to live in.
 
@@ -124,16 +505,20 @@ This also sidesteps the "unidentified developer" warning on macOS and SmartScree
 file fetched with `curl` or `irm` is not quarantined the way a browser download is. Windows will still ask
 about the firewall the first time the service starts; say yes for private networks.
 
-It will refuse to run on ARM Linux, such as a Raspberry Pi, because there is no prebuilt binary for it.
-That needs [building from source](#building-from-source).
+It will refuse to run on ARM Linux, such as a Raspberry Pi, because there is no prebuilt binary for it. On
+a 64 bit OS, [Docker](#docker-on-linux) has a ready made arm64 build; otherwise it needs
+[building from source](#building-from-source).
 
 The rest of this section is the same thing done by hand.
 
-**On Linux, read [Linux: microphone access](#linux-microphone-access) first.** On a server, or any machine
+**Using the installer on Linux? Read [Linux: microphone access](#linux-microphone-access) first.** On a server, or any machine
 you reach over SSH, your account usually cannot open the microphone until you add it to one group, and the
 tempting shortcut of running it with `sudo` causes a second, quieter problem.
 
 ## Linux: microphone access
+
+This is for the installer, or any direct install, on Linux. **With [Docker](#docker-on-linux), none of it
+applies**: the container is given the sound devices itself, and your account needs nothing.
 
 Linux keeps the sound hardware behind device files in `/dev/snd`, and only `root` and members of the
 `audio` group may open them. When you sit at a desktop and log in there, you are given access
@@ -347,7 +732,8 @@ Go to the **Releases** page of the repository and download the file for your mac
 Not sure which Mac you have? Apple menu, About This Mac. Anything that says Apple M1, M2, M3 or later needs
 the `aarch64` file.
 
-There is no prebuilt file for ARM Linux, such as a Raspberry Pi. That works, but you have to
+There is no prebuilt file for ARM Linux, such as a Raspberry Pi. On a 64 bit OS, use
+[Docker](#docker-on-linux), which has an arm64 build; on a 32 bit OS, you have to
 [build it from source](#building-from-source).
 
 Each download has a `.sha256` file next to it if you want to check it arrived intact:
@@ -388,6 +774,8 @@ Run it once by hand like this before setting it up to start automatically, becau
 never gets shown that microphone prompt.
 
 ### Linux
+
+[Docker](#docker-on-linux) is the simpler way on Linux, and needs none of this. By hand:
 
 ALSA is how Linux hands out audio, and the program loads its shared library at run time. Desktop systems
 already have it. A minimal server may not, in which case the program fails to start with a message about
@@ -633,6 +1021,8 @@ both. Run `on-air-record --help` to see this list on the machine itself.
 | `--data-dir` | `OAR_DATA_DIR` | `./data` | Where recordings and the database are kept. |
 | `--static-dir` | `OAR_STATIC_DIR` | `../frontend/dist` | A folder holding a web interface to serve instead of the built in one. You do not normally need this. |
 | `--log-level` | `OAR_LOG_LEVEL` | `info` | How much detail is printed: `error`, `warn`, `info`, `debug` or `trace`. Use `debug` when reporting a problem. |
+| none | `OAR_CHANNEL` | from the version | Which releases the update notices offer: `stable` or `beta`. The installers' `--beta` saves it in their `config` file. |
+| none | `RUST_LOG` | not set | A detailed logging filter that replaces `--log-level`, such as `on_air_record=debug,tower_http=info`. |
 
 A complete example:
 
@@ -645,6 +1035,9 @@ The same thing with environment variables:
 ```sh
 OAR_PORT=9000 OAR_DATA_DIR=/srv/on-air-record OAR_LOG_LEVEL=debug ./on-air-record
 ```
+
+In Docker, the image sets some of these for you; [Environment variables](#environment-variables) in the
+Docker section lists what to set there and what to leave alone.
 
 Everything else, such as which microphone to use, how long to keep recordings and at what quality, is
 changed on the app's own settings page while it is running. It is remembered between restarts, so it does
@@ -727,6 +1120,10 @@ permission on macOS belongs to a logged in user, and a daemon running as the sys
 been granted it. The cost is that recording only runs while you are logged in.
 
 ## Keeping it running: Linux
+
+**With [Docker](#docker-on-linux) there is nothing to do.** The compose file restarts the container
+whenever the machine starts, as long as Docker itself starts at boot, which it does by default once
+installed; `sudo systemctl enable docker` makes sure. The rest of this section is for a direct install.
 
 The repository ships a systemd unit at
 [`packaging/on-air-record.service`](../packaging/on-air-record.service), and it is included in the Linux
@@ -850,6 +1247,9 @@ curl -fsSL https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scr
 Stop it first: `--update` replaces the program and starts it again, and a copy still running would hold
 the port.
 
+Running it in Docker: `docker compose pull` then `docker compose up -d`, as in
+[Docker on Linux](#day-to-day).
+
 **The update check.** Every six hours, and a minute after it starts, the service asks
 `api.github.com` for the list of releases. That is the only request it ever makes to the internet. It
 sends nothing about the recorder beyond its version in the user agent, and it never downloads or installs
@@ -866,6 +1266,9 @@ it yourself straight after upgrading, so that you are the one who answers. See
 Nothing else is written anywhere on the machine, so there is no cache or configuration file to clear.
 
 ## Trying a beta
+
+With Docker, follow betas by changing the image tag, as [Day to day](#day-to-day) describes. The rest of
+this section is for the installers.
 
 New features are released as a **beta** first, with a version like `0.4.0-beta.1`, for people willing to
 try them before everybody else gets them. Betas are tested on all three platforms like any release, but
@@ -901,9 +1304,12 @@ A beta's data carries over into the stable release it leads up to, so there is n
 2. Delete the program file, and the unit or plist file if you made one.
 3. Delete the data directory. **That is where all the recordings are**, so be sure before you do.
 
+In Docker, `docker compose down`, then `docker volume rm on-air-record_data` for the recordings.
+
 ## Building from source
 
-Needed only for a platform with no prebuilt file, such as a Raspberry Pi, or to work on the code.
+Needed only for a platform with no prebuilt file or image, such as a Raspberry Pi on a 32 bit OS, or to work
+on the code.
 
 You need [Rust](https://rustup.rs) 1.82 or newer and Node.js 22. On Debian based Linux you also need the
 audio and build headers:
@@ -937,7 +1343,8 @@ changing the code.
 
 ## Publishing a release
 
-For maintainers. Releases are made from the GitHub web interface, and the binaries build themselves.
+For maintainers. Releases are started from the **Actions** tab and published by workflows once their pull
+requests are merged, and the binaries build themselves. Doing it by hand is described after that.
 
 There are two channels, one per branch:
 
@@ -982,8 +1389,31 @@ GitHub Actions to create and approve pull requests**. Without it the first step 
 If publishing fails after the merge, open **Actions**, **Publish beta**, and re-run it; it picks up where
 it left off, and a new beta cannot be started until this one is out.
 
-Stable releases are still made by hand, with the steps below, because they also date the changelog and are
-the ones that reach everybody.
+### A stable release in two merges
+
+When a beta has held up, making it the stable release takes one click and two merges:
+
+1. On GitHub, open **Actions**, choose **Stable release**, press **Run workflow**, leave **Use workflow
+   from** on `develop`, and run it. It refuses unless CI has passed on the newest `develop` commit,
+   `develop` is at a beta that has been published, and nothing that changes the program has landed since
+   that beta (documentation, tests and tooling are fine). Then it finishes the version, `0.4.0-beta.2`
+   becomes `0.4.0`, dates the `[Unreleased]` section of `CHANGELOG.md`, and opens a pull request
+   `chore:[OAR-N] release 0.4.0` into `develop` with the release notes in its description.
+2. **Merge that pull request.** Once CI passes on `develop`, the **Promote stable** workflow opens a pull
+   request from `develop` into `master`, titled `release v0.4.0`.
+3. **Merge that one too.** Once CI passes on `master`, the **Publish stable** workflow publishes `v0.4.0`
+   from `master` as the latest release, with its changelog section as the notes, then builds every
+   platform, attaches the files and installs them on macOS, Linux and Windows.
+
+Nothing is published until both pull requests are merged; close either to stop. The `develop` to `master`
+pull request follows `develop`, so merge it before merging other work, or that work goes out with the
+release. Promote stable refuses to open it if something untried has landed in between. Tick **Dry run** in
+step 1 to see the version, commit and notes without anything being pushed or opened.
+
+It needs the same setting as betas. If publishing fails after the second merge, re-run **Publish stable**
+from **Actions**. Do not also publish the release by hand: it would race the workflow for the tag.
+
+The steps below are what the workflows do, for doing it by hand when you need to.
 
 ### 1. Decide the version
 
@@ -1006,6 +1436,9 @@ node scripts/version.mjs bump release
 git commit -am "chore:[OAR-N] release 0.4.0"
 # pull request into develop, then a pull request from develop into master
 ```
+
+Bumping to a stable version also dates the changelog: `## [Unreleased]` becomes `## [0.4.0]` with today's
+date, and the compare link at the bottom moves with it. A beta leaves the changelog alone.
 
 Or skip the question:
 
@@ -1055,6 +1488,47 @@ Publishing starts [`.github/workflows/release.yml`](../.github/workflows/release
    `CHANGELOG.md` if they are empty or are GitHub's generated list.
 6. Installs what it just published, on macOS, Linux and Windows, using the installer scripts exactly as a
    user would, and checks the service starts and reports the version the archive is named for.
+7. Alongside all that, builds the container image from the `Dockerfile` for `linux/amd64` and
+   `linux/arm64`, each on its own native runner, and pushes it to `ghcr.io/shibbirweb/on-air-record`
+   tagged with the version, and to Docker Hub as `shibbirweb/on-air-record` when its secrets are set up
+   (below). A beta also moves `beta`; a stable release moves `latest`, `beta` and its minor line, like
+   `0.7`.
+8. Verifies the image the way a user gets it, on an amd64 and an arm64 runner, **without signing in**:
+   pulls it from both registries, checks every tag points at the new image and both registries hold the
+   same one, then runs it from each, and checks it answers as that version and stops cleanly. It also tries
+   to pass a loopback sound card through as this guide says, but GitHub's own runners cannot load one, so
+   that part only warns there; passthrough with a real microphone was checked by hand on an Ubuntu server.
+9. Publishes the Docker Hub page, described below.
+
+**If the image cannot be pulled without signing in,** the ghcr.io package is private. New packages can
+start out private; this one was public from its first release, 0.8.0-beta.1, but the setting is worth
+knowing. Open the package from the repository's **Packages** list, then **Package settings**, **Change
+visibility**, **Public**. The **verify the image** jobs pull without signing in precisely to catch this,
+and fail with an error linking to the setting; once it is public, re-run the failed jobs from the run's
+page.
+
+**Docker Hub needs two repository secrets,** set once:
+
+1. On Docker Hub, signed in as `shibbirweb`, open Account settings, **Personal access tokens**, and create
+   one with **Read, Write, Delete** access. Pushing images needs only Read and Write, but Docker Hub only
+   lets a token with Delete change the repository's description, which the page below needs.
+2. In this repository on GitHub, Settings, Secrets and variables, Actions, add `DOCKERHUB_USERNAME`
+   (`shibbirweb`) and `DOCKERHUB_TOKEN` (the token).
+
+Until both are set, releases still publish to `ghcr.io` and the image tags job warns that Docker Hub was
+skipped. Releases published before the secrets existed are not pushed there afterwards; Docker Hub starts
+at the next release.
+
+**The Docker Hub page** is [`packaging/DOCKERHUB.md`](../packaging/DOCKERHUB.md), published on every
+release, beta or stable, by
+[`.github/workflows/dockerhub-description.yml`](../.github/workflows/dockerhub-description.yml). Docker
+Hub reads nothing from GitHub, so that file is the whole page. It is rendered for the release it goes out
+with: links to `master` become links to that release's tag, so the compose file and guides it points at
+exist and match that version, and while Docker Hub has no `latest` image, before the first stable release,
+the page names `beta` instead and says how to point the compose file at it. To publish it again without a
+release, run the workflow from the Actions tab with a release tag, such as `v0.8.0`. A token without the
+Delete scope makes that job fail with `Forbidden` after everything else has published. When a Docker
+behaviour changes, update that page as well as the Docker section above.
 
 Expect ten to fifteen minutes, most of it compiling. The release exists and is visible the whole time; the
 files appear at the end. Notes you wrote yourself are left exactly as they are.
@@ -1080,12 +1554,16 @@ again.
 Run the workflow from the **Actions** tab with **Run workflow**. It builds the same files and offers them
 as downloadable artifacts without touching Releases. They are named for the manifest version plus the
 commit, such as `on-air-record-v0.1.0-dev-4f5389a-x86_64-unknown-linux-gnu.tar.gz`, so a rehearsal can
-never be mistaken for a real release.
+never be mistaken for a real release. A rehearsal pushes no container image; `make docker` builds one
+locally instead.
 
 Separately, [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request:
 formatting, linting and the full test suite on macOS, Linux and Windows, the frontend checks, a check that
-the four recorded versions still agree, and a run of the installers on all three platforms that starts the
-service they produce and confirms it answers. Those Windows jobs are the only thing standing behind the
+the four recorded versions still agree, a run of the installers on all three platforms that starts the
+service they produce and confirms it answers, and a build of the container image that runs it, stages
+each way the sound cards can be out of reach and checks the service names the right fix, and stops it. It
+also tries to pass a loopback sound card in, which GitHub's own runners cannot load, so that step only
+warns there. Those Windows jobs are the only thing standing behind the
 Windows build, since it cannot be produced or tested from a Mac.
 
 ## Setup problems

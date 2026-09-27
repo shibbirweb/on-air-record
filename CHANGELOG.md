@@ -5,6 +5,21 @@ Every release of On Air Record, newest first. The format follows
 [Semantic Versioning](https://semver.org/). Each release's section is also used as its notes on the
 [releases page](https://github.com/shibbirweb/on-air-record/releases).
 
+## [0.8.0] - 2026-09-27
+
+### Added
+
+- **Docker image for Linux.** Each release is now also published as a container image, on
+  `ghcr.io/shibbirweb/on-air-record` and on Docker Hub as `shibbirweb/on-air-record`, for 64 bit Intel, AMD
+  and ARM machines, so a Raspberry Pi with a 64 bit OS no longer has to build from source. Download
+  `packaging/compose.yaml`, write the host's audio group and time zone into a `.env` file beside it, and
+  `docker compose up -d`; the host's sound cards are passed through and the microphone is picked on the
+  settings page as usual. It needs a Linux host: Docker Desktop on macOS and Windows cannot give a container
+  the microphone. Update notices in a container show the commands to pull the new image, and `docker ps`
+  shows whether it is healthy. When the container cannot reach the microphone, the log and the recorder
+  panel say why and what to change, such as the exact group number to set. The setup guide has the
+  details. (OAR-92)
+
 ## [0.7.0] - 2026-09-26
 
 ### Added
@@ -175,6 +190,7 @@ The first release.
 - There is no authentication, by design. Anyone who can reach the port can listen, so keep it on a network
   you trust.
 
+[0.8.0]: https://github.com/shibbirweb/on-air-record/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/shibbirweb/on-air-record/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/shibbirweb/on-air-record/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/shibbirweb/on-air-record/compare/v0.4.0...v0.5.0

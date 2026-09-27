@@ -15,7 +15,53 @@ Think of it as a small FM station plus a digital video recorder for sound:
 
 ## Quick start
 
-### The installer, on macOS and Linux
+Install it on the one machine the microphone is plugged into; everyone else just opens a web address.
+Choose by that machine:
+
+| The host | Use | |
+| --- | --- | --- |
+| Linux, including a Raspberry Pi on a 64 bit OS | [Docker](#docker-recommended-on-linux) | Recommended: the least that can go wrong |
+| macOS | [the installer](#the-installer-on-macos-or-linux-without-docker) | |
+| Windows | [the installer](#the-installer-on-windows) | |
+
+### Docker, recommended on Linux
+
+On Linux, Docker takes away the parts of a direct install that usually go wrong:
+
+- **No permissions to set up on your account.** The container is handed the sound devices itself, so there
+  is no `audio` group to join and no logging out and back in, and no `sudo` mistake that leaves recordings
+  it cannot save.
+- **It starts again with the machine,** with no service file to write.
+- **Updating is two commands,** `docker compose pull` and `docker compose up -d`, and admins are shown them
+  in the app when a new version is out.
+- **Raspberry Pi included.** Every release is built for 64 bit Intel, AMD and ARM, so a Pi on a 64 bit OS
+  gets a ready made build instead of compiling from source.
+- **Everything it keeps is in one volume,** recordings, settings and accounts, so nothing else on the
+  machine changes.
+
+It needs [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin, installed once;
+on Linux use Docker Engine rather than Docker Desktop, which runs containers inside a virtual machine that
+cannot reach the microphone. For the same reason Docker is not a way to run it on macOS or Windows; use the
+installer there. The image is published as `ghcr.io/shibbirweb/on-air-record` and, the same image, on
+Docker Hub as `shibbirweb/on-air-record`.
+
+In an empty folder:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/shibbirweb/on-air-record/master/packaging/compose.yaml
+audio_gid="$(stat -c %g /dev/snd/timer)"
+zone="$(timedatectl show -p Timezone --value 2>/dev/null || readlink -f /etc/localtime | sed 's|.*/zoneinfo/||')"
+printf 'AUDIO_GID=%s\nTZ=%s\n' "$audio_gid" "$zone" > .env
+docker compose up -d
+```
+
+Then open `http://<this machine's address>:8080` and pick the microphone on the settings page. The `.env`
+file records the number of the group that owns the sound devices, which the container is given so it may
+open them, and the time zone recordings are filed by. If no microphone is listed, the service says why in
+`docker compose logs` and in the recorder panel, and [Docker on Linux](docs/SETUP.md#docker-on-linux) has
+a check of the host before you start and a table matching each symptom to its fix.
+
+### The installer, on macOS (or Linux without Docker)
 
 Run this from wherever you want it to live:
 
@@ -42,8 +88,10 @@ for a specific one, `--beta` to try new features before everybody else
 ([Trying a beta](docs/SETUP.md#trying-a-beta)), or `--reconfigure` to change the port. `--help` lists the
 rest.
 
-There is no prebuilt binary for ARM Linux, such as a Raspberry Pi. The installer says so and points at
-[building from source](#build-from-source).
+There is no prebuilt binary for ARM Linux, such as a Raspberry Pi. On a 64 bit OS, use
+[Docker](#docker-recommended-on-linux) instead, which has an arm64 image; otherwise the installer points
+at [building from source](#build-from-source). On Linux, the installer also needs your account in the
+`audio` group, which [the setup guide](docs/SETUP.md#linux-microphone-access) explains.
 
 ### The installer, on Windows
 
@@ -143,7 +191,7 @@ through every part of the interface with screenshots.
 - **Single binary service.** The Rust backend serves the REST API, the WebSocket audio stream, and the
   compiled web UI from one process, with the UI baked into the executable so a release is one file. Built
   for macOS, Linux (desktop and headless server), and Windows, see [Requirements](#requirements) for which
-  of those have actually been exercised.
+  of those have actually been exercised, and published as a Docker image for Linux on amd64 and arm64.
 - **Live broadcast.** Captured audio is fanned out to every connected browser through a WebSocket, so
   several listeners on the LAN hear the same signal at the same time.
 - **Always on recording.** Audio is written to disk in fixed length segments and indexed in SQLite, so the
@@ -231,10 +279,13 @@ is why the row above says what it says.
 [docs/SETUP.md](docs/SETUP.md) has the full instructions for all three platforms, including firewall rules
 and the pitfalls. The short version:
 
-- **Linux**: [packaging/on-air-record.service](packaging/on-air-record.service) is a systemd unit template
-  whose header comment carries the install sequence. Do not skip `sudo usermod -aG audio on-air-record`, or
-  the service starts, serves the UI, and lists no input devices at all, which looks like a hardware fault
-  rather than a permissions one.
+- **Linux, with Docker (recommended)**: nothing to set up. [packaging/compose.yaml](packaging/compose.yaml)
+  restarts it with the machine and passes `/dev/snd` through, with the host's audio group number given by
+  `group_add`.
+- **Linux, without Docker**: [packaging/on-air-record.service](packaging/on-air-record.service) is a systemd
+  unit template whose header comment carries the install sequence. Do not skip
+  `sudo usermod -aG audio on-air-record`, or the service starts, serves the UI, and lists no input devices
+  at all, which looks like a hardware fault rather than a permissions one.
 - **Windows**: no service wrapper is built in, because a code path nobody here can test is worse than a
   documented command. Use [NSSM](https://nssm.cc/), which supervises a console program properly, or
   `sc.exe`. Either way the service must run as a real user account, because the Windows audio session
@@ -260,6 +311,12 @@ OAR_PORT=9000 OAR_DATA_DIR=/srv/on-air-record on-air-record
 | `--data-dir` | `OAR_DATA_DIR` | `./data` | Root directory for recordings and the database |
 | `--static-dir` | `OAR_STATIC_DIR` | `../frontend/dist` | Compiled web UI to serve |
 | `--log-level` | `OAR_LOG_LEVEL` | `info` | `error`, `warn`, `info`, `debug`, or `trace` |
+| none | `OAR_CHANNEL` | from the version | Releases the update notices offer: `stable` or `beta` |
+| none | `RUST_LOG` | not set | Full tracing filter, replacing `--log-level` when set |
+
+In Docker, the image sets `OAR_HOST`, `OAR_PORT` and `OAR_DATA_DIR` for the container, the compose file adds
+`TZ`, and its `.env` holds `AUDIO_GID`, `TZ` and the host port;
+[Environment variables](docs/SETUP.md#environment-variables) lists them all, with which to leave alone.
 
 `--data-dir` defaults to a path **relative to the working directory**, so a service started from elsewhere
 will appear to have lost its recordings when it has in fact made a second `data` directory. Give it an
@@ -407,7 +464,9 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Embed the compiled UI into the binary for a single file distribution
 - [x] Continuous integration building and testing on macOS, Linux, and Windows
 - [x] Release workflow producing macOS, Linux, and Windows artifacts
+- [x] Betas and stable releases started from Actions and published by workflows after their pull requests merge
 - [x] systemd unit template, with the Windows service wrapper documented
+- [x] Container image for Linux on amd64 and arm64, published to ghcr.io and Docker Hub with each release, a health check, and a compose file passing the host's sound cards through
 
 ### Milestone 7: access control
 

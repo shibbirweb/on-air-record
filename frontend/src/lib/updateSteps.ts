@@ -11,6 +11,9 @@ import type { ReleaseInfo, UpdateStatus } from '@/api/types';
 const REPOSITORY = 'shibbirweb/on-air-record';
 const INSTALL_SH = `https://raw.githubusercontent.com/${REPOSITORY}/master/scripts/install.sh`;
 const INSTALL_PS1 = `https://raw.githubusercontent.com/${REPOSITORY}/master/scripts/install.ps1`;
+/** The container image the release workflow publishes, and the same image on Docker Hub. */
+export const IMAGE = `ghcr.io/${REPOSITORY}`;
+export const DOCKER_HUB_IMAGE = 'shibbirweb/on-air-record';
 
 /** The targets each release is built for. Anything else has no ready made download. */
 export const RELEASED_TARGETS = [
@@ -82,6 +85,23 @@ export function updatePlan(status: UpdateStatus, release: ReleaseInfo): UpdatePl
       ],
       download,
       note: 'Run both as the account that owns the folder.',
+    };
+  }
+
+  // No archive to offer: the program inside a container is replaced by pulling the image, never by hand,
+  // or it reverts the next time the container is recreated. Nothing inside a container says which
+  // registry it came from, so the note names both.
+  if (install.kind === 'docker') {
+    const tag = status.channel === 'beta' ? 'beta' : 'latest';
+    return {
+      steps: [
+        {
+          text: 'In the folder holding your compose.yaml, pull the new image and recreate the container. Recordings, settings and accounts live in the data volume and are kept:',
+          command: ['docker compose pull', 'docker compose up -d'].join('\n'),
+        },
+      ],
+      download: null,
+      note: `Started with docker run instead? Pull the image you started it from, docker pull ${IMAGE}:${tag} or docker pull ${DOCKER_HUB_IMAGE}:${tag} from Docker Hub, then remove the container and run it again with the same options. If your image line names a version, change it to ${release.version} first.`,
     };
   }
 

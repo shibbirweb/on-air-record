@@ -235,6 +235,14 @@ semicolons and trailing commas in TS). Project specifics on top of those:
   commit with `version.mjs notes` as the notes and calls `release.yml` through `workflow_call`, since
   GitHub starts no workflow for anything done with the built in token. Anything in `release.yml` that
   checks out code must keep passing `ref: ${{ inputs.tag }}`, or a called build compiles the wrong commit.
+- Stable releases take three workflows on the same pattern. **Stable release** (`stable.yml`, run by hand
+  on develop) refuses unless develop is at a published beta with no `feat`, `fix` or other program change
+  since it (`docs`, `test` and `chore` are allowed), runs `version.mjs bump release`, which also dates the
+  changelog, and opens the `release/v<version>` pull request into develop. **Promote stable**
+  (`stable-promote.yml`) opens the develop to master pull request when CI passes on develop at an untagged
+  stable version, under the same untried rule. **Publish stable** (`stable-publish.yml`) publishes the
+  release from master when CI passes there at an untagged stable version, and calls `release.yml`. The
+  release commit goes to develop, never straight to master, so develop always carries the version.
 - Betas are released from `develop` as GitHub pre-releases with versions like `0.4.0-beta.1`
   (`version.mjs bump beta`). When a beta has held up, `version.mjs bump release` finishes the version on a
   branch from `develop`, that branch is merged into `develop`, then `develop` into `master`, and the stable
@@ -306,6 +314,35 @@ The stop scripts send TERM and wait, because shutdown closes and indexes the seg
 CI runs both installers on all three platforms, and `make install-preview` tries one locally under `/tmp`.
 `packaging/on-air-record.service` is the systemd unit.
 
+The `Dockerfile` at the root builds the same binary for Linux. `release.yml` pushes it to
+`ghcr.io/shibbirweb/on-air-record` for amd64 and arm64, and the same digests to Docker Hub
+(`shibbirweb/on-air-record`) when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets exist, skipping Docker
+Hub with a warning otherwise. Tags: the version and `beta`, and for stable also `latest` and the minor line.
+ghcr.io is the one the docs and update notices lead with, because Docker Hub rate limits anonymous pulls.
+Microphone passthrough is `/dev/snd` plus the host's audio GID via `group_add` (`packaging/compose.yaml`), so
+it is **Linux hosts only**; Docker Desktop has no sound hardware. Passthrough with a real microphone was
+verified by hand on an Ubuntu server with a 0.8.0 beta; nothing automated covers it, because GitHub's hosted
+runners cannot load `snd-aloop`, so the loopback steps in CI and `verify-image` only warn. The image sets `OAR_CONTAINER`, which makes the
+install kind `docker` so update notices say to pull rather than run an installer. It runs as uid 10001 and
+ships `tzdata` because days are local; keep both. Its `HEALTHCHECK` is `on-air-record health`
+(`health_probe.rs`), a std only HTTP probe of `/api/health` that opens no database; it reports liveness, not
+whether capture is running, on purpose. `make docker` builds it, and CI builds and runs it on every push,
+including each access failure staged with `mknod`. After a release, `verify-image` pulls it signed out on
+amd64 and arm64 and runs it with a loopback card; keep it signed out, or a still private package passes.
+The GID is read from the devices (`stat -c %g /dev/snd/timer`), never looked up by the name `audio`, in the
+setup guide, the README, `compose.yaml`'s header and CI's passthrough step; change all four together. The
+guide's Docker section is built around the three things passthrough needs (device present, device allowed,
+group) and a symptom to fix table; keep a new failure mode in that table rather than in prose elsewhere.
+`audio/device_access.rs` diagnoses the same three from inside a container (EPERM versus EACCES on a control
+device, owner GIDs against `/proc/self/status`) and appends the fix to capture errors; a new row in the
+table that the service can detect belongs in its `diagnose` too. It must only ever open a control device,
+never a PCM one, so checking never takes the microphone.
+`packaging/DOCKERHUB.md` is the whole Docker Hub page (Docker Hub reads nothing from GitHub), published on
+every release by `dockerhub-description.yml`, which `release.yml` calls. It rewrites the page's master
+links to the release tag and, while Docker Hub has no `latest`, names `beta` in place of the
+`<!-- before-stable -->` marker, so keep links pointing at master and keep that marker. Keep the page in
+step with the guide's Docker section, with absolute links only.
+
 ## Docs and the wiki
 
 `docs/SETUP.md` and `docs/USER_GUIDE.md` are also published to the GitHub wiki on every push to master
@@ -313,6 +350,10 @@ CI runs both installers on all three platforms, and `make install-preview` tries
 plain relative links in those files, and keep images as absolute raw GitHub URLs, which it does not
 rewrite. `make wiki` builds a preview. When a user facing behaviour changes, update the matching section
 there as well as the `README.md` feature checklist.
+
+Docker is the recommended install on Linux and the README and setup guide lead with it there; the installer
+leads for macOS and Windows. Keep that order when adding install instructions, and give Linux-only advice
+for a direct install a pointer to Docker first.
 
 ## Further reading
 

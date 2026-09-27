@@ -21,7 +21,8 @@ You do not need to install anything to listen. There is no account, no password,
 web address in an ordinary browser.
 
 If nothing is running yet, start with the **[installation guide](SETUP.md)**, which covers downloading and
-running it on macOS, Linux and Windows.
+running it on macOS, Linux and Windows. On Linux, the recommended way is its
+[Docker section](SETUP.md#docker-on-linux).
 
 > The screenshots in this guide come from a demonstration setup with several days of example recordings
 > already on disk, so the timeline looks busy. A brand new installation starts empty and fills up as it
@@ -587,6 +588,8 @@ missed. Below that are the steps to update, written for how your copy was instal
   recordings are kept, and it starts again when it is done.
 - **Running as a Linux service**: commands to download the new version, check it, put it in place and
   restart the service.
+- **Running in Docker**: the two commands that pull the new image and recreate the container. Recordings,
+  settings and accounts are in the data volume and are kept.
 - **Anything else**: which download to get for your machine.
 
 Updating restarts the service, so a few seconds are not recorded. The recorder never updates itself; it

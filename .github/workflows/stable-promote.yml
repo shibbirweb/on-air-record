@@ -1,0 +1,107 @@
+# Opens the develop to master pull request once a stable release is merged into develop.
+#
+# stable.yml opens a release pull request that moves develop to a stable version. Once that is merged and
+# CI has passed on develop, this opens the second pull request, develop into master, with the release
+# notes in its description. Merging it is the last decision; stable-publish.yml does the rest once CI
+# passes on master.
+#
+# It runs whenever CI finishes on a push to develop, and acts only when CI passed, develop is at a stable
+# version with no tag yet, and no such pull request is open already: every other run ends with a note.
+name: Promote stable
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: stable-promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: open the develop to master pull request
+    runs-on: ubuntu-latest
+    # Only CI that passed, on a push to develop. A pull request's CI never promotes anything.
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - name: Is there a stable release to promote?
+        id: check
+        run: |
+          version="$(node scripts/version.mjs show)"
+          case "$version" in
+            *-*)
+              echo "develop is at $version, a beta. Nothing to promote." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+          esac
+          if git rev-parse --verify --quiet "refs/tags/v$version" > /dev/null; then
+            echo "v$version is already released. Nothing to promote." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # The same rule as stable.yml: nothing that changes the program may ride along untried. Only the
+          # release commit itself, and docs, tests or tooling, may sit between the beta and this.
+          untried="$(git log HEAD --no-merges --format='%h %s' --not --tags='v*' \
+            | grep -vE "^[0-9a-f]+ (docs|test|chore)[:[(]" || true)"
+          if [ -n "$untried" ]; then
+            {
+              echo "::error::develop has changes since the last beta that nobody has tried, so v$version is not promoted to master."
+              echo "Run Beta release to put them in a beta, then Stable release again."
+              printf '%s\n' "$untried"
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Open the pull request into master
+        if: steps.check.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          open="$(gh pr list --repo "$GITHUB_REPOSITORY" --base master --head develop --state open \
+            --json url --jq '.[0].url // ""')"
+          if [ -n "$open" ]; then
+            echo "A pull request from develop into master is already open: $open" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if ! node scripts/version.mjs notes "$VERSION" > "$RUNNER_TEMP/notes.md"; then
+            echo '_No user visible changes are recorded in CHANGELOG.md for this version._' > "$RUNNER_TEMP/notes.md"
+          fi
+          {
+            echo "Merging this releases **v$VERSION** to everybody. Once CI passes on master, Publish stable"
+            echo "publishes the release from master, builds every platform, installs it on macOS, Linux and"
+            echo "Windows, and the installers start handing it out."
+            echo ''
+            echo 'This pull request follows develop, so anything merged into develop before it is merged goes to'
+            echo 'master with it. Merge it before merging other work.'
+            echo ''
+            echo '## Release notes'
+            echo ''
+            cat "$RUNNER_TEMP/notes.md"
+          } > "$RUNNER_TEMP/body.md"
+
+          if ! url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base master --head develop \
+                --title "release v$VERSION" --body-file "$RUNNER_TEMP/body.md" 2>&1)"; then
+            echo "$url"
+            echo "::error::GitHub would not open the pull request into master. Open it by hand from develop, or re-run this once the cause above is fixed."
+            exit 1
+          fi
+          echo "Opened $url" >> "$GITHUB_STEP_SUMMARY"

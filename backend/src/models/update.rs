@@ -136,16 +136,26 @@ pub enum InstallKind {
     Installer { dir: String },
     /// Run by systemd, as the setup guide describes: replace the program and restart the unit.
     Systemd,
+    /// The published container image: pull the new image and recreate the container. Replacing the
+    /// program inside it would be lost the next time the container is recreated.
+    Docker,
     /// Anything else, such as a program started by hand: download the new one from the release page.
     Manual,
 }
 
-/// Work out the install kind from what the process can see. `INVOCATION_ID` is set by systemd for every
-/// unit it starts; the installers write a start script beside the program.
+/// Work out the install kind from what the process can see. The image sets `OAR_CONTAINER` rather than
+/// this guessing from `/.dockerenv`, which Podman and other runtimes do not create. `INVOCATION_ID` is
+/// set by systemd for every unit it starts; the installers write a start script beside the program.
 pub fn detect_install(
+    container: Option<&str>,
     invocation_id: Option<&str>,
     program_dir: Option<&std::path::Path>,
 ) -> InstallKind {
+    // First, because nothing on the host reaches inside a container: a unit that runs `docker run` gives
+    // the program no INVOCATION_ID, and the image has no installer folder, but saying so costs nothing.
+    if container.is_some_and(|name| !name.is_empty()) {
+        return InstallKind::Docker;
+    }
     if invocation_id.is_some_and(|id| !id.is_empty()) {
         return InstallKind::Systemd;
     }
@@ -318,27 +328,37 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
 
         assert_eq!(
-            detect_install(Some("abc123"), Some(&dir)),
+            detect_install(None, Some("abc123"), Some(&dir)),
             InstallKind::Systemd
         );
-        assert_eq!(detect_install(None, Some(&dir)), InstallKind::Manual);
-        assert_eq!(detect_install(None, None), InstallKind::Manual);
+        assert_eq!(detect_install(None, None, Some(&dir)), InstallKind::Manual);
+        assert_eq!(detect_install(None, None, None), InstallKind::Manual);
 
         std::fs::write(dir.join("start.sh"), "#!/bin/sh\n").expect("start script");
         assert_eq!(
-            detect_install(None, Some(&dir)),
+            detect_install(None, None, Some(&dir)),
             InstallKind::Installer {
                 dir: dir.display().to_string()
             }
         );
         // systemd wins: a unit may well run a program that sits in an installer folder.
         assert_eq!(
-            detect_install(Some("abc123"), Some(&dir)),
+            detect_install(None, Some("abc123"), Some(&dir)),
             InstallKind::Systemd
         );
         assert_eq!(
-            detect_install(Some(""), Some(&dir)).clone(),
-            detect_install(None, Some(&dir))
+            detect_install(None, Some(""), Some(&dir)).clone(),
+            detect_install(None, None, Some(&dir))
+        );
+
+        // The image says so, and that beats everything else the process can see.
+        assert_eq!(
+            detect_install(Some("docker"), Some("abc123"), Some(&dir)),
+            InstallKind::Docker
+        );
+        assert_eq!(
+            detect_install(Some(""), None, Some(&dir)),
+            detect_install(None, None, Some(&dir))
         );
 
         let _ = std::fs::remove_dir_all(&dir);
