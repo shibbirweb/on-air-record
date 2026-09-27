@@ -287,37 +287,8 @@ async function checkApi(plan) {
 // ---- Chrome ---------------------------------------------------------------------------------------
 
 async function withChrome(body) {
-  const profile = mkdtempSync(join(tmpdir(), 'oar-e2e-chrome-'));
-  const debugPort = PORT + 1;
-  const chrome = spawn(
-    CHROME,
-    [
-      '--headless=new',
-      '--no-sandbox',
-      '--disable-gpu',
-      '--hide-scrollbars',
-      '--mute-audio',
-      // Dates and numbers on the page are formatted for the browser's language; pin it so checks agree.
-      '--lang=en-US',
-      `--remote-debugging-port=${debugPort}`,
-      `--user-data-dir=${profile}`,
-      'about:blank',
-    ],
-    // Detached, so Chrome leads a process group of its own and stopping it can reach its helpers too.
-    { env: ENV, stdio: 'ignore', detached: true },
-  );
-  const exited = new Promise((done) => chrome.on('exit', done));
+  const { chrome, exited, target, profile } = await launchChrome(PORT + 1);
   try {
-    let target;
-    for (let attempt = 0; attempt < 100 && !target; attempt += 1) {
-      await sleep(150);
-      target = await fetch(`http://127.0.0.1:${debugPort}/json/list`)
-        .then((reply) => reply.json())
-        .then((targets) => targets.find((item) => item.type === 'page'), () => undefined);
-    }
-    if (!target) {
-      throw new Error('Chrome did not open a page to drive');
-    }
     const page = await connect(target.webSocketDebuggerUrl);
     try {
       await body(page);
@@ -332,6 +303,66 @@ async function withChrome(body) {
     await processGroupGone(chrome.pid);
     removeTemporary(profile);
   }
+}
+
+/**
+ * Start Chrome and wait for the page it opens. Twice, each time with a fresh profile: a runner under load
+ * can be slow to start it, and a crashed first attempt can leave a lock in its profile. When it really
+ * fails, what Chrome printed is the only clue, so the end of it is kept and reported.
+ */
+async function launchChrome(debugPort) {
+  let problem = '';
+  for (let launch = 1; launch <= 2; launch += 1) {
+    const profile = mkdtempSync(join(tmpdir(), 'oar-e2e-chrome-'));
+    const chrome = spawn(
+      CHROME,
+      [
+        '--headless=new',
+        '--no-sandbox',
+        '--disable-gpu',
+        '--hide-scrollbars',
+        '--mute-audio',
+        // Dates and numbers on the page are formatted for the browser's language; pin it so checks agree.
+        '--lang=en-US',
+        `--remote-debugging-port=${debugPort}`,
+        `--user-data-dir=${profile}`,
+        'about:blank',
+      ],
+      // Detached, so Chrome leads a process group of its own and stopping it can reach its helpers too.
+      { env: ENV, stdio: ['ignore', 'ignore', 'pipe'], detached: true },
+    );
+    let output = '';
+    chrome.stderr.on('data', (chunk) => {
+      output = (output + chunk).slice(-4000);
+    });
+    let exitedWith = null;
+    const exited = new Promise((done) => {
+      chrome.on('exit', (code, signal) => {
+        exitedWith = code ?? signal ?? 'unknown';
+        done();
+      });
+    });
+
+    // Up to thirty seconds, and no longer than Chrome stays alive.
+    for (let attempt = 0; attempt < 200 && exitedWith === null; attempt += 1) {
+      await sleep(150);
+      const target = await fetch(`http://127.0.0.1:${debugPort}/json/list`)
+        .then((reply) => reply.json())
+        .then((targets) => targets.find((item) => item.type === 'page'), () => undefined);
+      if (target) {
+        return { chrome, exited, target, profile };
+      }
+    }
+
+    problem = exitedWith === null ? 'no page after 30 s' : `Chrome exited during start up (${exitedWith})`;
+    stopProcessGroup(chrome);
+    await exited;
+    await processGroupGone(chrome.pid);
+    removeTemporary(profile);
+    const said = output.trim().split('\n').slice(-15).join('\n');
+    console.warn(`note: Chrome launch ${launch} of 2 failed: ${problem}${said ? `; it said:\n${said}` : ''}`);
+  }
+  throw new Error(`Chrome did not open a page to drive: ${problem}`);
 }
 
 /** Stop a detached child and everything it started, falling back to the child alone where groups are not
