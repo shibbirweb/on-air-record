@@ -48,20 +48,7 @@ impl DeviceRegistry {
             });
         }
 
-        if let Some(selected) = selected_id {
-            if !listed.iter().any(|device| device.id == selected) {
-                listed.push(InputDevice::unavailable(selected));
-            }
-        }
-
-        listed.sort_by(|left, right| {
-            right
-                .is_default
-                .cmp(&left.is_default)
-                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
-        });
-
-        Ok(listed)
+        Ok(arrange(listed, selected_id))
     }
 
     /// Find the device to capture from.
@@ -116,4 +103,82 @@ fn find_by_name(host: &cpal::Host, wanted: &str) -> Option<Device> {
     host.input_devices()
         .ok()?
         .find(|device| device.name().map(|name| name == wanted).unwrap_or(false))
+}
+
+/// The configured device appended as unavailable when the host does not offer it, so the UI can say the
+/// microphone is unplugged rather than silently showing another one selected; then the system default
+/// first and the rest by name, case aside. Apart from `list` so it can be tested without audio hardware.
+fn arrange(mut listed: Vec<InputDevice>, selected_id: Option<&str>) -> Vec<InputDevice> {
+    if let Some(selected) = selected_id {
+        if !listed.iter().any(|device| device.id == selected) {
+            listed.push(InputDevice::unavailable(selected));
+        }
+    }
+    listed.sort_by(|left, right| {
+        right
+            .is_default
+            .cmp(&left.is_default)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+    listed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(name: &str, is_default: bool) -> InputDevice {
+        InputDevice {
+            id: name.to_string(),
+            name: name.to_string(),
+            is_default,
+            available: true,
+            channels: 1,
+            sample_rate: 48_000,
+        }
+    }
+
+    fn names(devices: &[InputDevice]) -> Vec<&str> {
+        devices.iter().map(|device| device.name.as_str()).collect()
+    }
+
+    #[test]
+    fn the_system_default_comes_first_and_the_rest_by_name_whatever_the_case() {
+        let arranged = arrange(
+            vec![
+                device("zoom H1", false),
+                device("Built-in", true),
+                device("apogee", false),
+            ],
+            None,
+        );
+        assert_eq!(names(&arranged), ["Built-in", "apogee", "zoom H1"]);
+    }
+
+    #[test]
+    fn a_configured_device_that_is_unplugged_is_listed_as_unavailable() {
+        let arranged = arrange(vec![device("Built-in", true)], Some("Scarlett Solo"));
+        let missing = arranged
+            .iter()
+            .find(|device| device.id == "Scarlett Solo")
+            .expect("still listed");
+        assert!(!missing.available);
+        assert!(!missing.is_default);
+        assert_eq!(arranged.len(), 2);
+    }
+
+    #[test]
+    fn a_configured_device_that_is_present_is_not_listed_twice() {
+        let arranged = arrange(
+            vec![device("Built-in", true), device("Scarlett Solo", false)],
+            Some("Scarlett Solo"),
+        );
+        assert_eq!(arranged.len(), 2);
+        assert!(arranged.iter().all(|device| device.available));
+    }
+
+    #[test]
+    fn with_no_devices_and_nothing_configured_the_list_is_empty() {
+        assert!(arrange(Vec::new(), None).is_empty());
+    }
 }

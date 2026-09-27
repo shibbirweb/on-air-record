@@ -1,3 +1,5 @@
+/// <reference types="vitest/config" />
+
 import { fileURLToPath, URL } from 'node:url';
 
 import tailwindcss from '@tailwindcss/vite';
@@ -32,5 +34,32 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+  },
+  test: {
+    // Opt in through `npm run coverage`; `npm test`, which CI and `make check` run, stays as fast as it was.
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/__tests__/**',
+        'src/**/*.test.{ts,tsx}',
+        'src/test/**',
+        'src/**/*.d.ts',
+        // Types only, so there is nothing in it to execute.
+        'src/api/types.ts',
+        'src/main.tsx',
+        'src/vite-env.d.ts',
+      ],
+      reporter: ['text-summary', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+      // A floor, not a target: the measured totals rounded down, less two points, so a real regression
+      // fails the run while generated property inputs moving a branch or two cannot.
+      thresholds: {
+        statements: 96,
+        branches: 93,
+        functions: 95,
+        lines: 96,
+      },
+    },
   },
 });

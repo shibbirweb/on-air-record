@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// End to end: the real service on seeded recordings, driven through real headless Chrome.
+// End to end: the real service, driven through real headless Chrome, in two scenarios. One runs on
+// seeded recordings, for the sounds, bookmarks, export, the day picker and settings. The other starts
+// from a brand new recorder, for the first visit question, signing in and out, and what a listener sees.
 //
 // The unit tests prove the parts; this proves them joined up, for what jsdom cannot reach: buttons that
 // talk to the server and seek, canvases that draw, and a settings card built on a component library that
@@ -16,7 +18,7 @@
 // E2E_PORT (8199), E2E_ARTIFACTS (where screenshots go), CHROME_PATH.
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,21 +74,36 @@ async function main() {
     throw new Error(`node:sqlite is not available in Node ${process.version}; use Node 22.13 or newer.`);
   }
   mkdirSync(ARTIFACTS, { recursive: true });
-  const dataDir = mkdtempSync(join(tmpdir(), 'oar-e2e-'));
 
-  // Once to let the service create its database and run its migrations, then stopped to seed it.
-  await withService(dataDir, async () => {});
-  const plan = seed(DatabaseSync, join(dataDir, 'on-air-record.sqlite'));
-
-  try {
-    await withService(dataDir, async () => {
-      await request('POST', '/api/auth/open');
-      await checkApi(plan);
-      await withChrome(async (page) => {
-        await checkTimeline(page, plan);
-        await checkSettings(page);
-      });
+  console.log('-- recordings: sounds, bookmarks, export, the day picker and settings');
+  await scenario(DatabaseSync, { seedRecordings: true }, async (plan) => {
+    await request('POST', '/api/auth/open');
+    await checkApi(plan);
+    await withChrome(async (page) => {
+      await checkTimeline(page, plan);
+      await checkBookmarks(page);
+      await checkExport(page);
+      await checkDayPicker(page, plan);
+      await checkSettings(page);
     });
+  });
+
+  console.log('-- a brand new recorder: the first visit, signing in, and a listener');
+  await scenario(DatabaseSync, { seedRecordings: false }, async () => {
+    await withChrome(async (page) => {
+      await checkFirstRunAndSignIn(page);
+    });
+  });
+}
+
+/** A fresh data directory: created by the service itself, seeded while it is stopped, then served. */
+async function scenario(DatabaseSync, { seedRecordings }, body) {
+  const dataDir = mkdtempSync(join(tmpdir(), 'oar-e2e-'));
+  try {
+    // Once to let the service create its database and run its migrations, then stopped to seed it.
+    await withService(dataDir, async () => {});
+    const plan = seed(DatabaseSync, join(dataDir, 'on-air-record.sqlite'), seedRecordings);
+    await withService(dataDir, () => body(plan));
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
   }
@@ -99,8 +116,18 @@ async function main() {
  * with a clap, a click that must be ignored, speech with pauses, and a door. The sounds sit at a minute
  * and a half past a round ten minutes, where no gridline or hour tick can fall on their marks.
  */
-function seed(DatabaseSync, path) {
+function seed(DatabaseSync, path, withRecordings) {
   const db = new DatabaseSync(path);
+  const setting = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at_ms) VALUES (?, ?, ?)');
+  // CI has no microphone, and a developer's should stay out of it.
+  setting.run('auto_start', 'false', Date.now());
+  // Three days, or the janitor prunes yesterday's recording within a minute of starting: the default
+  // window is a day, and yesterday's sits just past it.
+  setting.run('retention_hours', '72', Date.now());
+  if (!withRecordings) {
+    db.close();
+    return null;
+  }
   const tenMinutes = 600_000;
   const start = Math.floor((Date.now() - 45 * 60_000) / tenMinutes) * tenMinutes;
   const end = start + 30 * 60_000;
@@ -152,12 +179,24 @@ function seed(DatabaseSync, path) {
       day,
     );
   }
-  // CI has no microphone, and a developer's should stay out of it.
-  db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at_ms) VALUES (?, ?, ?)').run(
-    'auto_start',
-    'false',
-    Date.now(),
-  );
+  // Ten flat minutes the day before, so the day picker has a second day to go to. Flat, so previous
+  // sound from today's first still finds nothing earlier.
+  const yesterday = start - 24 * 3_600_000;
+  plan.yesterday = yesterday;
+  for (let offset = 0; offset < 600_000; offset += 10_000) {
+    const at = yesterday + offset;
+    const day = new Date(at).toISOString().slice(0, 10);
+    insert.run(
+      sessionId,
+      100_000 + offset / 10_000,
+      `recordings/${day}/${sessionId}/y${String(offset / 10_000).padStart(5, '0')}.pcm`,
+      at,
+      at + 10_000,
+      10_000 * 96,
+      Uint8Array.from({ length: 100 }, () => 2),
+      day,
+    );
+  }
   db.close();
   return plan;
 }
@@ -189,17 +228,38 @@ async function withService(dataDir, body) {
   }
 }
 
-async function request(method, path, body) {
+async function request(method, path, body, cookie) {
   const reply = await fetch(`${BASE}${path}`, {
     method,
     // The guard refuses a state change whose Origin is not the page's own, as a browser would send.
-    headers: { Origin: BASE, 'Content-Type': 'application/json' },
+    headers: {
+      Origin: BASE,
+      'Content-Type': 'application/json',
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!reply.ok) {
     throw new Error(`${method} ${path} answered ${reply.status}: ${await reply.text()}`);
   }
   return reply.headers.get('content-type')?.includes('json') ? reply.json() : null;
+}
+
+/** Sign in over the API and return the session cookie, for setting up accounts a test then uses. */
+async function sessionFor(email, password) {
+  const reply = await fetch(`${BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { Origin: BASE, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!reply.ok) {
+    throw new Error(`signing in as ${email} answered ${reply.status}`);
+  }
+  const cookie = reply.headers.get('set-cookie')?.split(';')[0];
+  if (!cookie) {
+    throw new Error(`signing in as ${email} set no cookie`);
+  }
+  return cookie;
 }
 
 async function checkApi(plan) {
@@ -225,12 +285,15 @@ async function withChrome(body) {
       '--disable-gpu',
       '--hide-scrollbars',
       '--mute-audio',
+      // Dates and numbers on the page are formatted for the browser's language; pin it so checks agree.
+      '--lang=en-US',
       `--remote-debugging-port=${debugPort}`,
       `--user-data-dir=${profile}`,
       'about:blank',
     ],
     { env: ENV, stdio: 'ignore' },
   );
+  const exited = new Promise((done) => chrome.on('exit', done));
   try {
     let target;
     for (let attempt = 0; attempt < 100 && !target; attempt += 1) {
@@ -250,7 +313,10 @@ async function withChrome(body) {
     }
   } finally {
     chrome.kill();
-    rmSync(profile, { recursive: true, force: true });
+    // Chrome goes on writing its cache for a moment after being told to stop; deleting its profile
+    // before it has exited fails with a folder that is not empty.
+    await exited;
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }
 
@@ -294,6 +360,28 @@ async function connect(url) {
       const reply = await send('Page.captureScreenshot', { format: 'png' });
       writeFileSync(join(ARTIFACTS, `${name}.png`), Buffer.from(reply.result.data, 'base64'));
     },
+    /** Focus a field with a real click and type into it, as the keyboard would. */
+    async type(selector, text) {
+      const found = await this.click(selector);
+      if (found) {
+        await send('Input.insertText', { text });
+      }
+      return found;
+    },
+    /** Poll until an expression is truthy, or give up after `ms`. */
+    async waitFor(expression, ms = 5000) {
+      const until = Date.now() + ms;
+      while (Date.now() < until) {
+        if (await run(expression)) {
+          return true;
+        }
+        await sleep(200);
+      }
+      return false;
+    },
+    async downloadsTo(folder) {
+      await send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: folder });
+    },
     /** A real mouse click at the element's centre: the settings dropdown ignores synthetic clicks. */
     async click(selector) {
       const point = await run(`(() => {
@@ -318,6 +406,10 @@ const button = (text) => `[...document.querySelectorAll('button')].find((b) => b
 const buttonContaining = (text) =>
   `[...document.querySelectorAll('button')].find((b) => b.textContent.includes(${JSON.stringify(text)}))`;
 const labelled = (label) => `document.querySelector('[aria-label=${JSON.stringify(label)}]')`;
+/** The field a visible label names, the way a person finds it. */
+const field = (label) =>
+  `(() => { const tag = [...document.querySelectorAll('label')].find((l) => l.textContent.trim() === ${JSON.stringify(label)}); return tag ? document.getElementById(tag.htmlFor) : null; })()`;
+const hasText = (text) => `document.body.innerText.includes(${JSON.stringify(text)})`;
 
 /** What the transport bar says: the cued or playing time, and any note beside the controls. */
 async function transport(page) {
@@ -408,6 +500,140 @@ async function checkSettings(page) {
 
   await page.open('/settings');
   check('the page shows High after a reload', (await shown()) === 'High', String(await shown()));
+}
+
+async function checkBookmarks(page) {
+  // The previous checks leave the clap cued. A bookmark is added where the cue is.
+  const cued = (await transport(page)).time;
+  await page.click(labelled('Add a bookmark here'));
+  await sleep(500);
+  await page.type(`document.querySelector('input[placeholder="What happened here?"]')`, 'Clap');
+  await page.click(button('Save'));
+  await sleep(1500);
+  const { bookmarks } = await request('GET', '/api/bookmarks');
+  check('a bookmark is stored where the cue was, with its label', bookmarks.length === 1 && bookmarks[0].label === 'Clap' && clock(bookmarks[0].timestampMs) === cued, JSON.stringify(bookmarks));
+  check('the bookmark count beside the timeline shows it', Boolean(await page.run(`Boolean(${button('1')})`)));
+
+  await page.click(button('1'));
+  await sleep(500);
+  check('the bookmark list shows it', await page.run(hasText('Clap')));
+  await page.shot('bookmarks');
+  await page.click(labelled('Remove Clap'));
+  await sleep(1500);
+  const after = await request('GET', '/api/bookmarks');
+  check('removing it from the list deletes it', after.bookmarks.length === 0, JSON.stringify(after.bookmarks));
+  await page.run(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await sleep(300);
+}
+
+async function checkExport(page) {
+  const folder = mkdtempSync(join(tmpdir(), 'oar-e2e-downloads-'));
+  try {
+    await page.downloadsTo(folder);
+    await page.click(labelled('Export audio'));
+    await sleep(1500);
+    check('the export panel shows the length and the file size', (await page.run(hasText('Export as WAV'))) && (await page.run(hasText('File size'))));
+    await page.shot('export');
+    const href = await page.run(`document.querySelector('a[download][href*="/api/export"]')?.getAttribute('href') ?? null`);
+    check('the export panel offers a download of the chosen range', typeof href === 'string', String(href));
+    if (typeof href !== 'string') {
+      return;
+    }
+    const query = href.slice(href.indexOf('?'));
+    const plan = await request('GET', `/api/export/plan${query}`);
+    await page.click(`document.querySelector('a[download][href*="/api/export"]')`);
+    let saved = null;
+    for (let attempt = 0; attempt < 50 && !saved; attempt += 1) {
+      await sleep(200);
+      const finished = readdirSync(folder).filter((name) => name.endsWith('.wav'));
+      saved = finished[0] ?? null;
+    }
+    check('the download is saved as a WAV file', saved !== null, String(saved));
+    if (saved !== null) {
+      const size = statSync(join(folder, saved)).size;
+      check('the saved file is exactly as long as the plan said', size === plan.totalBytes, `${size} bytes, plan ${plan.totalBytes}`);
+    }
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+async function checkDayPicker(page, plan) {
+  await page.click(labelled('Choose a recorded day'));
+  await sleep(800);
+  const yesterday = new Date(plan.yesterday);
+  const today = new Date(plan.start);
+  if (yesterday.getUTCMonth() !== today.getUTCMonth()) {
+    await page.click(`[...document.querySelectorAll('button')].find((b) => /previous/i.test(b.getAttribute('aria-label') ?? ''))`);
+    await sleep(500);
+  }
+  const dayNumber = String(yesterday.getUTCDate());
+  const picked = await page.click(
+    `[...document.querySelectorAll('[role="grid"] button')].find((b) => b.textContent.trim() === ${JSON.stringify(dayNumber)} && !b.disabled)`,
+  );
+  check('yesterday can be picked in the calendar', picked);
+  await sleep(1500);
+  await page.shot('day-picker');
+  // The day overview is captioned with the day it shows.
+  const caption = yesterday.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  check('the timeline moves to the day picked', await page.run(hasText(caption)), caption);
+}
+
+async function checkFirstRunAndSignIn(page) {
+  await page.open('/');
+  check('a new recorder asks whether to protect it with a login', await page.run(hasText('Protect this recorder with a login?')));
+  await page.shot('first-run');
+
+  await page.click(buttonContaining('Set up accounts'));
+  await sleep(500);
+  check('choosing accounts asks for the admin account', await page.run(hasText('Create the admin account')));
+  await page.type(field('Email'), 'owner@example.com');
+  await page.type(field('Password'), 'a long password');
+  await page.type(field('Password again'), 'a long password');
+  await page.click(buttonContaining('Create and sign in'));
+  const signedIn = await page.waitFor(`Boolean(${labelled('Account: owner@example.com')})`);
+  check('creating the admin signs them straight in', signedIn);
+  const state = await request('GET', '/api/auth/state', undefined, await sessionFor('owner@example.com', 'a long password'));
+  check('the recorder now asks for a login', state.mode === 'accounts', state.mode);
+
+  await page.click(labelled('Account: owner@example.com'));
+  await sleep(500);
+  await page.click(buttonContaining('Sign out'));
+  const loginShown = await page.waitFor(hasText('Sign in') + ` && Boolean(${field('Email')})`);
+  check('signing out goes back to the sign in page', loginShown);
+
+  await page.type(field('Email'), 'owner@example.com');
+  await page.type(field('Password'), 'not the password');
+  await page.click(button('Sign in'));
+  await sleep(1500);
+  check('a wrong password is refused with a message', Boolean(await page.run(`Boolean(document.querySelector('[role="alert"]'))`)));
+  check('and nothing is opened', !(await page.run(`Boolean(${labelled('Account: owner@example.com')})`)));
+
+  await page.open('/');
+  await page.type(field('Email'), 'owner@example.com');
+  await page.type(field('Password'), 'a long password');
+  await page.click(button('Sign in'));
+  check('the right password signs in', await page.waitFor(`Boolean(${labelled('Account: owner@example.com')})`));
+  check('an admin sees the settings link', await page.run(`[...document.querySelectorAll('a')].some((a) => a.textContent.trim() === 'Settings')`));
+
+  // A listener, added by the admin, signs in and is shown only what a listener may use.
+  const admin = await sessionFor('owner@example.com', 'a long password');
+  await request('POST', '/api/users', { email: 'kitchen@example.com', password: 'listen only', role: 'listener' }, admin);
+  await page.click(labelled('Account: owner@example.com'));
+  await sleep(500);
+  await page.click(buttonContaining('Sign out'));
+  await page.waitFor(`Boolean(${field('Email')})`);
+  await page.type(field('Email'), 'kitchen@example.com');
+  await page.type(field('Password'), 'listen only');
+  await page.click(button('Sign in'));
+  check('a listener signs in', await page.waitFor(`Boolean(${labelled('Account: kitchen@example.com')})`));
+  await sleep(1000);
+  await page.shot('listener');
+  check('a listener sees no settings link', !(await page.run(`[...document.querySelectorAll('a')].some((a) => a.textContent.trim() === 'Settings')`)));
+  check('a listener can listen and move through the recording', await page.run(`Boolean(${labelled('Next sound')}) && Boolean(${labelled('Previous sound')})`));
+  check('a listener cannot add bookmarks', !(await page.run(`Boolean(${labelled('Add a bookmark here')})`)));
+  await page.open('/settings');
+  check('a listener who types the settings address is sent back', !(await page.run(`location.pathname.startsWith('/settings')`)), await page.run('location.pathname'));
 }
 
 main().then(

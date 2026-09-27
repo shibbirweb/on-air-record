@@ -210,4 +210,124 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].sample_count(), 1000);
     }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        const RATES: [u32; 7] = [8_000, 11_025, 16_000, 22_050, 44_100, 48_000, 96_000];
+
+        /// A capture session: a rate, a frame length inside the settings' range, where the wall clock
+        /// stood when it began, and the buffers the driver delivered, each with how late the callback
+        /// ran relative to the audio it carried, within ordinary scheduling jitter.
+        ///
+        /// Buffers are at most 100 ms of audio, which is already generous for a driver. The drift check
+        /// compares the clock at the end of a buffer with the end of each frame cut from it, so buffers
+        /// approaching `MAX_DRIFT_MS` long would be re anchored mid buffer by design of that comparison.
+        fn session() -> impl Strategy<Value = (u32, u32, i64, Vec<(usize, i64)>)> {
+            (
+                proptest::sample::select(RATES.to_vec()),
+                20u32..=500,
+                0i64..4_000_000_000_000,
+                proptest::collection::vec((1usize..=100, 0i64..100), 0..60),
+            )
+                .prop_map(|(sample_rate, frame_ms, start_ms, buffers)| {
+                    let buffers = buffers
+                        .into_iter()
+                        .map(|(buffer_ms, late_ms)| {
+                            ((buffer_ms * sample_rate as usize / 1000).max(1), late_ms)
+                        })
+                        .collect();
+                    (sample_rate, frame_ms, start_ms, buffers)
+                })
+        }
+
+        /// Run a session through a builder, returning the frames and the samples fed in, in order.
+        fn capture(
+            sample_rate: u32,
+            frame_ms: u32,
+            start_ms: i64,
+            buffers: &[(usize, i64)],
+        ) -> (FrameBuilder, Vec<AudioFrame>, Vec<i16>) {
+            let mut builder = FrameBuilder::new(sample_rate, 1, frame_ms);
+            let mut frames = Vec::new();
+            let mut fed: Vec<i16> = Vec::new();
+            for (length, late_ms) in buffers {
+                // Distinct values, so a lost, repeated or reordered sample shows up in the comparison.
+                let buffer: Vec<i16> = (fed.len()..fed.len() + length)
+                    .map(|index| index as i16)
+                    .collect();
+                fed.extend_from_slice(&buffer);
+                // The wall clock when the driver delivered this buffer: the audio's own time plus lateness.
+                let now_ms =
+                    start_ms + (fed.len() as i64 * 1000) / i64::from(sample_rate) + late_ms;
+                builder.push(&buffer, now_ms, |frame| frames.push(frame));
+            }
+            (builder, frames, fed)
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// However the driver slices the audio, every frame is exactly the configured size, and laid
+            /// end to end the frames and the one short tail `flush` returns are exactly the samples fed
+            /// in: none lost, none repeated, none reordered. A dropped sample is a click in the recording
+            /// and shifts every byte offset after it in the segment.
+            #[test]
+            fn frames_are_fixed_size_and_lose_nothing((sample_rate, frame_ms, start_ms, buffers) in session()) {
+                let (mut builder, mut frames, fed) = capture(sample_rate, frame_ms, start_ms, &buffers);
+                let size = frame_samples_for(sample_rate, frame_ms);
+                prop_assert!(frames.iter().all(|frame| frame.samples.len() == size));
+
+                let complete = frames.len();
+                builder.flush(i64::MAX / 2, |frame| frames.push(frame));
+                prop_assert!(frames.len() - complete <= 1);
+                if let Some(tail) = frames.get(complete) {
+                    prop_assert!(!tail.samples.is_empty() && tail.samples.len() < size);
+                }
+
+                let joined: Vec<i16> = frames.iter().flat_map(|frame| frame.samples.iter().copied()).collect();
+                prop_assert_eq!(joined, fed);
+            }
+
+            /// With the clock running at the audio's own pace, give or take a tenth of a second of callback
+            /// jitter, the stream is never re anchored, and every frame is stamped from the samples that
+            /// came before it: the first sample's time plus their count at the sample rate, to the
+            /// millisecond. That is what keeps timestamps contiguous across frames rather than drifting
+            /// with the callback schedule, and is what the recorder's discontinuity check relies on.
+            #[test]
+            fn timestamps_follow_the_sample_count((sample_rate, frame_ms, start_ms, buffers) in session()) {
+                let (builder, frames, _) = capture(sample_rate, frame_ms, start_ms, &buffers);
+                prop_assert_eq!(builder.drift_resets(), 0);
+
+                let Some(first) = frames.first() else {
+                    return Ok(());
+                };
+                let size = frame_samples_for(sample_rate, frame_ms) as i64;
+                let anchor_ms = first.timestamp_ms;
+                for (index, frame) in frames.iter().enumerate() {
+                    let before = index as i64 * size;
+                    prop_assert_eq!(frame.timestamp_ms, anchor_ms + before * 1000 / i64::from(sample_rate));
+                    prop_assert!(frame.timestamp_ms <= frame.end_timestamp_ms());
+                }
+                for pair in frames.windows(2) {
+                    let step = pair[1].timestamp_ms - pair[0].end_timestamp_ms();
+                    prop_assert!((0..=1).contains(&step), "a {} ms seam between frames", step);
+                }
+            }
+
+            /// The first frame is back dated to when its audio was captured, never stamped after the
+            /// buffer that completed it arrived, and never earlier than jitter can explain.
+            #[test]
+            fn the_first_frame_is_stamped_when_its_audio_began((sample_rate, frame_ms, start_ms, buffers) in session()) {
+                let (_, frames, _) = capture(sample_rate, frame_ms, start_ms, &buffers);
+                if let Some(first) = frames.first() {
+                    let late_ms = buffers.first().map(|(_, late_ms)| *late_ms).unwrap_or(0);
+                    // The anchor is the first buffer's arrival less its own duration, which rounds down.
+                    prop_assert!(first.timestamp_ms >= start_ms - 1 && first.timestamp_ms <= start_ms + late_ms + 1,
+                        "stamped {} for audio that began at {}", first.timestamp_ms, start_ms);
+                }
+            }
+        }
+    }
 }

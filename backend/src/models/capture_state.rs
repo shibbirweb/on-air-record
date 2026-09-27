@@ -58,3 +58,41 @@ pub struct LevelSnapshot {
     pub rms: f32,
     pub peak: f32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn starting_and_recording_are_active_and_idle_and_error_are_not() {
+        assert!(CaptureState::Starting.is_active());
+        assert!(CaptureState::Recording.is_active());
+        assert!(!CaptureState::Idle.is_active());
+        assert!(!CaptureState::Error.is_active());
+    }
+
+    #[test]
+    fn states_travel_as_lowercase_words() {
+        for (state, word) in [
+            (CaptureState::Idle, "idle"),
+            (CaptureState::Starting, "starting"),
+            (CaptureState::Recording, "recording"),
+            (CaptureState::Error, "error"),
+        ] {
+            assert_eq!(serde_json::to_value(state).expect("serialise"), word);
+        }
+    }
+
+    #[test]
+    fn a_fresh_snapshot_is_an_idle_recorder_with_nothing_open() {
+        let snapshot = CaptureSnapshot::default();
+        assert_eq!(snapshot.state, CaptureState::Idle);
+        assert_eq!(snapshot.session_id, None);
+        assert_eq!(snapshot.device_id, None);
+        assert_eq!(snapshot.started_at_ms, None);
+        assert_eq!(snapshot.dropped_frames, 0);
+        assert_eq!(snapshot.error, None);
+        let levels = LevelSnapshot::default();
+        assert_eq!((levels.rms, levels.peak), (0.0, 0.0));
+    }
+}

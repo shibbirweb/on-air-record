@@ -16,10 +16,24 @@ use tower_http::compression::CompressionLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
+#[cfg(test)]
+mod bookmark_tests;
 mod embedded_ui;
+#[cfg(test)]
+mod export_tests;
 pub mod guard;
 #[cfg(test)]
+mod recorder_tests;
+#[cfg(test)]
+mod stream_tests;
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod timeline_tests;
+#[cfg(test)]
+mod web_tests;
 
 use crate::app::AppState;
 use crate::controllers::{

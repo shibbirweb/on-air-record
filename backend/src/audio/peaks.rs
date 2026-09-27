@@ -207,4 +207,187 @@ mod tests {
         assert!(render(&[], 100, 100, 10).is_empty());
         assert!(render(&[], 0, 100, 0).is_empty());
     }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Up to three stored envelopes in time order, with gaps, near a window starting at `from_ms`.
+        fn sources_near(from_ms: i64) -> impl Strategy<Value = Vec<(i64, Vec<u8>)>> {
+            proptest::collection::vec(
+                (
+                    0i64..3_600_000,
+                    proptest::collection::vec(any::<u8>(), 0..400),
+                ),
+                0..4,
+            )
+            .prop_map(move |runs| {
+                let mut next_ms = from_ms - 1_800_000;
+                runs.into_iter()
+                    .map(|(gap_ms, values)| {
+                        let start_ms = next_ms + gap_ms;
+                        next_ms = start_ms + values.len() as i64 * PEAK_BUCKET_MS;
+                        (start_ms, values)
+                    })
+                    .collect()
+            })
+        }
+
+        /// A window anywhere a clock could read, from a tenth of a second (zoomed in past the stored
+        /// resolution) to the 32 days the controller allows, with sources around it.
+        fn window() -> impl Strategy<Value = (i64, i64, usize, Vec<(i64, Vec<u8>)>)> {
+            (
+                -1_000_000_000_000i64..4_000_000_000_000,
+                prop_oneof![
+                    1i64..10_000,
+                    10_000i64..7_200_000,
+                    7_200_000i64..2_764_800_000
+                ],
+                1usize..=4_000,
+            )
+                .prop_flat_map(|(from_ms, span_ms, buckets)| {
+                    (
+                        Just(from_ms),
+                        Just(from_ms + span_ms),
+                        Just(buckets),
+                        sources_near(from_ms),
+                    )
+                })
+        }
+
+        fn as_sources(runs: &[(i64, Vec<u8>)]) -> Vec<PeakSource<'_>> {
+            runs.iter()
+                .map(|(start_ms, values)| PeakSource {
+                    start_ms: *start_ms,
+                    values,
+                })
+                .collect()
+        }
+
+        /// Every stored bucket as `(start_ms, value)`.
+        fn buckets_of(runs: &[(i64, Vec<u8>)]) -> impl Iterator<Item = (i64, u8)> + '_ {
+            runs.iter().flat_map(|(start_ms, values)| {
+                values
+                    .iter()
+                    .enumerate()
+                    .map(move |(index, value)| (start_ms + index as i64 * PEAK_BUCKET_MS, *value))
+            })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// The waveform has exactly the columns asked for, and each column holds the loudest stored
+            /// level that overlaps the stretch of time it stands for, or nothing. The canvas draws one bar
+            /// per value, so a short answer would squash the waveform against the timeline's scale, and a
+            /// level smeared into a column it does not touch would put a sound where the playhead will not
+            /// find it. The expected columns are worked out here in exact integer arithmetic, against which
+            /// the renderer's floating point placement has to agree to the column.
+            #[test]
+            fn each_column_holds_the_loudest_level_overlapping_it((from_ms, to_ms, buckets, runs) in window()) {
+                let rendered = render(&as_sources(&runs), from_ms, to_ms, buckets);
+                prop_assert_eq!(rendered.len(), buckets);
+
+                // Column `c` covers `[from + c * span / n, from + (c + 1) * span / n)`, so a stored bucket
+                // `[start, end)` overlaps columns `floor((start - from) * n / span)` up to, not including,
+                // `ceil((end - from) * n / span)`.
+                let span = i128::from(to_ms - from_ms);
+                let columns = buckets as i128;
+                let mut expected = vec![0u8; buckets];
+                for (start_ms, value) in buckets_of(&runs) {
+                    let start = i128::from(start_ms - from_ms) * columns;
+                    let end = i128::from(start_ms + PEAK_BUCKET_MS - from_ms) * columns;
+                    let first = start.div_euclid(span).max(0);
+                    let last = (-(-end).div_euclid(span)).min(columns);
+                    for column in first..last {
+                        let slot = &mut expected[column as usize];
+                        *slot = (*slot).max(value);
+                    }
+                }
+                prop_assert_eq!(rendered, expected);
+            }
+
+            /// No stored level inside the window is lost however far the view is zoomed out: some column
+            /// is at least as loud. Taking the maximum is the whole reason the renderer exists, so a
+            /// transient that vanished at some zoom would make the waveform useless for finding it.
+            #[test]
+            fn no_level_inside_the_window_is_lost((from_ms, to_ms, buckets, runs) in window()) {
+                let rendered = render(&as_sources(&runs), from_ms, to_ms, buckets);
+                let loudest_drawn = rendered.iter().copied().max().unwrap_or(0);
+                let loudest_stored = buckets_of(&runs)
+                    .filter(|(start_ms, _)| *start_ms + PEAK_BUCKET_MS > from_ms && *start_ms < to_ms)
+                    .map(|(_, value)| value)
+                    .max()
+                    .unwrap_or(0);
+                prop_assert_eq!(loudest_drawn, loudest_stored);
+            }
+
+            /// An empty or inverted window, or no columns, is an empty answer for any sources, never a
+            /// panic or a buffer sized from a negative span.
+            #[test]
+            fn a_degenerate_window_is_empty(
+                from_ms in -1_000_000_000_000i64..4_000_000_000_000,
+                back_ms in 0i64..1_000_000,
+                buckets in 0usize..4_000,
+            ) {
+                let values = vec![200u8; 10];
+                let sources = [PeakSource { start_ms: from_ms - 500, values: &values }];
+                prop_assert!(render(&sources, from_ms, from_ms - back_ms, buckets).is_empty());
+                prop_assert!(render(&sources, from_ms, from_ms + 1_000, 0).is_empty());
+            }
+
+            /// The envelope does not depend on how the samples were delivered: any chunking gives the same
+            /// buckets as one long push, and one bucket per 100 ms of audio started. Capture hands the
+            /// recorder frames of whatever size the device and the frame setting produce, so an envelope
+            /// that shifted with the chunk size would draw the same recording differently from day to day.
+            #[test]
+            fn chunking_never_changes_the_envelope(
+                sample_rate in prop_oneof![Just(8_000u32), Just(11_025), Just(16_000), Just(44_100), Just(48_000), 1u32..200_000],
+                seed in any::<u64>(),
+                length in 0usize..20_000,
+                cuts in proptest::collection::vec(1usize..5_000, 0..20),
+            ) {
+                // Samples from a seed rather than a generated vector: twenty thousand generated values per
+                // case cost more than everything else here, and the property is about where the cuts fall.
+                let mut state = seed | 1;
+                let samples: Vec<i16> = (0..length)
+                    .map(|_| {
+                        state ^= state << 13;
+                        state ^= state >> 7;
+                        state ^= state << 17;
+                        state as i16
+                    })
+                    .collect();
+                let mut whole = PeakEnvelopeBuilder::new(sample_rate);
+                whole.push(&samples);
+                let whole = whole.finish();
+
+                let mut chunked = PeakEnvelopeBuilder::new(sample_rate);
+                let mut rest: &[i16] = &samples;
+                for cut in cuts {
+                    let (head, tail) = rest.split_at(cut.min(rest.len()));
+                    chunked.push(head);
+                    rest = tail;
+                }
+                chunked.push(rest);
+                prop_assert_eq!(&chunked.finish(), &whole);
+
+                let bucket_samples = ((i64::from(sample_rate) * PEAK_BUCKET_MS) / 1000).max(1) as usize;
+                prop_assert_eq!(whole.len(), samples.len().div_ceil(bucket_samples));
+            }
+
+            /// A steady amplitude reads back as that amplitude on the linear scale in every full bucket, and
+            /// silence as zero, so the waveform's height means the same thing everywhere.
+            #[test]
+            fn a_steady_amplitude_reads_back_linearly(amplitude in 0i16..=i16::MAX, buckets in 1usize..20) {
+                let mut builder = PeakEnvelopeBuilder::new(48_000);
+                let samples: Vec<i16> = (0..buckets * 4_800)
+                    .map(|index| if index % 2 == 0 { amplitude } else { -amplitude })
+                    .collect();
+                builder.push(&samples);
+                let expected = (f64::from(amplitude) / f64::from(i16::MAX) * 255.0).round() as u8;
+                prop_assert_eq!(builder.finish(), vec![expected; buckets]);
+            }
+        }
+    }
 }

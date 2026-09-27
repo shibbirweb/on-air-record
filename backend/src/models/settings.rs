@@ -600,4 +600,161 @@ mod tests {
         }
         .is_empty());
     }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        const KEYS: [&str; 11] = [
+            KEY_INPUT_DEVICE_ID,
+            KEY_GAIN,
+            KEY_SEGMENT_SECONDS,
+            KEY_RETENTION_HOURS,
+            KEY_AUTO_START,
+            KEY_AUTO_START_DELAY_SECONDS,
+            KEY_FRAME_MS,
+            KEY_RECORDINGS_DIR,
+            KEY_RECORDING_SAMPLE_RATE,
+            KEY_CHECK_FOR_UPDATES,
+            KEY_SOUND_SENSITIVITY,
+        ];
+
+        /// What a stored value might hold after years of upgrades or a hand edit: anything at all, or
+        /// something close to a real value, including numbers out of range, non finite gains, and the
+        /// words the parsers look for with stray spacing.
+        fn stored_value() -> impl Strategy<Value = String> {
+            prop_oneof![
+                ".{0,12}",
+                any::<u32>().prop_map(|value| value.to_string()),
+                any::<i64>().prop_map(|value| value.to_string()),
+                any::<f32>().prop_map(|value| value.to_string()),
+                prop_oneof![
+                    Just("true"),
+                    Just("false"),
+                    Just("yes"),
+                    Just("0"),
+                    Just(""),
+                    Just("  "),
+                    Just("NaN"),
+                    Just("inf"),
+                    Just("-0"),
+                    Just("low"),
+                    Just(" high "),
+                    Just("medium"),
+                ]
+                .prop_map(str::to_string),
+            ]
+        }
+
+        fn stored() -> impl Strategy<Value = HashMap<String, String>> {
+            proptest::collection::vec(
+                proptest::option::of(stored_value()),
+                KEYS.len()..=KEYS.len(),
+            )
+            .prop_map(|values| {
+                KEYS.iter()
+                    .zip(values)
+                    .filter_map(|(key, value)| Some((key.to_string(), value?)))
+                    .collect()
+            })
+        }
+
+        fn assert_in_range(settings: &Settings) -> Result<(), TestCaseError> {
+            prop_assert!(
+                settings.gain.is_finite() && (GAIN_RANGE.0..=GAIN_RANGE.1).contains(&settings.gain)
+            );
+            prop_assert!((SEGMENT_SECONDS_RANGE.0..=SEGMENT_SECONDS_RANGE.1)
+                .contains(&settings.segment_seconds));
+            prop_assert!(settings
+                .retention_hours
+                .is_none_or(
+                    |hours| (RETENTION_HOURS_RANGE.0..=RETENTION_HOURS_RANGE.1).contains(&hours)
+                ));
+            prop_assert!((FRAME_MS_RANGE.0..=FRAME_MS_RANGE.1).contains(&settings.frame_ms));
+            prop_assert!(
+                (AUTO_START_DELAY_SECONDS_RANGE.0..=AUTO_START_DELAY_SECONDS_RANGE.1)
+                    .contains(&settings.auto_start_delay_seconds)
+            );
+            prop_assert!(settings
+                .recording_sample_rate
+                .is_none_or(|rate| SUPPORTED_SAMPLE_RATES.contains(&rate)));
+            prop_assert!(settings
+                .input_device_id
+                .as_deref()
+                .is_none_or(|id| !id.is_empty() && id.trim() == id));
+            prop_assert!(settings
+                .recordings_dir
+                .as_deref()
+                .is_none_or(|dir| !dir.is_empty() && dir.trim() == dir));
+            Ok(())
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// Whatever the settings table holds, loading it gives values inside every documented range,
+            /// and saving them and loading again gives back the same settings. The first is what lets a
+            /// hand edited database never stop the service booting; the second is what stops a setting
+            /// from drifting each time an unrelated one is saved.
+            #[test]
+            fn any_stored_settings_load_in_range_and_survive_a_save(pairs in stored()) {
+                let loaded = Settings::from_pairs(&pairs);
+                assert_in_range(&loaded)?;
+
+                let saved: HashMap<String, String> = loaded.to_pairs().into_iter().collect();
+                prop_assert_eq!(saved.len(), KEYS.len());
+                prop_assert_eq!(Settings::from_pairs(&saved), loaded);
+            }
+
+            /// Any patch, applied to any loaded settings, leaves them in range and survives a save, and a
+            /// patch that sets nothing changes nothing. A patch carries raw values from the API, so the
+            /// clamping in `apply_to` is the only thing between a client and an impossible setting.
+            #[test]
+            fn any_patch_leaves_settings_in_range(
+                pairs in stored(),
+                gain in proptest::option::of(any::<f32>()),
+                segment_seconds in proptest::option::of(any::<u32>()),
+                retention_hours in proptest::option::of(proptest::option::of(any::<u32>())),
+                frame_ms in proptest::option::of(any::<u32>()),
+                delay in proptest::option::of(any::<u32>()),
+                rate in proptest::option::of(proptest::option::of(any::<u32>())),
+                device in proptest::option::of(proptest::option::of(".{0,8}")),
+                dir in proptest::option::of(proptest::option::of(".{0,8}")),
+            ) {
+                let base = Settings::from_pairs(&pairs);
+                prop_assert_eq!(SettingsPatch::default().apply_to(&base), base.clone());
+
+                let patch = SettingsPatch {
+                    input_device_id: device,
+                    gain,
+                    segment_seconds,
+                    retention_hours,
+                    auto_start_delay_seconds: delay,
+                    frame_ms,
+                    recording_sample_rate: rate,
+                    recordings_dir: dir,
+                    ..SettingsPatch::default()
+                };
+                let updated = patch.apply_to(&base);
+                assert_in_range(&updated)?;
+                let saved: HashMap<String, String> = updated.to_pairs().into_iter().collect();
+                prop_assert_eq!(Settings::from_pairs(&saved), updated);
+            }
+
+            /// The recorder never records above the device's own rate, and a chosen rate is always one the
+            /// UI offers, so the storage the settings page promises is never exceeded.
+            #[test]
+            fn the_recording_rate_never_exceeds_the_device(
+                pairs in stored(),
+                device_rate in 1u32..400_000,
+            ) {
+                let settings = Settings::from_pairs(&pairs);
+                let rate = settings.effective_sample_rate(device_rate);
+                prop_assert!(rate <= device_rate);
+                if settings.recording_sample_rate.is_none() {
+                    prop_assert_eq!(rate, device_rate);
+                }
+            }
+        }
+    }
 }

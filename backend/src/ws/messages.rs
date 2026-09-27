@@ -235,4 +235,239 @@ mod tests {
         assert!(serde_json::from_str::<ClientMessage>(r#"{"type":"explode"}"#).is_err());
         assert!(serde_json::from_str::<ClientMessage>(r#"{"type":"seek"}"#).is_err());
     }
+
+    mod props {
+        use super::*;
+        use crate::models::{ListenerAccount, ListenerActivity, ListenerEntry, PlayerState, Role};
+        use proptest::prelude::*;
+        use std::net::{IpAddr, Ipv4Addr};
+
+        fn mode() -> impl Strategy<Value = StreamMode> {
+            prop_oneof![
+                Just(StreamMode::Live),
+                Just(StreamMode::Playback),
+                Just(StreamMode::Paused),
+            ]
+        }
+
+        fn player() -> impl Strategy<Value = PlayerState> {
+            prop_oneof![
+                Just(PlayerState::Idle),
+                Just(PlayerState::Playing),
+                Just(PlayerState::Paused),
+            ]
+        }
+
+        fn entry() -> impl Strategy<Value = ListenerEntry> {
+            let account = proptest::option::of(("[a-z]{1,8}@[a-z]{1,8}", any::<bool>()).prop_map(
+                |(email, admin)| ListenerAccount {
+                    email,
+                    role: if admin { Role::Admin } else { Role::Listener },
+                },
+            ));
+            let activity = prop_oneof![
+                Just(ListenerActivity::Live),
+                any::<i64>().prop_map(|from_ms| ListenerActivity::Playback { from_ms }),
+                Just(ListenerActivity::Paused),
+            ];
+            (
+                any::<u64>(),
+                account,
+                any::<u32>(),
+                proptest::option::of(".{0,20}"),
+                any::<i64>(),
+                activity,
+                player(),
+            )
+                .prop_map(
+                    |(id, account, address, user_agent, connected_at_ms, activity, player)| {
+                        ListenerEntry {
+                            id,
+                            account,
+                            address: IpAddr::V4(Ipv4Addr::from(address)),
+                            user_agent,
+                            connected_at_ms,
+                            activity,
+                            player,
+                        }
+                    },
+                )
+        }
+
+        /// Every variant, with any values its fields can hold, including non finite levels.
+        fn server_message() -> impl Strategy<Value = ServerMessage> {
+            let optional_ms = || proptest::option::of(any::<i64>());
+            prop_oneof![
+                (
+                    any::<u32>(),
+                    any::<u16>(),
+                    any::<u32>(),
+                    mode(),
+                    any::<i64>(),
+                    optional_ms(),
+                    optional_ms(),
+                    any::<bool>(),
+                )
+                    .prop_map(
+                        |(
+                            sample_rate,
+                            channels,
+                            frame_ms,
+                            mode,
+                            server_time_ms,
+                            live_edge_ms,
+                            earliest_ms,
+                            capturing,
+                        )| ServerMessage::StreamInfo {
+                            sample_rate,
+                            channels,
+                            frame_ms,
+                            mode,
+                            server_time_ms,
+                            live_edge_ms,
+                            earliest_ms,
+                            capturing,
+                        },
+                    ),
+                (mode(), any::<i64>())
+                    .prop_map(|(mode, position_ms)| ServerMessage::Mode { mode, position_ms }),
+                any::<i64>()
+                    .prop_map(|timestamp_ms| ServerMessage::SwitchedToLive { timestamp_ms }),
+                (any::<i64>(), any::<i64>())
+                    .prop_map(|(from_ms, to_ms)| ServerMessage::Gap { from_ms, to_ms }),
+                any::<i64>()
+                    .prop_map(|timestamp_ms| ServerMessage::EndOfRecording { timestamp_ms }),
+                (any::<f32>(), any::<f32>())
+                    .prop_map(|(rms, peak)| ServerMessage::Level { rms, peak }),
+                any::<f32>().prop_map(|value| ServerMessage::Speed { value }),
+                (any::<i64>(), any::<i64>()).prop_map(|(client_time_ms, server_time_ms)| {
+                    ServerMessage::Pong {
+                        client_time_ms,
+                        server_time_ms,
+                    }
+                }),
+                (".{0,16}", ".{0,32}")
+                    .prop_map(|(code, message)| ServerMessage::Error { code, message }),
+                proptest::collection::vec(entry(), 0..4).prop_map(|entries| {
+                    ServerMessage::Listeners {
+                        listeners: entries.into_iter().map(ListenerView::from).collect(),
+                    }
+                }),
+                Just(ServerMessage::ListenersHidden),
+            ]
+        }
+
+        /// Every key in a JSON value, however deeply nested.
+        fn keys(value: &serde_json::Value, found: &mut Vec<String>) {
+            match value {
+                serde_json::Value::Object(map) => {
+                    for (key, inner) in map {
+                        found.push(key.clone());
+                        keys(inner, found);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for inner in items {
+                        keys(inner, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// A socket hands the session whatever text a client sent, so parsing must answer for any
+            /// string at all. Half the inputs are objects with a real `type` and a field of any JSON kind,
+            /// which is where a wrong shape would reach the field parsers rather than stop at the tag.
+            #[test]
+            fn any_text_parses_or_is_refused_without_panicking(
+                text in ".{0,64}",
+                kind in prop_oneof![
+                    Just("live"), Just("seek"), Just("pause"), Just("resume"),
+                    Just("speed"), Just("ping"), Just("player"),
+                ],
+                field in prop_oneof![
+                    Just("timestampMs"), Just("value"), Just("clientTimeMs"), Just("state"),
+                ],
+                raw in prop_oneof![
+                    Just("null".to_string()),
+                    Just("true".to_string()),
+                    Just("1e400".to_string()),
+                    Just("-9223372036854775809".to_string()),
+                    Just("[]".to_string()),
+                    Just("{}".to_string()),
+                    any::<f64>().prop_map(|number| number.to_string()),
+                    any::<i64>().prop_map(|number| number.to_string()),
+                    ".{0,8}".prop_map(|text| serde_json::Value::String(text).to_string()),
+                ],
+            ) {
+                let _ = serde_json::from_str::<ClientMessage>(&text);
+                let shaped = format!(r#"{{"type":"{kind}","{field}":{raw}}}"#);
+                let _ = serde_json::from_str::<ClientMessage>(&shaped);
+            }
+
+            /// The documented shapes carry any value a field can hold through unchanged: a seek to a
+            /// moment far in the past, a ping with a negative clock, any finite speed. A lossy parse here
+            /// would put a listener somewhere other than where they asked to be.
+            #[test]
+            fn documented_client_shapes_carry_any_value(
+                timestamp_ms in any::<i64>(),
+                client_time_ms in any::<i64>(),
+                speed in any::<f32>().prop_filter("JSON has no non finite numbers", |value| value.is_finite()),
+                state in player(),
+            ) {
+                let seek = format!(r#"{{"type":"seek","timestampMs":{timestamp_ms}}}"#);
+                let parsed = serde_json::from_str::<ClientMessage>(&seek).expect("seek");
+                let recognised = matches!(parsed, ClientMessage::Seek { timestamp_ms: got } if got == timestamp_ms);
+                prop_assert!(recognised, "{:?}", parsed);
+
+                let ping = format!(r#"{{"type":"ping","clientTimeMs":{client_time_ms}}}"#);
+                let parsed = serde_json::from_str::<ClientMessage>(&ping).expect("ping");
+                let recognised = matches!(parsed, ClientMessage::Ping { client_time_ms: got } if got == client_time_ms);
+                prop_assert!(recognised, "{:?}", parsed);
+
+                let request = serde_json::json!({ "type": "speed", "value": speed }).to_string();
+                let parsed = serde_json::from_str::<ClientMessage>(&request).expect("speed");
+                let recognised = matches!(parsed, ClientMessage::Speed { value } if value == speed);
+                prop_assert!(recognised, "{:?}", parsed);
+
+                let request = serde_json::json!({ "type": "player", "state": state }).to_string();
+                let parsed = serde_json::from_str::<ClientMessage>(&request).expect("player");
+                let recognised = matches!(parsed, ClientMessage::Player { state: got } if got == state);
+                prop_assert!(recognised, "{:?}", parsed);
+            }
+
+            /// Every server message, whatever it holds, serialises to an object tagged with a kebab case
+            /// `type` and with camel case keys all the way down. The UI reads fields by their camel case
+            /// names, so a variant that forgot its `rename_all` would arrive as a field the browser never
+            /// sees, and a non finite level must not make serialisation fail and drop the message.
+            #[test]
+            fn every_server_message_serialises_to_the_wire_naming(message in server_message()) {
+                let value = serde_json::to_value(&message).expect("serialise");
+                let tag = value["type"].as_str().expect("a type tag").to_string();
+                prop_assert!(!tag.is_empty());
+                prop_assert!(tag.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "tag {}", tag);
+
+                let mut found = Vec::new();
+                keys(&value, &mut found);
+                for key in found {
+                    prop_assert!(!key.contains('_') && !key.contains('-'), "key {} in {}", key, tag);
+                    prop_assert!(key.chars().next().is_some_and(|c| c.is_ascii_lowercase()), "key {}", key);
+                }
+            }
+
+            /// The listener list's two derived pairings cannot disagree: a starting point is shown only for
+            /// somebody in history, and an email never appears without its role or the other way round.
+            #[test]
+            fn a_listener_view_keeps_its_pairings(entry in entry()) {
+                let in_history = matches!(entry.activity, ListenerActivity::Playback { .. });
+                let view = ListenerView::from(entry);
+                prop_assert_eq!(view.from_ms.is_some(), in_history);
+                prop_assert_eq!(view.activity == StreamMode::Playback, in_history);
+                prop_assert_eq!(view.email.is_some(), view.role.is_some());
+            }
+        }
+    }
 }

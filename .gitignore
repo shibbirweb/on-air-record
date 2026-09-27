@@ -1,6 +1,11 @@
 # Rust
 /backend/target/
 **/*.rs.bk
+# cargo-mutants reports
+/backend/mutants.out*/
+# proptest's replay seeds for a failing run. A case worth keeping becomes a named test instead, which
+# says what it proves.
+/backend/proptest-regressions/
 
 # Node
 node_modules/

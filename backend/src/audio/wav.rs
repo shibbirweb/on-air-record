@@ -133,4 +133,82 @@ mod tests {
         assert_eq!(data_bytes_for(48_000, 1, 1_000 * 60 * 60 * 13), None);
         assert!(data_bytes_for(48_000, 1, 1_000 * 60 * 60 * 6).is_some());
     }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// For any rate, channel count and length, the header is the canonical 44 bytes and every field
+            /// a player reads agrees with the others: the RIFF size is the rest of the file, the block
+            /// align is a whole sample frame, and the byte rate is exactly rate times block align. Players
+            /// seek and compute duration from these, so one that disagreed would play at the wrong speed
+            /// or stop early, and a zero channel count must still describe mono.
+            #[test]
+            fn any_header_is_self_consistent(
+                sample_rate in 1u32..=384_000,
+                channels in 0u16..=32,
+                data_bytes in any::<u32>(),
+            ) {
+                let out = header(sample_rate, channels, data_bytes);
+                let channels = channels.max(1);
+                prop_assert_eq!(&out[0..4], b"RIFF");
+                prop_assert_eq!(&out[8..16], b"WAVEfmt ");
+                prop_assert_eq!(&out[36..40], b"data");
+                prop_assert_eq!(read_u32(&out, 4), data_bytes.saturating_add(36));
+                prop_assert_eq!(read_u32(&out, 16), 16);
+                prop_assert_eq!(read_u16(&out, 20), 1);
+                prop_assert_eq!(read_u16(&out, 22), channels);
+                prop_assert_eq!(read_u32(&out, 24), sample_rate);
+                prop_assert_eq!(read_u16(&out, 32), channels * 2);
+                prop_assert_eq!(read_u32(&out, 28), sample_rate * u32::from(channels) * 2);
+                prop_assert_eq!(read_u16(&out, 34), 16);
+                prop_assert_eq!(read_u32(&out, 40), data_bytes);
+            }
+
+            /// The promised data length is whole sample frames of exactly the span, rounded down to the
+            /// sample, or nothing at all when that would not fit the format: never a length the RIFF size
+            /// field cannot hold, and never an odd byte that would split a sample. The export streams
+            /// exactly this many bytes, so the same arithmetic is its `Content-Length`.
+            #[test]
+            fn data_length_is_whole_samples_of_the_span(
+                sample_rate in 1u32..=384_000,
+                channels in 0u16..=8,
+                duration_ms in -1_000_000i64..200_000_000,
+            ) {
+                let frame = 2 * u64::from(channels.max(1));
+                let expected = if duration_ms <= 0 {
+                    0
+                } else {
+                    (duration_ms as u64 * u64::from(sample_rate) / 1000) * frame
+                };
+                match data_bytes_for(sample_rate, channels, duration_ms) {
+                    Some(bytes) => {
+                        prop_assert_eq!(bytes, expected);
+                        prop_assert_eq!(bytes % frame, 0);
+                        prop_assert!(bytes <= MAX_DATA_BYTES);
+                        prop_assert!(u32::try_from(bytes + HEADER_BYTES as u64).is_ok());
+                    }
+                    None => prop_assert!(expected > MAX_DATA_BYTES),
+                }
+            }
+
+            /// A longer span never promises fewer bytes, or an export could shrink when someone widened it.
+            #[test]
+            fn longer_spans_never_hold_fewer_bytes(
+                sample_rate in 1u32..=384_000,
+                channels in 1u16..=8,
+                first_ms in 0i64..100_000_000,
+                second_ms in 0i64..100_000_000,
+            ) {
+                let (shorter, longer) = (first_ms.min(second_ms), first_ms.max(second_ms));
+                if let Some(longer_bytes) = data_bytes_for(sample_rate, channels, longer) {
+                    let shorter_bytes = data_bytes_for(sample_rate, channels, shorter).expect("shorter fits too");
+                    prop_assert!(shorter_bytes <= longer_bytes);
+                }
+            }
+        }
+    }
 }

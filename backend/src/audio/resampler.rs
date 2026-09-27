@@ -267,4 +267,111 @@ mod tests {
 
         assert!(output.iter().all(|value| value.abs() < 1e-6));
     }
+
+    mod props {
+        use super::*;
+        use crate::models::settings::SUPPORTED_SAMPLE_RATES;
+        use proptest::prelude::*;
+
+        /// A device rate and one of the recording rates below it, as the capture path pairs them.
+        fn rates() -> impl Strategy<Value = (u32, u32)> {
+            (
+                proptest::sample::select(vec![
+                    11_025u32, 16_000, 22_050, 32_000, 44_100, 48_000, 88_200, 96_000, 192_000,
+                ]),
+                proptest::sample::select(SUPPORTED_SAMPLE_RATES.to_vec()),
+            )
+                .prop_filter("only downsampling builds a resampler", |(input, output)| {
+                    output < input
+                })
+        }
+
+        /// Audio from a seed, within full scale: noise, which has content at every frequency including the
+        /// ones the filter must remove, plus an occasional full scale step, the filter's worst case.
+        fn signal(seed: u64, length: usize) -> Vec<f32> {
+            let mut state = seed | 1;
+            (0..length)
+                .map(|index| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    if (index / 500) % 7 == 3 {
+                        if (index / 250) % 2 == 0 {
+                            1.0
+                        } else {
+                            -1.0
+                        }
+                    } else {
+                        (state % 20_001) as f32 / 10_000.0 - 1.0
+                    }
+                })
+                .collect()
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 128, ..ProptestConfig::default() })]
+
+            /// How the capture callback happens to slice the audio never changes a single output sample,
+            /// for any pair of rates and any cut points. Filter and interpolation state are carried across
+            /// calls; if they were not, every callback boundary would be a click in the recording.
+            #[test]
+            fn any_chunking_gives_the_same_output(
+                (input_rate, output_rate) in rates(),
+                seed in any::<u64>(),
+                length in 0usize..6_000,
+                cuts in proptest::collection::vec(0usize..1_500, 0..16),
+            ) {
+                let input = signal(seed, length);
+                let mut whole = Vec::new();
+                Resampler::new(input_rate, output_rate).expect("downsampling").process(&input, &mut whole);
+
+                let mut chunked = Vec::new();
+                let mut resampler = Resampler::new(input_rate, output_rate).expect("downsampling");
+                let mut rest: &[f32] = &input;
+                for cut in cuts {
+                    let (head, tail) = rest.split_at(cut.min(rest.len()));
+                    resampler.process(head, &mut chunked);
+                    rest = tail;
+                }
+                resampler.process(rest, &mut chunked);
+                prop_assert_eq!(chunked, whole);
+            }
+
+            /// The output runs at the output rate: as many samples as the input's duration holds at the new
+            /// rate, to within two, however long the input. Too many or too few and the recording's clock
+            /// drifts from the wall clock, which the segment byte arithmetic cannot see.
+            #[test]
+            fn output_length_follows_the_ratio(
+                (input_rate, output_rate) in rates(),
+                seed in any::<u64>(),
+                length in 1usize..40_000,
+            ) {
+                let mut output = Vec::new();
+                Resampler::new(input_rate, output_rate)
+                    .expect("downsampling")
+                    .process(&signal(seed, length), &mut output);
+                let expected = (length - 1) as f64 * f64::from(output_rate) / f64::from(input_rate) + 1.0;
+                prop_assert!((output.len() as f64 - expected).abs() <= 2.0, "{} samples for an expected {}", output.len(), expected);
+            }
+
+            /// Full scale in stays finite and bounded out: the filters are stable at every pairing of rates.
+            /// A low pass legitimately overshoots on noise and hard steps (the worst case is the sum of the
+            /// magnitudes of its impulse response), so the bound is twice full scale; what it catches is a
+            /// section whose coefficients went unstable at some ratio and grows without limit, which would
+            /// be heard as the recording turning into a roar.
+            #[test]
+            fn full_scale_input_stays_bounded(
+                (input_rate, output_rate) in rates(),
+                seed in any::<u64>(),
+                length in 0usize..20_000,
+            ) {
+                let mut output = Vec::new();
+                Resampler::new(input_rate, output_rate)
+                    .expect("downsampling")
+                    .process(&signal(seed, length), &mut output);
+                prop_assert!(output.iter().all(|value| value.is_finite() && value.abs() <= 2.0),
+                    "peak {}", output.iter().fold(0.0f32, |peak, value| peak.max(value.abs())));
+            }
+        }
+    }
 }

@@ -89,6 +89,18 @@ impl CaptureService {
         self.snapshot().state.is_active()
     }
 
+    /// Stand in for a running capture, for tests of what listeners get while recording. Starting a real
+    /// one would open whatever input the machine has, a developer's microphone, and fail on a runner.
+    #[cfg(test)]
+    pub(crate) fn pretend_recording(&self, sample_rate: u32, frame_ms: u32) {
+        let mut snapshot = self.snapshot();
+        snapshot.sample_rate = sample_rate;
+        snapshot.channels = 1;
+        snapshot.frame_ms = frame_ms;
+        self.write_snapshot(snapshot);
+        self.set_state(CaptureState::Recording, None);
+    }
+
     /// Open the configured device and begin recording.
     pub async fn start(&self) -> AppResult<CaptureSnapshot> {
         let mut guard = self.transition.lock().await;
@@ -328,5 +340,140 @@ fn with_container_advice(error: AppError) -> AppError {
             None => AppError::Audio(message),
         },
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! What the capture service decides without touching audio hardware. Opening a device cannot be
+    //! tested on a CI runner, which has none, and on a developer's machine it would open their microphone;
+    //! what capture does with audio once open is covered by the recorder and pipeline tests.
+
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crate::app::AppState;
+    use crate::config::AppConfig;
+    use crate::models::{CaptureState, SettingsPatch};
+
+    struct Running {
+        state: Arc<AppState>,
+        data_dir: std::path::PathBuf,
+    }
+
+    impl Drop for Running {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.data_dir);
+        }
+    }
+
+    fn running(name: &str) -> Running {
+        let data_dir =
+            std::env::temp_dir().join(format!("oar-capture-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        let state = AppState::bootstrap(AppConfig {
+            data_dir: data_dir.clone(),
+            ..AppConfig::default()
+        })
+        .expect("bootstrap");
+        Running { state, data_dir }
+    }
+
+    fn configure(running: &Running, patch: SettingsPatch) {
+        running.state.settings.update(&patch).expect("settings");
+    }
+
+    #[test]
+    fn a_fresh_service_is_idle_with_nothing_open() {
+        let running = running("fresh");
+        let snapshot = running.state.capture.snapshot();
+        assert_eq!(snapshot.state, CaptureState::Idle);
+        assert_eq!(snapshot.session_id, None);
+        assert!(!running.state.capture.is_active());
+    }
+
+    #[tokio::test]
+    async fn stopping_or_shutting_down_an_idle_service_is_harmless() {
+        let running = running("stop-idle");
+        let stopped = running.state.capture.stop().await.expect("stop");
+        assert_eq!(stopped.state, CaptureState::Idle);
+        running.state.capture.shutdown().await;
+        assert_eq!(running.state.capture.snapshot().state, CaptureState::Idle);
+    }
+
+    #[tokio::test]
+    async fn auto_start_switched_off_opens_nothing() {
+        let running = running("auto-off");
+        configure(
+            &running,
+            SettingsPatch {
+                auto_start: Some(false),
+                ..SettingsPatch::default()
+            },
+        );
+        let (_shutdown, receiver) = tokio::sync::watch::channel(false);
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            running.state.capture.clone().start_if_configured(receiver),
+        )
+        .await
+        .expect("returns straight away");
+        assert_eq!(running.state.capture.snapshot().state, CaptureState::Idle);
+    }
+
+    #[tokio::test]
+    async fn shutting_down_during_the_start_up_delay_opens_nothing() {
+        let running = running("auto-shutdown");
+        configure(
+            &running,
+            SettingsPatch {
+                auto_start: Some(true),
+                auto_start_delay_seconds: Some(600),
+                ..SettingsPatch::default()
+            },
+        );
+        let (shutdown, receiver) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(running.state.capture.clone().start_if_configured(receiver));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        shutdown.send(true).expect("signal");
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("the ten minute wait is cut short")
+            .expect("task");
+        assert_eq!(running.state.capture.snapshot().state, CaptureState::Idle);
+    }
+
+    #[tokio::test]
+    async fn switching_auto_start_off_during_the_delay_is_respected() {
+        let running = running("auto-changed-mind");
+        configure(
+            &running,
+            SettingsPatch {
+                auto_start: Some(true),
+                auto_start_delay_seconds: Some(1),
+                ..SettingsPatch::default()
+            },
+        );
+        let (_shutdown, receiver) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(running.state.capture.clone().start_if_configured(receiver));
+        // Let it read the settings and start waiting first, so the change lands during the delay.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let started = std::time::Instant::now();
+        configure(
+            &running,
+            SettingsPatch {
+                auto_start: Some(false),
+                ..SettingsPatch::default()
+            },
+        );
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("returns once the delay is over")
+            .expect("task");
+        assert!(
+            started.elapsed() >= Duration::from_millis(500),
+            "it waited out the delay before checking again"
+        );
+        assert_eq!(running.state.capture.snapshot().state, CaptureState::Idle);
     }
 }

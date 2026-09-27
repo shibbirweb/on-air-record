@@ -34,7 +34,7 @@ The underlying commands:
 ```sh
 # Backend, from backend/
 cargo run                                    # API on :8080, reads ../frontend/dist
-cargo test                                   # ~310 unit and router tests
+cargo test                                   # ~500 unit, router, stream and property tests
 cargo test day_bounds                        # single test by name substring
 cargo test --lib services::playback_service  # one module
 cargo clippy --all-targets -- -D warnings    # must be clean
@@ -43,7 +43,8 @@ cargo fmt
 # Frontend, from frontend/
 npm run dev      # Vite on :5173, proxies /api and the WebSocket to :8080
 npm run build    # tsc -b then vite build, writes dist/, which a release backend embeds
-npm test         # Vitest, ~165 tests
+npm test         # Vitest, ~1450 tests
+npm run coverage # the same, measuring coverage against the floors in vite.config.ts
 npm run lint     # oxlint
 
 # From the repository root, after both builds
@@ -289,9 +290,26 @@ the playback cursor walking a real directory of real PCM across a recording gap.
 data directory plus an in memory SQLite, because the interaction between the two is the thing worth
 testing.
 
-`routes/tests.rs` drives the real router over HTTP with `tower::ServiceExt::oneshot`, on a temp data
-directory, to prove the access rules through the wiring rather than in isolation. Add a case there when a
-route's access changes.
+The router tests drive the real application over HTTP with `tower::ServiceExt::oneshot`, on a temp data
+directory, so they prove the wiring (query parsing, validation, JSON field names, status codes) rather than
+the pieces. `routes/test_support.rs` is their shared harness: `app`, `call`, `get_raw` for non JSON bodies,
+`app_serving_ui` for a deterministic web interface, and `seed_recording`, which writes real PCM files and
+matching segment rows as the recorder would. `routes/tests.rs` holds the access rules; add a case there when
+a route's access changes. Each area has its own feature tests beside it: `timeline_tests.rs`,
+`bookmark_tests.rs`, `export_tests.rs` (reading the WAV back byte by byte), `recorder_tests.rs` and
+`web_tests.rs`. A new endpoint gets a feature test in the matching file. Starting capture is not driven
+there: an unknown device falls back to the default input, so it would record from a developer's microphone
+and fail on a runner, which has none.
+
+`routes/stream_tests.rs` drives the audio stream over a real WebSocket: the router bound to a loopback port
+and a `tokio-tungstenite` client. Live audio is published straight into `state.hub`, as the recorder does,
+and `capture.pretend_recording()` (test only) stands in for a running capture where playback should hand
+over to live. It covers the session loop that nothing else reaches: live frames to many listeners in order,
+a listener who stops reading holding nobody up, seek, gaps, pacing by speed, pause and resume, catching up
+and running out, and the message order the page relies on. Tests of the 15 second access check and the idle
+timeout use `#[tokio::test(start_paused = true)]`; wait for the server side in short steps
+(`listeners.count()`), because a paused clock leaps to the next timer while a frame is still crossing the
+loopback interface. A change to `ws/session.rs` gets a case here.
 
 `services/sound_pipeline_tests.rs` generates real audio (room noise, hum, speech like syllables, a click,
 a door) and pushes it through the real recorder into segments and SQLite, then asks the timeline service
@@ -312,6 +330,25 @@ events, reading the canvases back pixel by pixel. It is CI's `browser end to end
 `make check` (`make e2e` alone); it needs Chrome and Node 22.13 or newer for `node:sqlite`. Canvases the
 test reads carry an `aria-label`, which it finds them by; keep those if a canvas is reworked. Add a check
 there when a feature's value is in what the page does rather than what a function returns.
+
+Pure functions whose edge cases hand picked examples miss also have property tests: `proptest!` blocks
+beside the Rust code, and `*.props.test.ts` files using `fast-check` beside the frontend tests (the frame
+codec against arbitrary bytes, geometry round trips, byte and date labels, quoting that must read back
+exactly). They found real bugs, so when one fails, read the counterexample it prints before touching the
+property, and pin a real bug as a named test (proptest's replay folder is ignored). Keep them quick:
+default case counts, fewer where a case does IO. The day properties run in the host's zone, and CI's is
+UTC, so CI runs `util::day` again under zones whose clocks change at midnight (Havana, the Azores,
+Santiago, Apia); do the same locally with `TZ=America/Havana cargo test --lib util::day`.
+
+CI runs both suites measuring coverage and fails under a floor: `BACKEND_COVERAGE_FLOOR` in the `Makefile`
+(line coverage, via `cargo llvm-cov`) and `coverage.thresholds` in `frontend/vite.config.ts`. Each floor
+sits a couple of points under what was measured. Raise one when coverage rises; never lower it to get a
+change through. `make coverage` runs both locally with HTML reports. `make mutants` runs `cargo-mutants`,
+which plants one small bug at a time and checks a test fails; it is too slow for CI, so aim it with
+`FILE=`, and restrict the tests it runs for speed (`cargo mutants -f src/ws/session.rs -- --lib -- ws::
+routes::stream_tests`). On `ws/session.rs` every surviving mutant is equivalent: the open mode guards in
+`may_watch_listeners` and `still_allowed` only save a lookup, a deleted `Close` arm ends the same way a
+moment later, and the `RecvError::Closed` branch cannot run while the hub lives, which is the whole process.
 
 Verify audio changes by running the service and listening. Browsers require a user gesture before audio
 starts, so headless checks cannot confirm playback. A useful trick for exercising the DVR without waiting

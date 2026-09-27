@@ -228,3 +228,145 @@ pub struct NextSoundResponse {
     /// `null` when there is no sound that way in the recordings.
     pub sound: Option<SoundDto>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repositories::DaySummary;
+    use crate::services::ExportPlan;
+
+    #[test]
+    fn coverage_and_the_range_travel_with_camel_case_fields() {
+        let response: TimelineRangeResponse = TimelineRange {
+            earliest_ms: Some(1_000),
+            latest_ms: Some(9_000),
+            live_edge_ms: None,
+            coverage: vec![TimeRange::new(1_000, 4_000), TimeRange::new(6_000, 9_000)],
+        }
+        .into();
+        let json = serde_json::to_value(response).expect("serialise");
+        assert_eq!(json["earliestMs"], 1_000);
+        assert_eq!(json["latestMs"], 9_000);
+        assert_eq!(json["liveEdgeMs"], serde_json::Value::Null);
+        assert!(json["serverTimeMs"].as_i64().expect("server time") > 0);
+        assert_eq!(
+            json["coverage"],
+            serde_json::json!([
+                { "startMs": 1_000, "endMs": 4_000 },
+                { "startMs": 6_000, "endMs": 9_000 },
+            ])
+        );
+    }
+
+    #[test]
+    fn a_recording_day_carries_its_extent_its_midnights_and_what_it_holds() {
+        let dto: RecordingDayDto = RecordingDay {
+            summary: DaySummary {
+                day: "2026-09-27".to_string(),
+                start_ms: 100,
+                end_ms: 900,
+                segment_count: 4,
+                bytes: 4_000,
+                recorded_ms: 700,
+            },
+            day_start_ms: 0,
+            day_end_ms: 86_400_000,
+        }
+        .into();
+        let json = serde_json::to_value(dto).expect("serialise");
+        assert_eq!(json["day"], "2026-09-27");
+        assert_eq!(json["startMs"], 100);
+        assert_eq!(json["endMs"], 900);
+        assert_eq!(json["dayStartMs"], 0);
+        assert_eq!(json["dayEndMs"], 86_400_000);
+        assert_eq!(json["segmentCount"], 4);
+        assert_eq!(json["bytes"], 4_000);
+        assert_eq!(json["recordedMs"], 700);
+    }
+
+    #[test]
+    fn peaks_keep_their_window_and_values() {
+        let response: PeaksResponse = PeaksView {
+            from_ms: 0,
+            to_ms: 1_000,
+            bucket_ms: 100,
+            values: vec![0, 5, 255],
+        }
+        .into();
+        let json = serde_json::to_value(response).expect("serialise");
+        assert_eq!(json["fromMs"], 0);
+        assert_eq!(json["toMs"], 1_000);
+        assert_eq!(json["bucketMs"], 100);
+        assert_eq!(json["peaks"], serde_json::json!([0, 5, 255]));
+    }
+
+    #[test]
+    fn a_peaks_query_defaults_its_columns() {
+        let query: PeaksQuery = serde_json::from_str(r#"{"fromMs":1,"toMs":2}"#).expect("parse");
+        assert_eq!(query.buckets, DEFAULT_BUCKETS);
+        let asked: PeaksQuery =
+            serde_json::from_str(r#"{"fromMs":1,"toMs":2,"buckets":50}"#).expect("parse");
+        assert_eq!(asked.buckets, 50);
+    }
+
+    #[test]
+    fn a_sound_carries_where_it_is_where_to_play_it_from_and_how_loud_it_was() {
+        let dto: SoundDto = Sound {
+            start_ms: 2_000,
+            end_ms: 3_000,
+            peak: 90,
+            seek_ms: 1_000,
+        }
+        .into();
+        let json = serde_json::to_value(dto).expect("serialise");
+        assert_eq!(
+            json,
+            serde_json::json!({ "startMs": 2_000, "endMs": 3_000, "seekMs": 1_000, "peak": 90 })
+        );
+    }
+
+    #[test]
+    fn the_next_sound_query_looks_forward_unless_told_backward_and_refuses_anything_else() {
+        let forward: NextSoundQuery = serde_json::from_str(r#"{"fromMs":5}"#).expect("parse");
+        assert_eq!(
+            SeekDirection::from(forward.direction),
+            SeekDirection::Forward
+        );
+        let backward: NextSoundQuery =
+            serde_json::from_str(r#"{"fromMs":5,"direction":"backward"}"#).expect("parse");
+        assert_eq!(
+            SeekDirection::from(backward.direction),
+            SeekDirection::Backward
+        );
+        assert!(
+            serde_json::from_str::<NextSoundQuery>(r#"{"fromMs":5,"direction":"up"}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn an_empty_next_sound_answer_is_null_rather_than_missing() {
+        let json = serde_json::to_value(NextSoundResponse { sound: None }).expect("serialise");
+        assert_eq!(json, serde_json::json!({ "sound": null }));
+    }
+
+    #[test]
+    fn an_export_plan_says_what_the_file_will_hold() {
+        let response: ExportPlanResponse = ExportPlan {
+            range: TimeRange::new(1_000, 3_000),
+            sample_rate: 16_000,
+            channels: 1,
+            data_bytes: 64_000,
+            total_bytes: 64_044,
+            mixed_rates: true,
+        }
+        .into();
+        let json = serde_json::to_value(response).expect("serialise");
+        assert_eq!(json["fromMs"], 1_000);
+        assert_eq!(json["toMs"], 3_000);
+        assert_eq!(json["durationMs"], 2_000);
+        assert_eq!(json["sampleRate"], 16_000);
+        assert_eq!(json["channels"], 1);
+        assert_eq!(json["totalBytes"], 64_044);
+        assert_eq!(json["mixedRates"], true);
+    }
+}

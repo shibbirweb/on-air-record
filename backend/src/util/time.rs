@@ -44,4 +44,24 @@ mod tests {
     fn now_is_after_2020() {
         assert!(now_ms() > 1_577_836_800_000);
     }
+
+    mod props {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+            /// Any duration, however long or negative, prints as hours, minutes and seconds that add back
+            /// up to its whole seconds, with minutes and seconds under sixty and hours never truncated.
+            #[test]
+            fn a_duration_reads_back_as_its_whole_seconds(duration_ms in any::<i64>()) {
+                let printed = format_duration_ms(duration_ms);
+                let parts: Vec<i64> = printed.split(':').map(|part| part.parse().expect("a number")).collect();
+                prop_assert_eq!(parts.len(), 3);
+                prop_assert!(parts[1] < 60 && parts[2] < 60);
+                prop_assert_eq!(parts[0] * 3600 + parts[1] * 60 + parts[2], duration_ms.max(0) / 1000);
+            }
+        }
+    }
 }
