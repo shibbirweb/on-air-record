@@ -5,6 +5,14 @@ Every release of On Air Record, newest first. The format follows
 [Semantic Versioning](https://semver.org/). Each release's section is also used as its notes on the
 [releases page](https://github.com/shibbirweb/on-air-record/releases).
 
+## [Unreleased]
+
+### Added
+
+- **The whole compose file, to copy.** The README, the setup guide and the Docker Hub page now show the
+  complete `compose.yaml` with a note on each line, and an example `.env`, so it can be written by hand
+  instead of downloaded. (OAR-105)
+
 ## [0.8.1] - 2026-09-27
 
 ### Added

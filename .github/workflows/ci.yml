@@ -46,6 +46,31 @@ jobs:
 
       - run: node scripts/version.mjs check
 
+      # The README, the setup guide and the Docker Hub page each carry the whole compose file, and a copy
+      # that drifted from packaging/compose.yaml would hand people a setup that differs from the one tested.
+      # docker compose config normalises each, dropping comments and filling in defaults, so they are compared
+      # by what they do. The Docker Hub page names the Docker Hub image, the same image by another name.
+      - name: Docs carry the real compose file
+        run: |
+          set -eu
+          export AUDIO_GID=29 TZ=UTC OAR_PORT=8080
+          docker compose -f packaging/compose.yaml config > "$RUNNER_TEMP/real.yml"
+          for doc in README.md docs/SETUP.md packaging/DOCKERHUB.md; do
+            awk 'index($0, "<!-- full-compose-file") { found = 1; next }
+                 found && /^```yaml/ { inside = 1; next }
+                 inside && /^```/ { exit }
+                 inside { print }' "$doc" \
+              | sed 's#image: shibbirweb/on-air-record:#image: ghcr.io/shibbirweb/on-air-record:#' \
+              > "$RUNNER_TEMP/copy.yml"
+            [ -s "$RUNNER_TEMP/copy.yml" ] || { echo "::error file=$doc::no compose file found after the full-compose-file marker"; exit 1; }
+            docker compose -f "$RUNNER_TEMP/copy.yml" config > "$RUNNER_TEMP/copy-config.yml"
+            if ! diff -u "$RUNNER_TEMP/real.yml" "$RUNNER_TEMP/copy-config.yml"; then
+              echo "::error file=$doc::the compose file in $doc no longer matches packaging/compose.yaml; update it to match"
+              exit 1
+            fi
+            echo "$doc matches packaging/compose.yaml"
+          done
+
       # Answers "is a release due?" on every run without anybody having to remember to ask. It is a note
       # in the run summary, not a rule: work waiting to be released is normal and never a build failure.
       - name: Report whether a release is due
