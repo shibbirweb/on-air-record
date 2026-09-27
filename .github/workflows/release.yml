@@ -517,10 +517,14 @@ jobs:
       packages: write
     env:
       DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
-    # Handed to verify-image, so it checks exactly what was tagged rather than working it out again.
+    # Handed on so verify-image checks exactly what was tagged. Never the image names themselves: GitHub
+    # drops any job output containing a secret's value, and every name contains the Docker Hub username,
+    # which is a secret here. That emptied the list on every release up to 0.8.0, so verify-image checked
+    # nothing, and a Docker Hub page job that relied on it never ran. verify-image rebuilds the names from
+    # IMAGE and DOCKERHUB_IMAGE.
     outputs:
       tags: ${{ steps.tag.outputs.tags }}
-      images: ${{ steps.tag.outputs.images }}
+      dockerhub: ${{ steps.tag.outputs.dockerhub }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -566,21 +570,7 @@ jobs:
             docker buildx imagetools inspect "$image:$VERSION"
           done
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
-          echo "images=$images" >> "$GITHUB_OUTPUT"
-
-  # Docker Hub's page for the image, refreshed with every release so it always describes the newest one.
-  # After image-tags, because a stable release moves `latest` there, and the page checks for `latest` to
-  # decide whether to name it. Skipped without the Docker Hub secrets, like the push itself.
-  dockerhub-description:
-    name: Docker Hub page
-    needs: [version, image-tags]
-    if: needs.version.outputs.publish == 'true' && contains(needs.image-tags.outputs.images, 'docker.io/')
-    permissions:
-      contents: read
-    uses: ./.github/workflows/dockerhub-description.yml
-    secrets: inherit
-    with:
-      tag: ${{ needs.version.outputs.artifact_tag }}
+          echo "dockerhub=$DOCKERHUB" >> "$GITHUB_OUTPUT"
 
   # The last word on the image, as the verify job is on the archives, and on each architecture's own
   # hardware, since an arm64 image that pulls but will not start is exactly what a Raspberry Pi user would
@@ -609,9 +599,23 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TAGS: ${{ needs.image-tags.outputs.tags }}
-      IMAGES: ${{ needs.image-tags.outputs.images }}
+      DOCKERHUB_USED: ${{ needs.image-tags.outputs.dockerhub }}
     steps:
       - uses: docker/setup-buildx-action@v3
+
+      # From the workflow's own image names and the tagging job's yes or no, never from a list handed over,
+      # which GitHub empties (see image-tags). An empty list must fail here: every loop below would otherwise
+      # run zero times and pass having checked nothing, which is what happened up to 0.8.0.
+      - name: Choose the registries
+        run: |
+          set -eu
+          images="$IMAGE"
+          if [ "$DOCKERHUB_USED" = "true" ]; then
+            images="$images $DOCKERHUB_IMAGE"
+          fi
+          [ -n "$TAGS" ] || { echo "::error::image-tags handed over no tags, so there is nothing to verify"; exit 1; }
+          echo "IMAGES=$images" >> "$GITHUB_ENV"
+          echo "verifying $images under: $TAGS"
 
       - name: Pull every tag anonymously
         run: |

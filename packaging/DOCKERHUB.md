@@ -31,8 +31,6 @@ printf 'AUDIO_GID=%s\nTZ=%s\n' "$audio_gid" "$zone" > .env
 docker compose up -d
 ```
 
-<!-- before-stable -->
-
 Open `http://<this machine's address>:8080`, answer the question about logins, and pick the microphone on
 the settings page.
 

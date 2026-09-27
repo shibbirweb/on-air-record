@@ -1498,7 +1498,6 @@ Publishing starts [`.github/workflows/release.yml`](../.github/workflows/release
    same one, then runs it from each, and checks it answers as that version and stops cleanly. It also tries
    to pass a loopback sound card through as this guide says, but GitHub's own runners cannot load one, so
    that part only warns there; passthrough with a real microphone was checked by hand on an Ubuntu server.
-9. Publishes the Docker Hub page, described below.
 
 **If the image cannot be pulled without signing in,** the ghcr.io package is private. New packages can
 start out private; this one was public from its first release, 0.8.0-beta.1, but the setting is worth
@@ -1519,16 +1518,14 @@ Until both are set, releases still publish to `ghcr.io` and the image tags job w
 skipped. Releases published before the secrets existed are not pushed there afterwards; Docker Hub starts
 at the next release.
 
-**The Docker Hub page** is [`packaging/DOCKERHUB.md`](../packaging/DOCKERHUB.md), published on every
-release, beta or stable, by
+**The Docker Hub page** is [`packaging/DOCKERHUB.md`](../packaging/DOCKERHUB.md), published by
 [`.github/workflows/dockerhub-description.yml`](../.github/workflows/dockerhub-description.yml). Docker
-Hub reads nothing from GitHub, so that file is the whole page. It is rendered for the release it goes out
-with: links to `master` become links to that release's tag, so the compose file and guides it points at
-exist and match that version, and while Docker Hub has no `latest` image, before the first stable release,
-the page names `beta` instead and says how to point the compose file at it. To publish it again without a
-release, run the workflow from the Actions tab with a release tag, such as `v0.8.0`. A token without the
-Delete scope makes that job fail with `Forbidden` after everything else has published. When a Docker
-behaviour changes, update that page as well as the Docker section above.
+Hub reads nothing from GitHub, so that file is the whole page. It is documentation for stable users, so it
+follows `master` rather than releases: it publishes whenever a change to it reaches `master`, which
+usually arrives with a stable release, and betas leave it alone. To publish it again without a change,
+run the workflow from the Actions tab on `master`. It never runs as part of a release, so a token without
+the Delete scope fails it alone, with `Forbidden`, and never a release. When a Docker behaviour changes,
+update that page as well as the Docker section above.
 
 Expect ten to fifteen minutes, most of it compiling. The release exists and is visible the whole time; the
 files appear at the end. Notes you wrote yourself are left exactly as they are.
