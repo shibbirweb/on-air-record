@@ -10,6 +10,8 @@ pub mod broadcast_hub;
 pub mod capture_service;
 pub mod device_service;
 pub mod export_service;
+#[cfg(test)]
+mod fault_tests;
 pub mod listener_registry;
 pub mod playback_service;
 pub mod recorder_service;

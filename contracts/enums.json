@@ -1,0 +1,42 @@
+{
+  "authMode": [
+    "undecided",
+    "open",
+    "accounts"
+  ],
+  "captureState": [
+    "idle",
+    "starting",
+    "recording",
+    "error"
+  ],
+  "channel": [
+    "stable",
+    "beta"
+  ],
+  "installKind": [
+    "installer",
+    "systemd",
+    "docker",
+    "manual"
+  ],
+  "playerState": [
+    "idle",
+    "playing",
+    "paused"
+  ],
+  "role": [
+    "admin",
+    "listener"
+  ],
+  "soundSensitivity": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "streamMode": [
+    "live",
+    "playback",
+    "paused"
+  ]
+}

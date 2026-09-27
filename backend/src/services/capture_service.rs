@@ -98,6 +98,12 @@ impl CaptureService {
         }
     }
 
+    /// The recorder's trouble with the disk and the index, for the fault tests.
+    #[cfg(test)]
+    pub(crate) fn recorder_health(&self) -> &Arc<RecorderHealth> {
+        &self.recorder_health
+    }
+
     pub fn is_active(&self) -> bool {
         self.snapshot().state.is_active()
     }

@@ -164,7 +164,8 @@ One WebSocket carries both live and DVR. Binary messages are audio, a fixed 24 b
 sample rate and channels on every frame so the input device can change mid stream.
 
 `frontend/src/lib/audio/frameCodec.ts` is the mirror of `ws/protocol.rs`. **Change one and you must change
-the other**, and both have tests that encode and decode the documented layout.
+the other**, and both have tests that encode and decode the documented layout. The same goes for every
+JSON message and REST body: see the contract tests under Testing, which fail on whichever side falls behind.
 
 ### Access control
 
@@ -311,6 +312,17 @@ timeout use `#[tokio::test(start_paused = true)]`; wait for the server side in s
 (`listeners.count()`), because a paused clock leaps to the next timer while a frame is still crossing the
 loopback interface. A change to `ws/session.rs` gets a case here.
 
+`services/fault_tests/` stages what an unattended install meets: a recordings folder made read only or
+deleted mid segment, a full disk (the one fault staged through a seam, `disk_full` in `segment_writer.rs`),
+a database locked by another connection, deleted, truncated or garbage segment files, index rows with
+impossible values or paths outside the data directory, and startup against a corrupt or read only database.
+Permission cases are Unix only and skip themselves under root. The rules they pin: the live feed never
+waits on the disk; a failed write closes the segment, because a hole would shift every later frame; a
+refused index insert waits in order and is retried at the next close; unreadable audio plays and exports as
+a gap at its true time; the janitor pages past files it cannot delete; nothing follows a relative path out
+of the data directory; and trouble reaches `capture.error` through `RecorderHealth`, logged once per run.
+A new failure mode the service meets in the field gets a case there.
+
 `services/sound_pipeline_tests.rs` generates real audio (room noise, hum, speech like syllables, a click,
 a door) and pushes it through the real recorder into segments and SQLite, then asks the timeline service
 for the sounds. It is the closest CI gets to a microphone, and it pins the documented limits: a voice at a
@@ -329,7 +341,21 @@ directory, starts the built service, and drives headless Chrome over the DevTool
 events, reading the canvases back pixel by pixel. It is CI's `browser end to end` job and part of
 `make check` (`make e2e` alone); it needs Chrome and Node 22.13 or newer for `node:sqlite`. Canvases the
 test reads carry an `aria-label`, which it finds them by; keep those if a canvas is reworked. Add a check
-there when a feature's value is in what the page does rather than what a function returns.
+there when a feature's value is in what the page does rather than what a function returns. It also runs
+axe-core (read from `frontend/node_modules`, injected over the protocol) against WCAG 2.1 A and AA at each
+page state, in both themes by toggling the root `dark` class; a violation fails the run and prints the rule,
+the elements and, for contrast, the measured colours. Fix the component or the theme token, not the rule;
+a genuine false positive goes in `AXE_EXCLUSIONS` with its reason. A new page state gets an `audit` call.
+
+`contracts/` holds the wire contract both sides test against, so neither can drift alone. The backend
+generates `server-messages.json`, `responses.json`, `enums.json` and `audio-frames.json` from the real types
+and encoder (`contract_tests.rs`; a difference fails, and `UPDATE_CONTRACTS=1 cargo test contract`
+rewrites them for review). The frontend holds its types to them exactly, key for key and in both directions
+(`src/test/contract.ts`, `src/api/__tests__/contract*.test.ts`), decodes the frames with the real codec, and
+checks that its `api` client sends exactly what `client-messages.json` and `requests.json` say. The backend
+parses every one of those into its real request types, fails on a key it would ignore, and
+`routes/contract_tests.rs` sends each through the router to prove the method and path reach a handler. So a
+renamed field fails on one side, and once the fixture is regenerated, on the other.
 
 Pure functions whose edge cases hand picked examples miss also have property tests: `proptest!` blocks
 beside the Rust code, and `*.props.test.ts` files using `fast-check` beside the frontend tests (the frame

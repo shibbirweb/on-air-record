@@ -159,6 +159,8 @@ impl SegmentWriter {
     /// Append a frame's payload and fold it into the envelope.
     pub fn append(&mut self, frame: &AudioFrame, encoder: &dyn FrameEncoder) -> AppResult<()> {
         let payload = encoder.encode(frame);
+        #[cfg(test)]
+        disk_full::check(&self.absolute_path)?;
         self.writer.write_all(&payload)?;
         self.byte_len += payload.len() as i64;
         self.envelope.push(&frame.samples);
@@ -171,6 +173,11 @@ impl SegmentWriter {
     /// A segment that never received a frame is removed instead, because an empty file in the index would
     /// make playback stall on a zero length read.
     pub fn finish(mut self) -> AppResult<Option<SegmentDraft>> {
+        // A flush with nothing buffered writes nothing, so even a full disk lets it succeed.
+        #[cfg(test)]
+        if !self.writer.buffer().is_empty() {
+            disk_full::check(&self.absolute_path)?;
+        }
         self.writer.flush()?;
         drop(self.writer);
 
@@ -222,6 +229,47 @@ impl std::fmt::Debug for SegmentWriter {
             .field("path", &self.relative_path)
             .field("byte_len", &self.byte_len)
             .finish()
+    }
+}
+
+/// Test only: folders whose segment writes fail as if the disk were full.
+///
+/// A full disk cannot be staged portably. Only Linux has `/dev/full`, a small filesystem needs root or a
+/// disk image, and the recorder opens its own files by path, so there is no writer to swap for a failing
+/// one. This fails a write at the two places the writer puts bytes on disk, which is where a real full
+/// disk fails it, so the recorder's handling of `ENOSPC` is exercised without any production path
+/// changing. Keyed by folder, so tests running side by side do not fill each other's disks.
+#[cfg(test)]
+pub(crate) mod disk_full {
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    static FULL: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+    /// The folder stays full until this is dropped.
+    pub(crate) struct Filled(PathBuf);
+
+    impl Drop for Filled {
+        fn drop(&mut self) {
+            let mut full = FULL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            full.retain(|dir| dir != &self.0);
+        }
+    }
+
+    /// Make every segment write under `dir` fail until the returned guard is dropped.
+    pub(crate) fn fill(dir: &Path) -> Filled {
+        FULL.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(dir.to_path_buf());
+        Filled(dir.to_path_buf())
+    }
+
+    pub(super) fn check(path: &Path) -> std::io::Result<()> {
+        let full = FULL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if full.iter().any(|dir| path.starts_with(dir)) {
+            return Err(std::io::Error::other("no space left on device (simulated)"));
+        }
+        Ok(())
     }
 }
 

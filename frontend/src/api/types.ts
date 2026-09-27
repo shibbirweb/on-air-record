@@ -236,7 +236,7 @@ export type ServerMessage =
 export type ListenerView = {
   /** Stable for the life of the connection. */
   id: number;
-  /** Absent for a guest on an open recorder. */
+  /** `null` for a guest on an open recorder. */
   email: string | null;
   role: Role | null;
   address: string;
@@ -341,4 +341,45 @@ export type TwoFactorSetup = {
   otpauthUri: string;
   /** An SVG document. Shown as an image, never inserted as markup. */
   qrSvg: string;
+};
+
+/** The recovery codes, shown once when two factor sign in is turned on or the codes are replaced. */
+export type RecoveryCodes = {
+  recoveryCodes: string[];
+};
+
+// List answers. The server wraps each list in an object so a field can be added beside it later without
+// breaking the page, and naming the wrappers here lets the contract tests check them like any other type.
+
+export type UserList = {
+  users: User[];
+};
+
+export type DeviceList = {
+  devices: InputDevice[];
+};
+
+export type RecordingDayList = {
+  days: RecordingDay[];
+};
+
+export type BookmarkList = {
+  bookmarks: Bookmark[];
+};
+
+export type SessionList = {
+  sessions: RecordingSession[];
+};
+
+/** The sound to jump to, or `null` when there is none that way. */
+export type NextSound = {
+  sound: Sound | null;
+};
+
+/** The body of every error answer, as `backend/src/error.rs` writes it. */
+export type ErrorEnvelope = {
+  error: {
+    code: string;
+    message: string;
+  };
 };

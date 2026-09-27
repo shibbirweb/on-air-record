@@ -18,6 +18,8 @@ use tower_http::trace::TraceLayer;
 
 #[cfg(test)]
 mod bookmark_tests;
+#[cfg(test)]
+mod contract_tests;
 mod embedded_ui;
 #[cfg(test)]
 mod export_tests;

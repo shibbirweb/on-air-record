@@ -18,3 +18,6 @@ pub mod routes;
 pub mod services;
 pub mod util;
 pub mod ws;
+
+#[cfg(test)]
+mod contract_tests;

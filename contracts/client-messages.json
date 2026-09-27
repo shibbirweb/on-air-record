@@ -1,0 +1,49 @@
+{
+  "live": [
+    {
+      "type": "live"
+    }
+  ],
+  "pause": [
+    {
+      "type": "pause"
+    }
+  ],
+  "ping": [
+    {
+      "clientTimeMs": 1757034015000,
+      "type": "ping"
+    }
+  ],
+  "player": [
+    {
+      "state": "idle",
+      "type": "player"
+    },
+    {
+      "state": "playing",
+      "type": "player"
+    },
+    {
+      "state": "paused",
+      "type": "player"
+    }
+  ],
+  "resume": [
+    {
+      "type": "resume"
+    }
+  ],
+  "seek": [
+    {
+      "timestampMs": 1757031000000,
+      "type": "seek"
+    }
+  ],
+  "speed": [
+    {
+      "type": "speed",
+      "value": 1.5
+    }
+  ]
+}

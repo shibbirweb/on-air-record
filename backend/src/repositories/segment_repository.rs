@@ -48,6 +48,14 @@ impl SegmentRepository {
         Self { database }
     }
 
+    /// The connection every repository of this application shares, so a fault test can shorten its busy
+    /// timeout. At the production five seconds, a test of what a locked database does would spend most
+    /// of its time waiting.
+    #[cfg(test)]
+    pub(crate) fn database(&self) -> &Arc<Database> {
+        &self.database
+    }
+
     pub fn insert(&self, draft: &SegmentDraft) -> AppResult<i64> {
         self.database.with_connection(|conn| {
             conn.execute(

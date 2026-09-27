@@ -1,0 +1,507 @@
+{
+  "authState": [
+    {
+      "mode": "accounts",
+      "pendingTwoFactor": false,
+      "user": {
+        "createdAtMs": 1756425600001,
+        "email": "owner@example.com",
+        "id": 1,
+        "role": "admin",
+        "twoFactorEnabled": true
+      }
+    },
+    {
+      "mode": "accounts",
+      "pendingTwoFactor": true,
+      "user": null
+    },
+    {
+      "mode": "open",
+      "pendingTwoFactor": false,
+      "user": null
+    }
+  ],
+  "bookmark": [
+    {
+      "createdAtMs": 1757034000007,
+      "id": 7,
+      "label": "Doorbell",
+      "note": "Parcel for next door",
+      "timestampMs": 1757030820000
+    },
+    {
+      "createdAtMs": 1757034000008,
+      "id": 8,
+      "label": "Dog barking",
+      "note": null,
+      "timestampMs": 1757030880000
+    }
+  ],
+  "bookmarks": [
+    {
+      "bookmarks": [
+        {
+          "createdAtMs": 1757034000007,
+          "id": 7,
+          "label": "Doorbell",
+          "note": "Parcel for next door",
+          "timestampMs": 1757030820000
+        },
+        {
+          "createdAtMs": 1757034000008,
+          "id": 8,
+          "label": "Dog barking",
+          "note": null,
+          "timestampMs": 1757030880000
+        }
+      ]
+    }
+  ],
+  "devices": [
+    {
+      "devices": [
+        {
+          "available": true,
+          "channels": 1,
+          "id": "MacBook Pro Microphone",
+          "isDefault": true,
+          "isSelected": false,
+          "name": "MacBook Pro Microphone",
+          "sampleRate": 48000
+        },
+        {
+          "available": false,
+          "channels": 2,
+          "id": "Scarlett Solo USB",
+          "isDefault": false,
+          "isSelected": true,
+          "name": "Scarlett Solo USB",
+          "sampleRate": 44100
+        }
+      ]
+    }
+  ],
+  "directoryTest": [
+    {
+      "exists": false,
+      "message": "The folder does not exist yet and will be created.",
+      "ok": true,
+      "readable": true,
+      "resolvedPath": "/srv/recordings",
+      "willCreate": true,
+      "writable": true
+    },
+    {
+      "exists": true,
+      "message": "The service cannot write to this folder.",
+      "ok": false,
+      "readable": false,
+      "resolvedPath": "/root/recordings",
+      "willCreate": false,
+      "writable": false
+    }
+  ],
+  "error": [
+    {
+      "error": {
+        "code": "bad_request",
+        "message": "the role must be admin or listener"
+      }
+    },
+    {
+      "error": {
+        "code": "unauthenticated",
+        "message": "sign in to continue"
+      }
+    },
+    {
+      "error": {
+        "code": "rate_limited",
+        "message": "too many attempts, wait a minute"
+      }
+    }
+  ],
+  "exportPlan": [
+    {
+      "channels": 1,
+      "durationMs": 60000,
+      "fromMs": 1757030400000,
+      "mixedRates": true,
+      "sampleRate": 16000,
+      "toMs": 1757030460000,
+      "totalBytes": 1920044
+    }
+  ],
+  "health": [
+    {
+      "status": "ok",
+      "uptimeMs": 86400000,
+      "version": "1.4.0"
+    }
+  ],
+  "nextSound": [
+    {
+      "sound": {
+        "endMs": 1757031306400,
+        "peak": 220,
+        "seekMs": 1757031304000,
+        "startMs": 1757031305000
+      }
+    },
+    {
+      "sound": null
+    }
+  ],
+  "peaks": [
+    {
+      "bucketMs": 100,
+      "fromMs": 1757030400000,
+      "peaks": [
+        0,
+        3,
+        12,
+        255,
+        90,
+        4,
+        0,
+        0,
+        1,
+        2
+      ],
+      "toMs": 1757030401000
+    }
+  ],
+  "recordingDays": [
+    {
+      "days": [
+        {
+          "bytes": 344640000,
+          "day": "2025-09-05",
+          "dayEndMs": 1757109600000,
+          "dayStartMs": 1757023200000,
+          "endMs": 1757033990000,
+          "recordedMs": 3590000,
+          "segmentCount": 359,
+          "startMs": 1757030400000
+        }
+      ]
+    }
+  ],
+  "recoveryCodes": [
+    {
+      "recoveryCodes": [
+        "4f7c-9a21",
+        "b83e-06d5",
+        "c1a9-7e44"
+      ]
+    }
+  ],
+  "sessions": [
+    {
+      "sessions": [
+        {
+          "bytes": 172800000,
+          "channels": 1,
+          "deviceId": "Scarlett Solo USB",
+          "deviceName": "Scarlett Solo USB",
+          "endedAtMs": 1757035800000,
+          "id": 1,
+          "sampleRate": 48000,
+          "segmentCount": 180,
+          "startedAtMs": 1757034000000
+        },
+        {
+          "bytes": 172800000,
+          "channels": 1,
+          "deviceId": "Scarlett Solo USB",
+          "deviceName": "Scarlett Solo USB",
+          "endedAtMs": null,
+          "id": 2,
+          "sampleRate": 48000,
+          "segmentCount": 180,
+          "startedAtMs": 1757037600000
+        }
+      ]
+    },
+    {
+      "sessions": []
+    }
+  ],
+  "settings": [
+    {
+      "autoStart": true,
+      "autoStartDelaySeconds": 20,
+      "checkForUpdates": true,
+      "effectiveRecordingsDir": "/srv/recordings",
+      "frameMs": 100,
+      "gain": 1.5,
+      "inputDeviceId": "Scarlett Solo USB",
+      "recordingSampleRate": 16000,
+      "recordingsDir": "/srv/recordings",
+      "retentionHours": 72,
+      "segmentSeconds": 10,
+      "soundSensitivity": "high"
+    },
+    {
+      "autoStart": false,
+      "autoStartDelaySeconds": 0,
+      "checkForUpdates": false,
+      "effectiveRecordingsDir": "/var/lib/on-air-record/recordings",
+      "frameMs": 100,
+      "gain": 1.0,
+      "inputDeviceId": null,
+      "recordingSampleRate": null,
+      "recordingsDir": null,
+      "retentionHours": null,
+      "segmentSeconds": 10,
+      "soundSensitivity": "medium"
+    }
+  ],
+  "sounds": [
+    {
+      "fromMs": 1757030400000,
+      "sensitivity": "medium",
+      "sounds": [
+        {
+          "endMs": 1757030462400,
+          "peak": 140,
+          "seekMs": 1757030460000,
+          "startMs": 1757030461000
+        },
+        {
+          "endMs": 1757031306400,
+          "peak": 220,
+          "seekMs": 1757031304000,
+          "startMs": 1757031305000
+        }
+      ],
+      "toMs": 1757034000000
+    }
+  ],
+  "status": [
+    {
+      "capture": {
+        "channels": 1,
+        "deviceId": "Scarlett Solo USB",
+        "deviceName": "Scarlett Solo USB",
+        "droppedFrames": 3,
+        "error": null,
+        "frameMs": 100,
+        "sampleRate": 48000,
+        "sessionId": 42,
+        "startedAtMs": 1757030400000,
+        "state": "recording"
+      },
+      "levels": {
+        "peak": 0.5,
+        "rms": 0.125
+      },
+      "listeners": 2,
+      "liveEdgeMs": 1757034000000,
+      "serverTimeMs": 1757034000250
+    },
+    {
+      "capture": {
+        "channels": 0,
+        "deviceId": null,
+        "deviceName": null,
+        "droppedFrames": 0,
+        "error": "audio device error: the device is no longer available",
+        "frameMs": 100,
+        "sampleRate": 0,
+        "sessionId": null,
+        "startedAtMs": null,
+        "state": "error"
+      },
+      "levels": {
+        "peak": 0.0,
+        "rms": 0.0
+      },
+      "listeners": 0,
+      "liveEdgeMs": null,
+      "serverTimeMs": 1757034000250
+    }
+  ],
+  "storage": [
+    {
+      "bytes": 8294400000,
+      "bytesPerHour": 345600000,
+      "dataDir": "/var/lib/on-air-record",
+      "newestMs": 1757030400000,
+      "oldestMs": 1756944000000,
+      "projectedMaxBytes": 24883200000,
+      "recordingsDir": "/var/lib/on-air-record/recordings",
+      "retentionHours": 72,
+      "segmentCount": 8640
+    },
+    {
+      "bytes": 0,
+      "bytesPerHour": 345600000,
+      "dataDir": "/var/lib/on-air-record",
+      "newestMs": null,
+      "oldestMs": null,
+      "projectedMaxBytes": null,
+      "recordingsDir": "/var/lib/on-air-record/recordings",
+      "retentionHours": null,
+      "segmentCount": 0
+    }
+  ],
+  "timelineRange": [
+    {
+      "coverage": [
+        {
+          "endMs": 1756987200000,
+          "startMs": 1756944000000
+        },
+        {
+          "endMs": 1757033990000,
+          "startMs": 1757030400000
+        }
+      ],
+      "earliestMs": 1756944000000,
+      "latestMs": 1757033990000,
+      "liveEdgeMs": 1757034000000,
+      "serverTimeMs": 1757034000250
+    },
+    {
+      "coverage": [],
+      "earliestMs": null,
+      "latestMs": null,
+      "liveEdgeMs": null,
+      "serverTimeMs": 1757034000250
+    }
+  ],
+  "twoFactorSetup": [
+    {
+      "otpauthUri": "otpauth://totp/On%20Air%20Record:owner%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=On%20Air%20Record",
+      "qrSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 29 29\"></svg>",
+      "secretKey": "JBSW Y3DP EHPK 3PXP"
+    }
+  ],
+  "twoFactorStatus": [
+    {
+      "enabled": true,
+      "recoveryCodesLeft": 8
+    }
+  ],
+  "updateStatus": [
+    {
+      "automatic": true,
+      "available": {
+        "notes": "### Added\n\n- Jump between the moments something was heard.",
+        "prerelease": true,
+        "publishedAtMs": 1757030401000,
+        "tag": "v1.5.0-beta.1",
+        "url": "https://github.com/shibbirweb/on-air-record/releases/tag/v1.5.0-beta.1",
+        "version": "1.5.0-beta.1"
+      },
+      "channel": "beta",
+      "checkedAtMs": 1757034000000,
+      "currentVersion": "1.4.0",
+      "error": null,
+      "install": {
+        "dir": "/home/me/on-air-record",
+        "kind": "installer",
+        "os": "linux",
+        "target": "x86_64-unknown-linux-gnu"
+      },
+      "releases": [
+        {
+          "notes": "### Added\n\n- Jump between the moments something was heard.",
+          "prerelease": true,
+          "publishedAtMs": 1757030401000,
+          "tag": "v1.5.0-beta.1",
+          "url": "https://github.com/shibbirweb/on-air-record/releases/tag/v1.5.0-beta.1",
+          "version": "1.5.0-beta.1"
+        },
+        {
+          "notes": "### Added\n\n- Jump between the moments something was heard.",
+          "prerelease": false,
+          "publishedAtMs": null,
+          "tag": "v1.4.1",
+          "url": "https://github.com/shibbirweb/on-air-record/releases/tag/v1.4.1",
+          "version": "1.4.1"
+        }
+      ],
+      "releasesUrl": "https://github.com/shibbirweb/on-air-record/releases"
+    },
+    {
+      "automatic": true,
+      "available": {
+        "notes": "### Added\n\n- Jump between the moments something was heard.",
+        "prerelease": false,
+        "publishedAtMs": null,
+        "tag": "v1.4.1",
+        "url": "https://github.com/shibbirweb/on-air-record/releases/tag/v1.4.1",
+        "version": "1.4.1"
+      },
+      "channel": "stable",
+      "checkedAtMs": 1757034000000,
+      "currentVersion": "1.4.0",
+      "error": null,
+      "install": {
+        "dir": null,
+        "kind": "systemd",
+        "os": "linux",
+        "target": "x86_64-unknown-linux-gnu"
+      },
+      "releases": [
+        {
+          "notes": "### Added\n\n- Jump between the moments something was heard.",
+          "prerelease": false,
+          "publishedAtMs": null,
+          "tag": "v1.4.1",
+          "url": "https://github.com/shibbirweb/on-air-record/releases/tag/v1.4.1",
+          "version": "1.4.1"
+        }
+      ],
+      "releasesUrl": "https://github.com/shibbirweb/on-air-record/releases"
+    },
+    {
+      "automatic": false,
+      "available": null,
+      "channel": "stable",
+      "checkedAtMs": null,
+      "currentVersion": "1.4.0",
+      "error": "could not reach GitHub: timed out",
+      "install": {
+        "dir": null,
+        "kind": "docker",
+        "os": "linux",
+        "target": "aarch64-unknown-linux-gnu"
+      },
+      "releases": [],
+      "releasesUrl": "https://github.com/shibbirweb/on-air-record/releases"
+    }
+  ],
+  "user": [
+    {
+      "createdAtMs": 1756425600002,
+      "email": "listener@example.com",
+      "id": 2,
+      "role": "listener",
+      "twoFactorEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "users": [
+        {
+          "createdAtMs": 1756425600001,
+          "email": "owner@example.com",
+          "id": 1,
+          "role": "admin",
+          "twoFactorEnabled": true
+        },
+        {
+          "createdAtMs": 1756425600002,
+          "email": "listener@example.com",
+          "id": 2,
+          "role": "listener",
+          "twoFactorEnabled": false
+        }
+      ]
+    }
+  ]
+}

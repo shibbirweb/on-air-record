@@ -14,11 +14,15 @@
 //
 //   node scripts/e2e.mjs            (after `make build`, or `npm run build` and `cargo build`)
 //
+// Every page state it reaches is also audited for accessibility with axe-core, in both themes. axe is
+// read from frontend/node_modules as a plain script and injected into the page, so the script still
+// imports nothing; `npm ci` in frontend, which the UI build needs anyway, is what provides it.
+//
 // Settings, all optional: E2E_BINARY (the service, default the debug build), E2E_STATIC_DIR (the built UI),
 // E2E_PORT (8199), E2E_ARTIFACTS (where screenshots go), CHROME_PATH.
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +32,7 @@ const BINARY =
   process.env.E2E_BINARY ??
   join(ROOT, 'backend', 'target', 'debug', `on-air-record${process.platform === 'win32' ? '.exe' : ''}`);
 const STATIC_DIR = process.env.E2E_STATIC_DIR ?? join(ROOT, 'frontend', 'dist');
+const AXE = join(ROOT, 'frontend', 'node_modules', 'axe-core', 'axe.min.js');
 const PORT = Number(process.env.E2E_PORT ?? 8199);
 const ARTIFACTS = process.env.E2E_ARTIFACTS ?? join(tmpdir(), 'oar-e2e-artifacts');
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -44,6 +49,8 @@ const CHROME =
 // The page and the service both show and file times in local time; pin it so the expected labels are
 // the same on every machine.
 const ENV = { ...process.env, TZ: 'UTC' };
+
+let axeSource = null;
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const results = [];
@@ -67,6 +74,10 @@ async function main() {
   if (!CHROME) {
     throw new Error('No Chrome or Chromium found. Set CHROME_PATH.');
   }
+  if (!existsSync(AXE)) {
+    throw new Error(`axe-core is missing at ${AXE}. Install the UI's dependencies first: npm ci in frontend.`);
+  }
+  axeSource = readFileSync(AXE, 'utf8');
   let DatabaseSync;
   try {
     ({ DatabaseSync } = await import('node:sqlite'));
@@ -425,6 +436,95 @@ async function press(page, label) {
   return transport(page);
 }
 
+// ---- accessibility --------------------------------------------------------------------------------
+
+// The WCAG 2.1 A and AA rules. Best practices are left out: they are advice, and a check that fails on
+// advice gets ignored.
+const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
+
+/**
+ * Nodes axe is wrong about, each with the reason, as `{ rule, selector, why }`. Keep it narrow: a rule
+ * and a selector for the one element, never a rule turned off for the whole page. Fix the component
+ * instead wherever it can be. Empty, because everything axe has found so far was real.
+ */
+const AXE_EXCLUSIONS = [];
+
+/**
+ * Run axe on the page as it stands, once in each theme, and record a check for each. The theme is the
+ * `dark` class useTheme puts on the root element, so it is flipped in place and put back: reloading to
+ * change it would close the dialog or menu that is the state being audited.
+ */
+async function audit(page, name) {
+  const loaded = await page.run(`typeof window.axe !== 'undefined'`);
+  if (!loaded) {
+    await page.run(`${axeSource}\n;true`);
+  }
+  const original = await page.run(`document.documentElement.classList.contains('dark') ? 'dark' : 'light'`);
+  for (const theme of [original, original === 'dark' ? 'light' : 'dark']) {
+    if (theme !== original) {
+      await setTheme(page, theme);
+    }
+    const report = await page.run(`(async () => {
+      const exclusions = ${JSON.stringify(AXE_EXCLUSIONS)};
+      const excluded = (rule, target) => {
+        const element = typeof target[0] === 'string' ? document.querySelector(target[0]) : null;
+        return exclusions.some((entry) => entry.rule === rule && element && element.matches(entry.selector));
+      };
+      const { passes, violations } = await axe.run(document, { runOnly: { type: 'tag', values: ${JSON.stringify(AXE_TAGS)} } });
+      const broken = violations
+        .map((violation) => ({
+          id: violation.id,
+          impact: violation.impact,
+          help: violation.help,
+          url: violation.helpUrl,
+          nodes: violation.nodes.filter((node) => !excluded(violation.id, node.target)).map((node) => ({
+            target: node.target.flat().join(' '),
+            summary: (node.failureSummary ?? '').split('\\n').slice(1).join(' ').replace(/\\s+/g, ' ').trim(),
+          })),
+        }))
+        .filter((violation) => violation.nodes.length > 0);
+      return { passes: passes.length, violations: broken };
+    })()`);
+    if (theme !== original) {
+      await setTheme(page, original);
+    }
+    const label = `accessibility: ${name}, ${theme} theme`;
+    if (!Array.isArray(report?.violations)) {
+      check(label, false, 'axe did not run');
+      continue;
+    }
+    const { violations } = report;
+    check(label, violations.length === 0, `${report.passes} rules pass${violations.length === 0 ? '' : `, ${violations.length} broken`}`);
+    // Enough to fix it from a CI log: the rule, where, and axe's own account of what is wrong.
+    for (const violation of violations) {
+      const count = violation.nodes.length;
+      console.log(`       ${violation.id} (${violation.impact}): ${violation.help}, on ${count} element${count === 1 ? '' : 's'}, ${violation.url}`);
+      for (const node of violation.nodes.slice(0, 5)) {
+        console.log(`         ${node.target}`);
+        console.log(`           ${node.summary}`);
+      }
+    }
+  }
+}
+
+/**
+ * Put a theme on the page the way useTheme does. Colour transitions are held off while it changes, so
+ * axe measures the finished colours at once instead of waiting for a fade, and the page is not left
+ * fading back afterwards.
+ */
+async function setTheme(page, theme) {
+  await page.run(`(() => {
+    const still = document.createElement('style');
+    still.textContent = '*, *::before, *::after { transition: none !important; }';
+    document.head.append(still);
+    document.documentElement.classList.toggle('dark', ${JSON.stringify(theme === 'dark')});
+    document.documentElement.style.colorScheme = ${JSON.stringify(theme)};
+    void document.documentElement.offsetHeight;
+    still.remove();
+    return true;
+  })()`);
+}
+
 async function checkTimeline(page, plan) {
   await page.open('/');
   check('the control room has the previous and next sound buttons', Boolean(
@@ -434,9 +534,17 @@ async function checkTimeline(page, plan) {
   // An hour at a time covers the whole recording; stop following live so the view holds still.
   await page.click(button('1h'));
   await sleep(800);
+  // Zooming holds the window's centre, and only the next range poll, every two seconds, pulls a followed
+  // window back to the live edge; freezing the view before it comes left the clap and the speech off the
+  // left of the hour. Following live again anchors it at once, so it is switched off, on, and off.
+  await page.click(buttonContaining('Following live'));
+  await sleep(300);
+  await page.click(buttonContaining('Follow live'));
+  await sleep(300);
   await page.click(buttonContaining('Following live'));
   await sleep(2000);
   await page.shot('timeline');
+  await audit(page, 'the control room on seeded recordings');
 
   // The teal marks, read back from the canvases: the strip along the bottom of the timeline and of the
   // day overview. Teal is told apart by hue, since the overview's window box tints what lies under it.
@@ -495,6 +603,7 @@ async function checkSettings(page) {
   await page.click(buttonContaining('Save changes'));
   await sleep(1500);
   await page.shot('settings');
+  await audit(page, 'the settings page');
   const stored = (await request('GET', '/api/settings')).soundSensitivity;
   check('choosing High and saving stores it', stored === 'high', stored);
 
@@ -518,6 +627,7 @@ async function checkBookmarks(page) {
   await sleep(500);
   check('the bookmark list shows it', await page.run(hasText('Clap')));
   await page.shot('bookmarks');
+  await audit(page, 'the bookmark list');
   await page.click(labelled('Remove Clap'));
   await sleep(1500);
   const after = await request('GET', '/api/bookmarks');
@@ -534,6 +644,7 @@ async function checkExport(page) {
     await sleep(1500);
     check('the export panel shows the length and the file size', (await page.run(hasText('Export as WAV'))) && (await page.run(hasText('File size'))));
     await page.shot('export');
+    await audit(page, 'the export dialog');
     const href = await page.run(`document.querySelector('a[download][href*="/api/export"]')?.getAttribute('href') ?? null`);
     check('the export panel offers a download of the chosen range', typeof href === 'string', String(href));
     if (typeof href !== 'string') {
@@ -554,13 +665,15 @@ async function checkExport(page) {
       check('the saved file is exactly as long as the plan said', size === plan.totalBytes, `${size} bytes, plan ${plan.totalBytes}`);
     }
   } finally {
-    rmSync(folder, { recursive: true, force: true });
+    // Chrome can still be tidying up after a download it reported finished, as with its profile below.
+    rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }
 
 async function checkDayPicker(page, plan) {
   await page.click(labelled('Choose a recorded day'));
   await sleep(800);
+  await audit(page, 'the day picker');
   const yesterday = new Date(plan.yesterday);
   const today = new Date(plan.start);
   if (yesterday.getUTCMonth() !== today.getUTCMonth()) {
@@ -583,10 +696,12 @@ async function checkFirstRunAndSignIn(page) {
   await page.open('/');
   check('a new recorder asks whether to protect it with a login', await page.run(hasText('Protect this recorder with a login?')));
   await page.shot('first-run');
+  await audit(page, 'the first run question');
 
   await page.click(buttonContaining('Set up accounts'));
   await sleep(500);
   check('choosing accounts asks for the admin account', await page.run(hasText('Create the admin account')));
+  await audit(page, 'the admin account form');
   await page.type(field('Email'), 'owner@example.com');
   await page.type(field('Password'), 'a long password');
   await page.type(field('Password again'), 'a long password');
@@ -601,6 +716,7 @@ async function checkFirstRunAndSignIn(page) {
   await page.click(buttonContaining('Sign out'));
   const loginShown = await page.waitFor(hasText('Sign in') + ` && Boolean(${field('Email')})`);
   check('signing out goes back to the sign in page', loginShown);
+  await audit(page, 'the sign in page');
 
   await page.type(field('Email'), 'owner@example.com');
   await page.type(field('Password'), 'not the password');
@@ -608,6 +724,7 @@ async function checkFirstRunAndSignIn(page) {
   await sleep(1500);
   check('a wrong password is refused with a message', Boolean(await page.run(`Boolean(document.querySelector('[role="alert"]'))`)));
   check('and nothing is opened', !(await page.run(`Boolean(${labelled('Account: owner@example.com')})`)));
+  await audit(page, 'the sign in page with a wrong password');
 
   await page.open('/');
   await page.type(field('Email'), 'owner@example.com');
@@ -615,6 +732,13 @@ async function checkFirstRunAndSignIn(page) {
   await page.click(button('Sign in'));
   check('the right password signs in', await page.waitFor(`Boolean(${labelled('Account: owner@example.com')})`));
   check('an admin sees the settings link', await page.run(`[...document.querySelectorAll('a')].some((a) => a.textContent.trim() === 'Settings')`));
+  await page.click(labelled('Account: owner@example.com'));
+  await sleep(500);
+  await audit(page, 'the account menu');
+  await page.click(`[...document.querySelectorAll('a')].find((a) => a.textContent.trim() === 'Account settings')`);
+  const accountShown = await page.waitFor(`location.pathname === '/account' && ${hasText('Change password')}`);
+  check('the account menu leads to the account page', accountShown, await page.run('location.pathname'));
+  await audit(page, 'the account page');
 
   // A listener, added by the admin, signs in and is shown only what a listener may use.
   const admin = await sessionFor('owner@example.com', 'a long password');
@@ -629,6 +753,7 @@ async function checkFirstRunAndSignIn(page) {
   check('a listener signs in', await page.waitFor(`Boolean(${labelled('Account: kitchen@example.com')})`));
   await sleep(1000);
   await page.shot('listener');
+  await audit(page, 'the control room as a listener');
   check('a listener sees no settings link', !(await page.run(`[...document.querySelectorAll('a')].some((a) => a.textContent.trim() === 'Settings')`)));
   check('a listener can listen and move through the recording', await page.run(`Boolean(${labelled('Next sound')}) && Boolean(${labelled('Previous sound')})`));
   check('a listener cannot add bookmarks', !(await page.run(`Boolean(${labelled('Add a bookmark here')})`)));
