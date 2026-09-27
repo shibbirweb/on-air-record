@@ -397,7 +397,12 @@ No platform specific code beyond the SIGTERM handler: `cpal` covers CoreAudio, A
   `ffprobe`. Needs `libasound2-dev` and `pkg-config`.
 - **Windows x86_64**: built and tested by CI only. Nobody has run it on a Windows desktop. Do not claim
   otherwise. Cross compiling from macOS cannot close this, because bundled SQLite needs a Windows C
-  toolchain, which is why `.github/workflows/ci.yml` runs the suite on a Windows runner.
+  toolchain, which is why `.github/workflows/ci.yml` runs the suite on a Windows runner, one test at a
+  time so a crash in native code names its test. CI found one: cpal 0.16 keeps one device enumerator for
+  the whole process, made in the COM apartment of the first thread to list devices, and tears COM down
+  when that thread ends, so listing from short lived blocking threads crashed the service with an access
+  violation. `audio/device_registry.rs` creates it first on a thread that parks for good
+  (`home_the_device_enumerator`); keep that while cpal works this way.
 
 ## Packaging
 

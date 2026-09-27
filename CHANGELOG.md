@@ -37,6 +37,8 @@ Every release of On Air Record, newest first. The format follows
   typing. (OAR-108)
 - The success message after changing a password goes away when the next attempt fails, rather than
   showing beside the error. (OAR-108)
+- On Windows, the service no longer crashes some time after the list of microphones was shown, or when
+  recording starts after it was. (OAR-108)
 - On a phone the control room fits the screen. The row of zoom buttons above the timeline did not wrap,
   so the whole page was a little wider than the phone and opened slightly zoomed out. (OAR-108)
 - The waveform on the Broadcast card shows what you are hearing again. It was drawn at true size, so a
