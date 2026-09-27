@@ -11,6 +11,7 @@ pub mod controllers;
 pub mod db;
 pub mod dto;
 pub mod error;
+pub mod health_probe;
 pub mod models;
 pub mod repositories;
 pub mod routes;

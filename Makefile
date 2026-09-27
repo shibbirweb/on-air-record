@@ -13,7 +13,7 @@ MAKEFLAGS += --no-print-directory
 .DEFAULT_GOAL := help
 
 .PHONY: help tools node-version run dev-backend dev-frontend ui build test lint fmt check \
-        version pending release wiki install-preview clean
+        version pending release wiki install-preview docker clean
 
 help: ## List these targets
 	@echo 'On Air Record'
@@ -104,6 +104,11 @@ wiki: node-version ## Build the wiki pages into /tmp/wiki-preview to see what wo
 install-preview: ## Run the installer into /tmp, to try what a user gets
 	mkdir -p /tmp/oar-install-preview
 	cd /tmp/oar-install-preview && sh $(CURDIR)/scripts/install.sh --no-start
+
+# The same image a release publishes, for the machine this runs on. It builds the UI and the binary inside
+# the image, so neither toolchain is needed here, only Docker.
+docker: ## Build the container image as on-air-record:dev
+	docker build -t on-air-record:dev .
 
 clean: ## Remove build output, leaving node_modules and any recordings alone
 	rm -rf backend/target frontend/dist

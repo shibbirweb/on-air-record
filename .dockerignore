@@ -1,0 +1,10 @@
+# The image builds the UI and the binary itself, so local build output, dependencies and recordings only
+# slow the context down, and a stale frontend/dist must never reach the embed step.
+.git
+.github
+**/node_modules
+**/target
+frontend/dist
+**/data
+docs
+*.md

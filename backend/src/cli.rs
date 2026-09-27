@@ -10,26 +10,36 @@ use std::sync::Arc;
 use crate::config::{AppConfig, AuthCommand, Command};
 use crate::db::Database;
 use crate::error::AppResult;
+use crate::health_probe;
 use crate::repositories::AuthRepository;
 use crate::services::AuthService;
 
 pub fn run(config: &AppConfig, command: Command) -> AppResult<()> {
+    match command {
+        // Before the database is opened: a probe that runs every thirty seconds must not touch SQLite,
+        // and must work with a data directory it cannot write to.
+        Command::Health => health_probe::run(config),
+        Command::Auth(command) => run_auth(config, command),
+    }
+}
+
+fn run_auth(config: &AppConfig, command: AuthCommand) -> AppResult<()> {
     let database = Arc::new(Database::open(&config.database_path())?);
     let auth = AuthService::new(Arc::new(AuthRepository::new(database)));
 
     match command {
-        Command::Auth(AuthCommand::ResetPassword { email }) => {
+        AuthCommand::ResetPassword { email } => {
             let password = auth.reset_password_by_email(&email)?;
             println!("New password for {}: {password}", email.trim());
             println!("Every session of that account has been signed out.");
             println!("Sign in with it, then change it under Account settings.");
         }
-        Command::Auth(AuthCommand::ResetTwoFactor { email }) => {
+        AuthCommand::ResetTwoFactor { email } => {
             auth.reset_two_factor_by_email(&email)?;
             println!("Two factor sign in is off for {}.", email.trim());
             println!("They sign in with their password alone, and can set up a new app under Account settings.");
         }
-        Command::Auth(AuthCommand::Disable) => {
+        AuthCommand::Disable => {
             auth.disable_accounts()?;
             println!("Accounts are switched off and every account has been deleted.");
             println!("Anyone who can reach the page can now use it without signing in.");

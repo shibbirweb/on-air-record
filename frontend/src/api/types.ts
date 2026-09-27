@@ -91,7 +91,7 @@ export type ReleaseInfo = {
 
 /** How this copy was installed, which decides how it is updated. */
 export type InstallInfo = {
-  kind: 'installer' | 'systemd' | 'manual';
+  kind: 'installer' | 'systemd' | 'docker' | 'manual';
   /** The installer folder, when there is one. */
   dir: string | null;
   os: string;

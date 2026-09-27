@@ -7,6 +7,7 @@
 //! [`AudioFrame`]: crate::models::AudioFrame
 
 pub mod capture;
+pub mod device_access;
 pub mod device_registry;
 pub mod encoder;
 pub mod frame_builder;
