@@ -91,7 +91,7 @@ export function TimelineToolbar({ getPlayheadMs }: TimelineToolbarProps) {
         <ZoomOut />
       </Button>
 
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         {ZOOM_LEVELS.map((level) => (
           <Button
             key={level}

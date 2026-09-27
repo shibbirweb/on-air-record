@@ -96,6 +96,7 @@ async function main() {
       await checkExport(page);
       await checkDayPicker(page, plan);
       await checkSettings(page);
+      await checkPhoneWidth(page);
     });
   });
 
@@ -399,6 +400,10 @@ async function connect(url) {
   return {
     run,
     close: () => socket.close(),
+    /** Change the window the page is laid out in, as a phone or a desktop would give it. */
+    async resize(width, height, mobile = false) {
+      await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile });
+    },
     async open(path) {
       await send('Page.navigate', { url: `${BASE}${path}` });
       await sleep(3000);
@@ -559,6 +564,51 @@ async function setTheme(page, theme) {
     still.remove();
     return true;
   })()`);
+}
+
+// A phone held upright: the control room must become one column, with nothing wider than the screen.
+async function checkPhoneWidth(page) {
+  await page.resize(390, 844, true);
+  await page.open('/');
+  const layout = await page.run(`(() => {
+    const title = (text) => [...document.querySelectorAll('[data-slot=card-title]')]
+      .find((element) => element.textContent.trim() === text);
+    const broadcast = title('Broadcast')?.getBoundingClientRect();
+    const recorder = title('Recorder')?.getBoundingClientRect();
+    // Against the screen, not the page: a phone widens a page that overflows and zooms out to fit it, so
+    // the page's own width would always agree with itself. The widest elements say what overflowed.
+    const widest = [...document.querySelectorAll('body *')]
+      .map((element) => ({ element, right: element.getBoundingClientRect().right }))
+      .filter(({ right }) => right > screen.width + 1)
+      .sort((a, b) => b.right - a.right)
+      .slice(0, 5)
+      .map(({ element, right }) => element.tagName.toLowerCase()
+        + (element.getAttribute('aria-label') ? '[' + element.getAttribute('aria-label') + ']' : '')
+        + (element.className && typeof element.className === 'string' ? '.' + element.className.split(' ').slice(0, 3).join('.') : '')
+        + ' to ' + Math.round(right) + ' px');
+    return {
+      scrollWidth: document.documentElement.scrollWidth,
+      screenWidth: screen.width,
+      widest,
+      broadcast: broadcast && { left: broadcast.left, top: broadcast.top },
+      recorder: recorder && { left: recorder.left, top: recorder.top },
+    };
+  })()`);
+  check(
+    'on a phone the page never scrolls sideways',
+    layout.scrollWidth <= layout.screenWidth,
+    `${layout.scrollWidth} px wide on a ${layout.screenWidth} px screen${layout.widest.length ? '; widest: ' + layout.widest.join(', ') : ''}`,
+  );
+  check(
+    'on a phone the recorder card sits below the broadcast card, in one column',
+    Boolean(layout.broadcast && layout.recorder)
+      && layout.recorder.top > layout.broadcast.top
+      && Math.abs(layout.recorder.left - layout.broadcast.left) < 2,
+    JSON.stringify({ broadcast: layout.broadcast, recorder: layout.recorder }),
+  );
+  await page.shot('phone-width');
+  await audit(page, 'the control room on a phone');
+  await page.resize(1440, 1000);
 }
 
 async function checkTimeline(page, plan) {
