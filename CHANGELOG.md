@@ -37,6 +37,9 @@ Every release of On Air Record, newest first. The format follows
   typing. (OAR-108)
 - The success message after changing a password goes away when the next attempt fails, rather than
   showing beside the error. (OAR-108)
+- The waveform on the Broadcast card shows what you are hearing again. It was drawn at true size, so a
+  microphone at a normal speaking level left it looking empty; quiet sound is now enlarged to fill the
+  box, loud sound is never cut off, and silence shows as a flat line. (OAR-108)
 - The level meter on the recorder card keeps showing the microphone while you play back a recording or
   pause. Before, it froze on its last reading as soon as you clicked the timeline. (OAR-108)
 - The storage panel says Forever for recordings kept forever, instead of 0 h. (OAR-108)

@@ -4,6 +4,8 @@
  * The oscilloscope above the transport controls. Before anything plays it draws a flat line; once the audio
  * graph has an analyser it traces what is coming out of the speakers, one vertical stroke per pixel from
  * the lowest to the highest sample in that slice, so a transient between two sample points still shows.
+ * The trace is magnified to the signal (lib/audio/waveformScale.ts, tested there), and every slice is at
+ * least a hairline, so quiet or silent audio still draws a line.
  * It reads the analyser every frame, straight off the engine, so none of this goes through React.
  *
  * Drawn onto a recording stand in for the canvas, since jsdom has none. jsdom resolves no stylesheet, so
@@ -91,16 +93,25 @@ describe('while audio plays', () => {
     const trace = drawing.paths[0];
     expect(trace).toMatchObject({ kind: 'stroke', style: WAVE, lineWidth: 1.5 });
 
-    const y = (sample: number) => 48 - sample * 48 * 0.92;
+    // The loudest sample is full scale, so the first frame shrinks the trace to fill 80 percent.
+    const y = (sample: number) => 48 - sample * 0.8 * 48 * 0.92;
     const expected = [
       [0.5, -0.5],
       [1, 0],
       [0, 0],
       [0.25, -1],
-    ].flatMap(([highest, lowest], x) => [
-      { x: x + 0.5, y: y(highest) },
-      { x: x + 0.5, y: y(lowest) },
-    ]);
+    ].flatMap(([highest, lowest], x) =>
+      highest === lowest
+        ? // A silent slice is still drawn, as a hairline around its middle.
+          [
+            { x: x + 0.5, y: y(highest) - 0.5 },
+            { x: x + 0.5, y: y(lowest) + 0.5 },
+          ]
+        : [
+            { x: x + 0.5, y: y(highest) },
+            { x: x + 0.5, y: y(lowest) },
+          ],
+    );
     expect(trace.points).toHaveLength(expected.length);
     trace.points.forEach((point, index) => {
       expect(point.x).toBe(expected[index].x);
@@ -108,15 +119,32 @@ describe('while audio plays', () => {
     });
   });
 
-  it('draws flat where the analyser has fewer samples than there are pixels', () => {
+  it('draws a hairline, not nothing, where a slice is silent', () => {
+    // A stroke of no length draws nothing, so silence used to leave an empty box.
     engine.analyser = analyserWith([1, -1]);
     renderWaveform();
     drawFrame();
 
     const [, , , , thirdTop, thirdBottom, fourthTop, fourthBottom] = drawing.paths[0].points;
-    for (const point of [thirdTop, thirdBottom, fourthTop, fourthBottom]) {
-      expect(point.y).toBe(48);
+    expect([thirdTop.y, thirdBottom.y, fourthTop.y, fourthBottom.y]).toEqual([47.5, 48.5, 47.5, 48.5]);
+  });
+
+  it('magnifies quiet audio frame by frame until it can be seen', () => {
+    // Speech a few percent of full scale is under a pixel tall at true size.
+    engine.analyser = analyserWith([0.05, -0.05, 0.05, -0.05, 0.05, -0.05, 0.05, -0.05]);
+    renderWaveform();
+    const spread = () => {
+      drawFrame();
+      const [top, bottom] = drawing.paths[0].points;
+      return bottom.y - top.y;
+    };
+    const first = spread();
+    for (let frame = 0; frame < 300; frame += 1) {
+      spread();
     }
+    const settled = spread();
+    expect(first).toBeLessThan(10);
+    expect(settled).toBeCloseTo(2 * 0.8 * 48 * 0.92, 1);
   });
 
   it('picks up the analyser the moment the engine has one, without a render', () => {
