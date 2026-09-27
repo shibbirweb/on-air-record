@@ -959,6 +959,79 @@ async fn a_seek_to_either_end_of_time_is_answered_and_the_stream_survives_it() {
     }
 }
 
+#[tokio::test]
+async fn the_recorder_meter_keeps_moving_while_a_listener_plays_a_recording() {
+    let server = serve(app("stream-meter-in-playback")).await;
+    let t0 = recent_start();
+    seed_recording(&server.app, &[steady(t0, 60, 20)]);
+    server.state().capture.pretend_recording(48_000, 100);
+    let mut client = connect(&server, None).await;
+    greeting(&mut client).await;
+
+    // A click on the timeline: this session now plays the recording, and live frames stop reaching it.
+    send(&mut client, json!({ "type": "seek", "timestampMs": t0 })).await;
+    assert_eq!(until_control(&mut client, "mode").await["mode"], "playback");
+
+    // The microphone goes on capturing, loudly, which the recorder card's meter must show.
+    let loud = live_frame(t0 + 120_000, 16_000);
+    let (rms, peak) = (f64::from(loud.rms), f64::from(loud.peak));
+    server.state().hub.publish(loud);
+    // A deadline of its own, since recorded audio keeps arriving and would otherwise keep the wait alive.
+    let level = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let level = until_control(&mut client, "level").await;
+            if (level["rms"].as_f64().expect("rms") - rms).abs() < 1e-6 {
+                break level;
+            }
+        }
+    })
+    .await
+    .expect("the microphone's level reached a listener playing a recording");
+    assert!((level["peak"].as_f64().expect("peak") - peak).abs() < 1e-6);
+    // And the recording still plays: the meter is extra, not instead.
+    assert!(!audio(&mut client).await.header.is_live());
+}
+
+#[tokio::test]
+async fn a_paused_listener_still_sees_the_microphone_level_while_recording() {
+    let server = serve(app("stream-meter-paused")).await;
+    server.state().capture.pretend_recording(48_000, 100);
+    let mut client = connect(&server, None).await;
+    greeting(&mut client).await;
+
+    send(&mut client, json!({ "type": "pause" })).await;
+    assert_eq!(until_control(&mut client, "mode").await["mode"], "paused");
+    let frame = live_frame(1_757_034_000_000, 9_000);
+    let rms = f64::from(frame.rms);
+    server.state().hub.publish(frame);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let level = until_control(&mut client, "level").await;
+            if (level["rms"].as_f64().expect("rms") - rms).abs() < 1e-6 {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the microphone's level reached a paused listener");
+}
+
+#[tokio::test]
+async fn no_level_is_sent_to_a_listener_in_a_recording_when_nothing_is_recording() {
+    let server = serve(app("stream-meter-idle")).await;
+    let t0 = recent_start();
+    seed_recording(&server.app, &[steady(t0, 60, 20)]);
+    let mut client = connect(&server, None).await;
+    greeting(&mut client).await;
+
+    send(&mut client, json!({ "type": "seek", "timestampMs": t0 })).await;
+    let heard = controls_within(&mut client, Duration::from_millis(500)).await;
+    assert!(
+        heard.iter().all(|message| message["type"] != "level"),
+        "with capture stopped there is no input to meter: {heard:?}"
+    );
+}
+
 // Control messages.
 
 #[tokio::test]

@@ -206,6 +206,13 @@ impl StreamSession {
         let frame_ms = effective_frame_ms(&state);
         let mut speed = 1.0f32;
         let mut ticker = playback_ticker(frame_ms, speed);
+        // The microphone's level for a listener who is not following live. The meter on the recorder
+        // card describes the input, not what this listener is hearing, and live frames, which carry the
+        // level otherwise, stop reaching a session that is playing a recording or paused.
+        let mut level_ticker = tokio::time::interval(std::time::Duration::from_millis(u64::from(
+            frame_ms.max(20),
+        )));
+        level_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         if !send_message(&mut sink, stream_info(&state, mode)).await {
             return;
@@ -233,6 +240,9 @@ impl StreamSession {
                 incoming = source.next() => Event::Incoming(incoming),
                 frame = receive_live(&mut live_rx), if mode == StreamMode::Live => Event::Live(frame),
                 _ = ticker.tick(), if mode == StreamMode::Playback => Event::Tick,
+                _ = level_ticker.tick(), if mode != StreamMode::Live && state.capture.is_active() => {
+                    Event::InputLevel
+                }
                 _ = access_check.tick() => Event::AccessCheck,
                 _ = presence.changed(), if may_watch => Event::Presence,
             };
@@ -270,6 +280,16 @@ impl StreamSession {
                         if !send_message(&mut sink, update).await {
                             break;
                         }
+                    }
+                }
+                Event::InputLevel => {
+                    let levels = state.hub.levels();
+                    let level = ServerMessage::Level {
+                        rms: levels.rms,
+                        peak: levels.peak,
+                    };
+                    if !send_message(&mut sink, level).await {
+                        break;
                     }
                 }
                 Event::Presence => {
@@ -432,6 +452,8 @@ enum Event {
     AccessCheck,
     /// Somebody arrived, left, or changed what they are doing.
     Presence,
+    /// Time to send the microphone's level to a session not following live.
+    InputLevel,
 }
 
 /// What a session is doing, for the listener list.
