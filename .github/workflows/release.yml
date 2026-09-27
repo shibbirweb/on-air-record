@@ -1,7 +1,8 @@
 # Builds a downloadable binary per platform and attaches it to a release.
 #
 # Each archive holds one executable with the web UI compiled into it, so running the service on a new
-# machine is download, extract, run.
+# machine is download, extract, run. The same release is also pushed as a container image for Linux
+# hosts, to ghcr.io, by the image jobs at the end.
 #
 # Releases are cut from the GitHub web interface: Releases, Draft a new release, pick or create the tag,
 # Publish. That publish is what starts this. Notes written there are kept. Notes left empty, or filled with
@@ -33,6 +34,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Lowercase, as registries insist, and matching IMAGE and DOCKER_HUB_IMAGE in
+  # frontend/src/lib/updateSteps.ts, which tell admins what to pull. ghcr.io is the one the docs lead with,
+  # because it has no pull rate limit; Docker Hub carries the same image for people who look there first.
+  IMAGE: ghcr.io/shibbirweb/on-air-record
+  DOCKERHUB_IMAGE: docker.io/shibbirweb/on-air-record
 
 jobs:
   # The version comes from the manifest, never from the tag. A tag is just a label somebody typed, and one
@@ -412,3 +418,187 @@ jobs:
           Write-Host ($health | ConvertTo-Json -Compress)
           if ($health.version -ne $env:RELEASE_VERSION) { throw "health reported the wrong version" }
           Write-Host 'release verified end to end on Windows'
+
+  # The container image, for Linux hosts. Built from the Dockerfile rather than from the binaries above, so
+  # `docker build` on a checkout makes exactly what is published. One native runner per architecture,
+  # because compiling Rust under emulation takes most of an hour. Each pushes its image by digest alone,
+  # with no tag, and the job after joins the two under the version's tags, so a half finished run never
+  # moves `latest` to an image for only one architecture.
+  #
+  # arm64 is here even though no arm64 archive is: a Raspberry Pi with a 64 bit OS gets a ready made build
+  # this way, where the archives would have it build from source.
+  #
+  # Docker Hub needs the DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets. Without them the image
+  # still goes to ghcr.io and the tagging job warns, so a release never fails over the second registry.
+  image:
+    name: image (${{ matrix.arch }})
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/login-action@v3
+        if: env.DOCKERHUB == 'true'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # One build pushed to both registries. The digest is the same in each, so the tagging job needs only
+      # the one list.
+      - name: Choose the registries
+        id: registries
+        run: |
+          if [ "$DOCKERHUB" = "true" ]; then
+            echo "names=$IMAGE,$DOCKERHUB_IMAGE" >> "$GITHUB_OUTPUT"
+          else
+            echo "names=$IMAGE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          labels: org.opencontainers.image.version=${{ needs.version.outputs.version }}
+          outputs: type=image,"name=${{ steps.registries.outputs.names }}",push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
+
+      - name: Keep the digest for the tagging job
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Tags follow the channels the installers have. `latest` is the newest stable release, what somebody who
+  # asks for nothing in particular should get. `beta` is the newest release of any kind, like --beta, so a
+  # stable release moves it too; that never steps back, because a stable release is only ever cut from a
+  # published beta of the same version. A stable release also gets its minor line, like 0.7, for anybody
+  # who wants fixes but not features.
+  image-tags:
+    name: image tags
+    needs: [version, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: image-digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/login-action@v3
+        if: env.DOCKERHUB == 'true'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tag both architectures under the version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -eu
+          case "$VERSION" in
+            *-*) tags="$VERSION beta" ;;
+            *) tags="$VERSION ${VERSION%.*} latest beta" ;;
+          esac
+          if [ "$DOCKERHUB" = "true" ]; then
+            images="$IMAGE $DOCKERHUB_IMAGE"
+          else
+            images="$IMAGE"
+            echo "::warning::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not set, so this release went to ghcr.io only, not Docker Hub."
+          fi
+          for image in $images; do
+            set --
+            for tag in $tags; do set -- "$@" --tag "$image:$tag"; done
+            for digest in "$RUNNER_TEMP"/digests/*; do set -- "$@" "$image@sha256:$(basename "$digest")"; done
+            docker buildx imagetools create "$@"
+            docker buildx imagetools inspect "$image:$VERSION"
+          done
+
+      # The same last word the verify job gives the archives: pull what was just published, the way a user
+      # would, and check it comes up as the version it is tagged as and knows it is in a container.
+      - name: Run the published image
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -eu
+          docker run -d --name on-air-record -p 8099:8080 "$IMAGE:$VERSION"
+          answered=0
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8099/api/health -o health.json 2>/dev/null; then answered=1; break; fi
+            sleep 1
+          done
+          if [ "$answered" -ne 1 ]; then
+            echo "the published image never answered"
+            docker logs on-air-record || true
+            exit 1
+          fi
+          cat health.json; echo
+          grep -q "\"version\":\"$VERSION\"" health.json || { echo "health reported the wrong version"; exit 1; }
+          curl -fsS http://127.0.0.1:8099/api/updates | grep -q '"kind":"docker"' \
+            || { echo "the image does not know it is a container, so admins would be told to run an installer"; exit 1; }
+          docker exec on-air-record on-air-record health
+          docker stop on-air-record > /dev/null
+          echo "image $IMAGE:$VERSION verified"
+
+      # Docker Hub has to hold the very same image, not merely one with the same tag: same manifest digest,
+      # and pulling it runs the version it is tagged as.
+      - name: Check Docker Hub serves the same image
+        if: env.DOCKERHUB == 'true'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -eu
+          ghcr="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{.Manifest.Digest}}')"
+          hub="$(docker buildx imagetools inspect "$DOCKERHUB_IMAGE:$VERSION" --format '{{.Manifest.Digest}}')"
+          echo "ghcr.io $ghcr, Docker Hub $hub"
+          [ "$ghcr" = "$hub" ] || { echo "the two registries hold different images under $VERSION"; exit 1; }
+          reported="$(docker run --rm "$DOCKERHUB_IMAGE:$VERSION" --version | awk '{print $2}')"
+          [ "$reported" = "$VERSION" ] || { echo "the Docker Hub image reports $reported"; exit 1; }
+          echo "image $DOCKERHUB_IMAGE:$VERSION verified"

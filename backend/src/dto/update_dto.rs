@@ -39,7 +39,7 @@ pub struct ReleaseDto {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallDto {
-    /// `installer`, `systemd` or `manual`.
+    /// `installer`, `systemd`, `docker` or `manual`.
     pub kind: &'static str,
     /// The installer folder, when there is one.
     pub dir: Option<String>,
@@ -67,6 +67,7 @@ impl From<UpdateStatus> for UpdateStatusResponse {
         let (kind, dir) = match status.install {
             InstallKind::Installer { dir } => ("installer", Some(dir)),
             InstallKind::Systemd => ("systemd", None),
+            InstallKind::Docker => ("docker", None),
             InstallKind::Manual => ("manual", None),
         };
         let releases: Vec<ReleaseDto> = status.newer.into_iter().map(Into::into).collect();

@@ -314,6 +314,27 @@ The stop scripts send TERM and wait, because shutdown closes and indexes the seg
 CI runs both installers on all three platforms, and `make install-preview` tries one locally under `/tmp`.
 `packaging/on-air-record.service` is the systemd unit.
 
+The `Dockerfile` at the root builds the same binary for Linux. `release.yml` pushes it to
+`ghcr.io/shibbirweb/on-air-record` for amd64 and arm64, and the same digests to Docker Hub
+(`shibbirweb/on-air-record`) when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets exist, skipping Docker
+Hub with a warning otherwise. Tags: the version and `beta`, and for stable also `latest` and the minor line.
+ghcr.io is the one the docs and update notices lead with, because Docker Hub rate limits anonymous pulls.
+Microphone passthrough is `/dev/snd` plus the host's audio GID via `group_add` (`packaging/compose.yaml`), so
+it is **Linux hosts only**; Docker Desktop has no sound hardware, and passthrough has never been tried with a
+real microphone, only checked in CI with a loopback card. The image sets `OAR_CONTAINER`, which makes the
+install kind `docker` so update notices say to pull rather than run an installer. It runs as uid 10001 and
+ships `tzdata` because days are local; keep both. Its `HEALTHCHECK` is `on-air-record health`
+(`health_probe.rs`), a std only HTTP probe of `/api/health` that opens no database; it reports liveness, not
+whether capture is running, on purpose. `make docker` builds it, and CI builds and runs it on every push.
+The GID is read from the devices (`stat -c %g /dev/snd/timer`), never looked up by the name `audio`, in the
+setup guide, the README, `compose.yaml`'s header and CI's passthrough step; change all four together. The
+guide's Docker section is built around the three things passthrough needs (device present, device allowed,
+group) and a symptom to fix table; keep a new failure mode in that table rather than in prose elsewhere.
+`audio/device_access.rs` diagnoses the same three from inside a container (EPERM versus EACCES on a control
+device, owner GIDs against `/proc/self/status`) and appends the fix to capture errors; a new row in the
+table that the service can detect belongs in its `diagnose` too. It must only ever open a control device,
+never a PCM one, so checking never takes the microphone.
+
 ## Docs and the wiki
 
 `docs/SETUP.md` and `docs/USER_GUIDE.md` are also published to the GitHub wiki on every push to master

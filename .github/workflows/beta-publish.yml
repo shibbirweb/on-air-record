@@ -83,6 +83,13 @@ jobs:
     name: build, attach and verify
     needs: publish
     if: needs.publish.outputs.tag != ''
+    # A called workflow gets no more than this job grants, and release.yml pushes the container image to
+    # GitHub Packages as well as attaching files to the release. It sees no secrets unless handed them,
+    # and needs the Docker Hub ones to push there too.
+    permissions:
+      contents: write
+      packages: write
     uses: ./.github/workflows/release.yml
+    secrets: inherit
     with:
       tag: ${{ needs.publish.outputs.tag }}

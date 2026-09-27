@@ -173,7 +173,8 @@ asks GitHub a minute after it starts and every six hours after, while `checkForU
 - `error` is why the last check failed, with the previous answer kept. `checkedAtMs` is `null` until the
   first check.
 - `install.kind` is `installer` (a folder with the installer's start script beside the program; `dir`
-  names it), `systemd` (started by systemd, detected by `INVOCATION_ID`), or `manual`. `target` is the
+  names it), `systemd` (started by systemd, detected by `INVOCATION_ID`), `docker` (the published
+  container image, which sets `OAR_CONTAINER`), or `manual`. `target` is the
   build's target triple, which names its release download.
 
 ### `POST /api/updates/check` (admin)

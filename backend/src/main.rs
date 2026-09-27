@@ -21,7 +21,7 @@ async fn main() {
     let command = args.command.take();
     let config = AppConfig::resolve(args);
 
-    // A maintenance command runs against the data directory and exits, without starting the service.
+    // A maintenance command, or the health probe, runs and exits without starting the service.
     if let Some(command) = command {
         if let Err(error) = cli::run(&config, command) {
             eprintln!("{error}");

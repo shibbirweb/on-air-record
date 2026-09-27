@@ -63,6 +63,26 @@ networks, or no other machine can listen.
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/shibbirweb/on-air-record/master/scripts/install.ps1))) -Port 9000
 ```
 
+### Docker, on Linux
+
+Each release is also published as an image for 64 bit Intel, AMD and ARM Linux, Raspberry Pi included, on
+`ghcr.io/shibbirweb/on-air-record` and on Docker Hub as `shibbirweb/on-air-record`.
+The host's sound cards are passed in with `/dev/snd`, so this needs a Linux host: Docker Desktop on macOS
+and Windows has no way to hand a container the microphone, so use the installers there. In an empty folder:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/shibbirweb/on-air-record/master/packaging/compose.yaml
+audio_gid="$(stat -c %g /dev/snd/timer)"
+zone="$(timedatectl show -p Timezone --value 2>/dev/null || readlink -f /etc/localtime | sed 's|.*/zoneinfo/||')"
+printf 'AUDIO_GID=%s\nTZ=%s\n' "$audio_gid" "$zone" > .env
+docker compose up -d
+```
+
+The `.env` file records the number of the group that owns the sound devices, which the container is given
+so it may open them, and the time zone recordings are filed by. Permissions are where this setup goes wrong
+if it does, so read [Docker on Linux](docs/SETUP.md#docker-on-linux) first: it has a check of the host
+before you start, a check that the container can hear, and a table matching each symptom to its fix.
+
 ### By hand
 
 A release build carries the web UI inside the executable, so there is one file to copy and nothing to
@@ -242,6 +262,9 @@ and the pitfalls. The short version:
 - **macOS**: use a per user LaunchAgent rather than a system LaunchDaemon. Microphone permission is granted
   to a logged in user, and a daemon has no user to have been granted it. Run the binary by hand once first
   so the permission prompt can appear.
+- **Docker, Linux only**: [packaging/compose.yaml](packaging/compose.yaml) restarts it with the host and
+  passes `/dev/snd` through. The container must be given the host's audio group number with `group_add`,
+  the container equivalent of the `usermod` above.
 
 ## Configuration
 
@@ -409,6 +432,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Release workflow producing macOS, Linux, and Windows artifacts
 - [x] Betas and stable releases started from Actions and published by workflows after their pull requests merge
 - [x] systemd unit template, with the Windows service wrapper documented
+- [x] Container image for Linux on amd64 and arm64, published to ghcr.io and Docker Hub with each release, a health check, and a compose file passing the host's sound cards through
 
 ### Milestone 7: access control
 
