@@ -292,10 +292,7 @@ fn a_recordings_folder_deleted_mid_segment_is_recreated_and_no_row_points_at_the
         .find_covering(T0 + 20_000)
         .expect("query")
         .expect("the segment after the deletion");
-    let path = store
-        .config
-        .resolve_segment_path(&latest.path)
-        .expect("inside the data directory");
+    let path = store.config.resolve_segment_path(&latest.path);
     assert!(path.is_file(), "recorded into a recreated folder");
 }
 

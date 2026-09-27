@@ -120,6 +120,8 @@ pub(super) struct Store {
     pub settings: Arc<SettingsService>,
     pub hub: Arc<BroadcastHub>,
     pub session_id: i64,
+    /// Held for its drop, which deletes the folder; only the Unix permission tests also call into it.
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub scratch: Scratch,
 }
 

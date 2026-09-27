@@ -221,15 +221,7 @@ impl PlaybackCursor {
         let wanted = samples_per_frame * open.segment.bytes_per_sample_frame();
         let read_len = wanted.min(available).max(0) as usize;
 
-        let Some(path) = self.config.resolve_segment_path(&open.segment.path) else {
-            tracing::warn!(
-                segment_id = open.segment.id,
-                path = open.segment.path,
-                "refusing to read a segment path that leaves the data directory"
-            );
-            self.advance_past_open_segment();
-            return Ok(Read::Lost { from_ms });
-        };
+        let path = self.config.resolve_segment_path(&open.segment.path);
         let bytes = match read_segment_bytes(&path, open.offset, read_len) {
             Ok(bytes) => bytes,
             Err(error) => {

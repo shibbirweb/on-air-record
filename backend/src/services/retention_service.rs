@@ -87,26 +87,16 @@ impl RetentionService {
             for segment in expired {
                 after = Some((segment.ended_at_ms, segment.id));
 
-                let reclaimed = match self.config.resolve_segment_path(&segment.path) {
-                    Some(path) => match std::fs::remove_file(&path) {
-                        Ok(()) => segment.byte_len,
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                            // Already gone. Removing the row is exactly the repair that is wanted.
-                            segment.byte_len
-                        }
-                        Err(error) => {
-                            tracing::warn!(%error, path = %path.display(), "could not delete an expired segment");
-                            continue;
-                        }
-                    },
-                    None => {
-                        // The row points outside the data directory, which the recorder never writes. It
-                        // is damage, so the row goes and whatever file it names is left alone.
-                        tracing::warn!(
-                            path = segment.path,
-                            "dropping an expired segment row whose path leaves the data directory"
-                        );
-                        0
+                let path = self.config.resolve_segment_path(&segment.path);
+                let reclaimed = match std::fs::remove_file(&path) {
+                    Ok(()) => segment.byte_len,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        // Already gone. Removing the row is exactly the repair that is wanted.
+                        segment.byte_len
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, path = %path.display(), "could not delete an expired segment");
+                        continue;
                     }
                 };
 

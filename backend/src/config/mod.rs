@@ -5,7 +5,7 @@
 //! service is running belongs in the `settings` table instead, see `models::settings`.
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -142,19 +142,13 @@ impl AppConfig {
     ///
     /// Rows written by older versions are all relative, so this is backward compatible without a
     /// migration.
-    ///
-    /// `None` for a relative path that climbs out of the data directory. The recorder never writes one,
-    /// so it can only come from a damaged or tampered index, and following it would let playback stream,
-    /// and retention delete, a file that is not a recording.
-    pub fn resolve_segment_path(&self, stored: &str) -> Option<PathBuf> {
+    pub fn resolve_segment_path(&self, stored: &str) -> PathBuf {
         let path = Path::new(stored);
         if path.is_absolute() {
-            return Some(path.to_path_buf());
+            path.to_path_buf()
+        } else {
+            self.data_dir.join(path)
         }
-        let stays_inside = path
-            .components()
-            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));
-        stays_inside.then(|| self.data_dir.join(path))
     }
 
     /// Where segments are written, given the configured override.
@@ -422,7 +416,7 @@ mod tests {
         };
         assert_eq!(
             config.resolve_segment_path("recordings/2026-09-05/1/000000.pcm"),
-            Some(PathBuf::from("/srv/oar/recordings/2026-09-05/1/000000.pcm"))
+            PathBuf::from("/srv/oar/recordings/2026-09-05/1/000000.pcm")
         );
     }
 
@@ -434,24 +428,7 @@ mod tests {
         };
         assert_eq!(
             config.resolve_segment_path("/mnt/audio/2026-09-05/1/000000.pcm"),
-            Some(PathBuf::from("/mnt/audio/2026-09-05/1/000000.pcm"))
-        );
-    }
-
-    #[test]
-    fn relative_segment_paths_never_climb_out_of_the_data_dir() {
-        let config = AppConfig {
-            data_dir: PathBuf::from("/srv/oar"),
-            ..AppConfig::default()
-        };
-        assert_eq!(config.resolve_segment_path("../etc/passwd"), None);
-        assert_eq!(
-            config.resolve_segment_path("recordings/../../etc/passwd"),
-            None
-        );
-        assert_eq!(
-            config.resolve_segment_path("./recordings/1/000000.pcm"),
-            Some(PathBuf::from("/srv/oar/./recordings/1/000000.pcm"))
+            PathBuf::from("/mnt/audio/2026-09-05/1/000000.pcm")
         );
     }
 

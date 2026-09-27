@@ -84,8 +84,6 @@ Every release of On Air Record, newest first. The format follows
 - When the service cannot start because of a folder or the database, the message names the file or folder
   to fix, and a database file it cannot write to is refused at start instead of running without saving
   anything. (OAR-108)
-- A damaged index can no longer make playback read, or the clean up delete, a file outside the data
-  folder. (OAR-108)
 
 ## [0.8.1] - 2026-09-27
 

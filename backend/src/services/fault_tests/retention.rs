@@ -7,7 +7,9 @@ use super::{seed_segment, SeedAt, Store, T0};
 use crate::app::AppState;
 use crate::audio::SegmentLayout;
 use crate::config::AppConfig;
-use crate::models::{SegmentDraft, SessionDraft};
+#[cfg(unix)]
+use crate::models::SegmentDraft;
+use crate::models::SessionDraft;
 use crate::repositories::BookmarkRepository;
 #[cfg(unix)]
 use crate::services::retention_service::BATCH_SIZE;
@@ -112,39 +114,6 @@ fn files_the_janitor_cannot_delete_do_not_stop_it_deleting_everything_after_them
         stuck as usize,
         "once the folder is writable again, the backlog clears"
     );
-    assert_eq!(store.segments.stats().expect("stats").segment_count, 0);
-}
-
-#[test]
-fn the_janitor_never_deletes_a_file_outside_the_data_directory() {
-    let store = Store::new("retention-escape");
-    let victim = store.scratch.root.join("precious.txt");
-    std::fs::write(&victim, b"not a recording").expect("victim");
-    store
-        .segments
-        .insert(&SegmentDraft {
-            session_id: store.session_id,
-            sequence: 0,
-            day: crate::util::day::local_day(T0),
-            path: "../precious.txt".to_string(),
-            started_at_ms: T0,
-            ended_at_ms: T0 + 1_000,
-            sample_rate: 48_000,
-            channels: 1,
-            byte_len: 15,
-            peaks: vec![0; 10],
-        })
-        .expect("a damaged row");
-
-    let report = janitor(&store).sweep_before(CUTOFF_MS).expect("sweep");
-
-    assert!(
-        victim.exists(),
-        "retention deleted a file that is not a recording"
-    );
-    // The row itself is the damage, and dropping it is the repair.
-    assert_eq!(report.segments_deleted, 1);
-    assert_eq!(report.bytes_reclaimed, 0);
     assert_eq!(store.segments.stats().expect("stats").segment_count, 0);
 }
 

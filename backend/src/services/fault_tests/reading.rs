@@ -192,41 +192,6 @@ fn more_missing_files_in_a_row_than_one_step_consults_are_a_gap_not_the_end_of_t
 }
 
 #[test]
-fn an_index_row_pointing_outside_the_data_directory_is_never_read() {
-    let store = Store::new("play-escape");
-    store.seed(0, T0, T0 + 1_000, 1_000);
-
-    // A file that is not a recording, next to the data directory, full of a recognisable value.
-    let secret = store.scratch.root.join("secret.pcm");
-    std::fs::write(&secret, 0x5a5au16.to_le_bytes().repeat(48_000)).expect("secret");
-    store
-        .segments
-        .insert(&SegmentDraft {
-            session_id: store.session_id,
-            sequence: 1,
-            day: crate::util::day::local_day(T0 + 1_000),
-            path: "../secret.pcm".to_string(),
-            started_at_ms: T0 + 1_000,
-            ended_at_ms: T0 + 2_000,
-            sample_rate: 48_000,
-            channels: 1,
-            byte_len: 96_000,
-            peaks: vec![0; 10],
-        })
-        .expect("a damaged row");
-
-    let heard = listen_from(&store, T0);
-
-    // The recorder only ever writes paths inside the data directory, or absolute ones inside a folder
-    // the operator chose, so a relative path climbing out of it can only be damage or tampering.
-    assert!(
-        frames(&heard).iter().all(|(_, level)| *level != 0x5a5a),
-        "a file outside the data directory was streamed as audio"
-    );
-    assert_eq!(gaps(&heard), vec![(T0 + 1_000, T0 + 2_000)]);
-}
-
-#[test]
 fn index_rows_with_impossible_formats_never_panic_or_spin() {
     let store = Store::new("play-impossible");
     let file = store.seed(0, T0, T0 + 1_000, 1_000);
