@@ -21,11 +21,25 @@ import type { AuthMode, CaptureState, ServiceStatus, UpdateStatus, User } from '
 const stream = vi.hoisted(() => ({
   engine: { name: 'the page engine' },
   playheadMs: () => 1_757_034_000_000,
+  /** How often the engine was set up and torn down, which would stop the broadcast and drop the socket. */
+  mounts: 0,
+  unmounts: 0,
 }));
 
-vi.mock('@/hooks/useStreamEngine', () => ({
-  useStreamEngine: () => stream,
-}));
+vi.mock('@/hooks/useStreamEngine', async () => {
+  const { useEffect } = await import('react');
+  return {
+    useStreamEngine: () => {
+      useEffect(() => {
+        stream.mounts += 1;
+        return () => {
+          stream.unmounts += 1;
+        };
+      }, []);
+      return stream;
+    },
+  };
+});
 
 const { AppShell, useAppContext } = await import('../AppShell');
 const { useAuthStore } = await import('@/store/useAuthStore');
@@ -190,6 +204,19 @@ describe('the app shell', () => {
 
       await user.click(controlRoomLink());
       expect(screen.getByText(/Control room page/)).toBeInTheDocument();
+    });
+
+    it('keeps the one audio engine through every move between pages, so playback never stops', async () => {
+      const user = userEvent.setup();
+      stream.mounts = 0;
+      stream.unmounts = 0;
+      renderShell('/');
+      await user.click(settingsLink() as HTMLElement);
+      await user.click(controlRoomLink());
+      await user.click(settingsLink() as HTMLElement);
+
+      expect(stream.mounts).toBe(1);
+      expect(stream.unmounts).toBe(0);
     });
   });
 

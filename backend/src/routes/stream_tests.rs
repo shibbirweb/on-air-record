@@ -1277,6 +1277,41 @@ async fn an_admin_made_a_listener_loses_the_listener_list_on_the_next_check() {
     until_control(&mut client, "pong").await;
 }
 
+/// CLAUDE.md: every write goes through `deliver`, which gives up after `SEND_TIMEOUT`. A client that
+/// vanished stops draining the socket, the buffers fill, and a bare send would then wait forever inside
+/// a branch of the loop that no timer can reach, keeping a ghost listener and its task alive.
+#[tokio::test(start_paused = true)]
+async fn a_client_that_stops_reading_is_dropped_once_a_send_has_waited_its_limit() {
+    let server = serve(app("stream-stuck-send")).await;
+    let mut client = connect(&server, None).await;
+    greeting(&mut client).await;
+    assert_eq!(server.state().listeners.count(), 1);
+
+    // One second frames, far more than the socket buffers hold, to a client that reads none of them.
+    let t0 = 1_757_034_000_000;
+    let started = tokio::time::Instant::now();
+    for index in 0..300 {
+        server.state().hub.publish(AudioFrame::from_samples(
+            t0 + index * 1_000,
+            48_000,
+            1,
+            vec![500; 48_000],
+            true,
+        ));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // In one second steps, so the paused clock never leaps past the session's end.
+    while server.state().listeners.count() > 0 {
+        assert!(
+            started.elapsed() < Duration::from_secs(40),
+            "still connected well past the send limit, and before the idle check at 45 s could end it"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    drop(client);
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_client_that_goes_silent_is_dropped_and_leaves_the_list() {
     let server = serve(app("stream-silent")).await;

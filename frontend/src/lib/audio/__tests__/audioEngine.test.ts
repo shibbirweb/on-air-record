@@ -344,6 +344,22 @@ describe('start', () => {
     expect(engine.running).toBe(true);
   });
 
+  it('starts the media element and the keeper before waiting on anything, inside the tap', async () => {
+    // Phones refuse media that begins after an await: the tap that asked for it is over by then.
+    const engine = new AudioEngine();
+    const starting = engine.start();
+    expect(output().playCalls).toBe(1);
+    expect(keeper()?.playCalls).toBe(1);
+    await starting;
+  });
+
+  it('never mutes the keeper clip, which browsers would then stop treating as media', async () => {
+    await started();
+    const clip = keeper() as unknown as { muted?: boolean; volume?: number };
+    expect(clip.muted).not.toBe(true);
+    expect(clip.volume).not.toBe(0);
+  });
+
   it('plays a looping silent keeper clip beside the element outside WebKit', async () => {
     await started();
     const clip = keeper();
