@@ -62,6 +62,7 @@ function status(state: CaptureState): ServiceStatus {
       deviceId: null,
       deviceName: null,
       sampleRate: 48_000,
+      deviceSampleRate: 48_000,
       channels: 1,
       frameMs: 100,
       startedAtMs: null,

@@ -37,6 +37,9 @@ Every release of On Air Record, newest first. The format follows
   typing. (OAR-108)
 - The success message after changing a password goes away when the next attempt fails, rather than
   showing beside the error. (OAR-108)
+- While recording at a lower bit rate, such as Telephone, the bit rate list in Settings offers every rate
+  the microphone can give again, not only Match the device and the rate in use; and the disk estimate for
+  Match the device uses the microphone's own rate. (OAR-108)
 - On Windows, the service no longer crashes some time after the list of microphones was shown, or when
   recording starts after it was. (OAR-108)
 - On a phone the control room fits the screen. The row of zoom buttons above the timeline did not wrap,

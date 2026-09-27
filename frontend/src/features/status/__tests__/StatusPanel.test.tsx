@@ -30,6 +30,7 @@ const RECORDING: Capture = {
   deviceId: 'usb-mic',
   deviceName: 'USB microphone',
   sampleRate: 48_000,
+  deviceSampleRate: 48_000,
   channels: 1,
   frameMs: 100,
   startedAtMs: NOW - (3_600_000 + 2 * 60_000 + 5_000),

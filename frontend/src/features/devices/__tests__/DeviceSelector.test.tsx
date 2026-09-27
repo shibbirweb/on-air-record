@@ -40,6 +40,7 @@ const CAPTURE: Capture = {
   deviceId: 'built-in',
   deviceName: 'MacBook Pro Microphone',
   sampleRate: 48_000,
+  deviceSampleRate: 48_000,
   channels: 1,
   frameMs: 100,
   startedAtMs: 0,

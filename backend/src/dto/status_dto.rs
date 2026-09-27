@@ -30,7 +30,10 @@ pub struct CaptureDto {
     pub session_id: Option<i64>,
     pub device_id: Option<String>,
     pub device_name: Option<String>,
+    /// The rate being recorded.
     pub sample_rate: u32,
+    /// The rate the microphone runs at, which the recording rates on offer go up to.
+    pub device_sample_rate: u32,
     pub channels: u16,
     pub frame_ms: u32,
     pub started_at_ms: Option<i64>,
@@ -46,6 +49,7 @@ impl From<CaptureSnapshot> for CaptureDto {
             device_id: snapshot.device_id,
             device_name: snapshot.device_name,
             sample_rate: snapshot.sample_rate,
+            device_sample_rate: snapshot.device_sample_rate,
             channels: snapshot.channels,
             frame_ms: snapshot.frame_ms,
             started_at_ms: snapshot.started_at_ms,
@@ -106,7 +110,8 @@ mod tests {
             session_id: Some(7),
             device_id: Some("usb".to_string()),
             device_name: Some("USB microphone".to_string()),
-            sample_rate: 48_000,
+            sample_rate: 16_000,
+            device_sample_rate: 48_000,
             channels: 1,
             frame_ms: 100,
             started_at_ms: Some(1_000),
@@ -119,7 +124,11 @@ mod tests {
         assert_eq!(json["sessionId"], 7);
         assert_eq!(json["deviceId"], "usb");
         assert_eq!(json["deviceName"], "USB microphone");
-        assert_eq!(json["sampleRate"], 48_000);
+        assert_eq!(json["sampleRate"], 16_000, "what is being recorded");
+        assert_eq!(
+            json["deviceSampleRate"], 48_000,
+            "what the microphone runs at"
+        );
         assert_eq!(json["channels"], 1);
         assert_eq!(json["frameMs"], 100);
         assert_eq!(json["startedAtMs"], 1_000);

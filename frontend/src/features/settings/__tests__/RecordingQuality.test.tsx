@@ -102,6 +102,17 @@ describe('the recording bit rate menu', () => {
     expect(screen.getByRole('option', { name: /^Telephone/ })).toBeInTheDocument();
   });
 
+  it('keeps offering every rate the microphone can give while recording at a lower one', async () => {
+    // Recording at Telephone quality: the recorder reports 8 kHz, the microphone still runs at 48 kHz.
+    // Offering only what lies under the recording rate trapped the choice at Telephone.
+    useSettingsStore.setState({ settings: { ...STORED, recordingSampleRate: 8_000 } });
+    useStatusStore.setState({ status: serviceStatus(8_000, 'recording', 48_000) });
+    await openMenu();
+    expect(screen.getAllByRole('option')).toHaveLength(6);
+    expect(screen.getByRole('option', { name: /^Full quality, 768 kbps/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /^Match the device/ })).toHaveTextContent('768 kbps');
+  });
+
   it('offers every rate while the microphone rate is unknown', async () => {
     useStatusStore.setState({ status: null });
     await openMenu();

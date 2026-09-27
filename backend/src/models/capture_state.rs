@@ -27,7 +27,11 @@ pub struct CaptureSnapshot {
     pub session_id: Option<i64>,
     pub device_id: Option<String>,
     pub device_name: Option<String>,
+    /// The rate being recorded, after the recording rate setting: what lands in segments and on the wire.
     pub sample_rate: u32,
+    /// The rate the microphone itself runs at, which the choice of recording rates is offered up to. Not
+    /// `sample_rate`: recording at 8 kHz from a 48 kHz device must still offer everything up to 48 kHz.
+    pub device_sample_rate: u32,
     pub channels: u16,
     pub frame_ms: u32,
     pub started_at_ms: Option<i64>,
@@ -43,6 +47,7 @@ impl Default for CaptureSnapshot {
             device_id: None,
             device_name: None,
             sample_rate: 0,
+            device_sample_rate: 0,
             channels: 0,
             frame_ms: 0,
             started_at_ms: None,

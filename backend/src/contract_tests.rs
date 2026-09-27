@@ -316,7 +316,9 @@ fn capture(state: CaptureState, running: bool) -> CaptureDto {
             session_id: Some(42),
             device_id: Some("Scarlett Solo USB".to_string()),
             device_name: Some("Scarlett Solo USB".to_string()),
-            sample_rate: 48_000,
+            // Recording below the device's own rate, so the two fields cannot be swapped unnoticed.
+            sample_rate: 16_000,
+            device_sample_rate: 48_000,
             channels: 1,
             frame_ms: 100,
             started_at_ms: Some(T0),
@@ -331,6 +333,7 @@ fn capture(state: CaptureState, running: bool) -> CaptureDto {
             device_id: None,
             device_name: None,
             sample_rate: 0,
+            device_sample_rate: 0,
             channels: 0,
             frame_ms: 100,
             started_at_ms: None,

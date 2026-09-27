@@ -114,6 +114,7 @@ impl CaptureService {
     pub(crate) fn pretend_recording(&self, sample_rate: u32, frame_ms: u32) {
         let mut snapshot = self.stored_snapshot();
         snapshot.sample_rate = sample_rate;
+        snapshot.device_sample_rate = sample_rate;
         snapshot.channels = 1;
         snapshot.frame_ms = frame_ms;
         self.write_snapshot(snapshot);
@@ -203,6 +204,7 @@ impl CaptureService {
             device_id: Some(runtime.device_id),
             device_name: Some(runtime.device_name),
             sample_rate: runtime.sample_rate,
+            device_sample_rate: runtime.source_sample_rate,
             channels: runtime.channels,
             frame_ms: runtime.frame_ms,
             started_at_ms: Some(started_at_ms),

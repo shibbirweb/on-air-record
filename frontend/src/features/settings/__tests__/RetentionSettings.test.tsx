@@ -254,6 +254,18 @@ describe('the retention settings card', () => {
       expect(screen.getByText(/at 32 kB per second of uncompressed audio/)).toBeInTheDocument();
     });
 
+    it('projects Match the device at the microphone rate while recording at a lower one', () => {
+      // Recording at 8 kHz from a 48 kHz microphone, and choosing to match the device again.
+      useSettingsStore.setState({
+        settings: { ...STORED, recordingSampleRate: 8_000 },
+        draft: { recordingSampleRate: null },
+      });
+      useStatusStore.setState({ status: serviceStatus(8_000, 'recording', 48_000) });
+      render(<RetentionSettings />);
+      expect(figure('Recording rate')).toHaveTextContent('329.6 MB per hour');
+      expect(screen.getByText(/at 96 kB per second of uncompressed audio/)).toBeInTheDocument();
+    });
+
     it('falls back to the rate the server reports while the microphone rate is unknown', () => {
       useStatusStore.setState({ status: null });
       useStorageStore.setState({ storage: storageUsage(0, 24_000 * 2 * 3600) });

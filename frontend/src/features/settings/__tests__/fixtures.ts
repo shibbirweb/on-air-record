@@ -26,6 +26,7 @@ export const STORED: Settings = {
 export function serviceStatus(
   sampleRate: number,
   state: ServiceStatus['capture']['state'] = 'recording',
+  deviceSampleRate: number = sampleRate,
 ): ServiceStatus {
   return {
     capture: {
@@ -34,6 +35,7 @@ export function serviceStatus(
       deviceId: 'mic',
       deviceName: 'USB microphone',
       sampleRate,
+      deviceSampleRate,
       channels: 1,
       frameMs: 100,
       startedAtMs: state === 'recording' ? 1_757_000_000_000 : null,

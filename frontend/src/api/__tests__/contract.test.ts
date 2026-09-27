@@ -74,6 +74,7 @@ const captureShape: Shape<Capture> = {
   deviceId: { nullable: 'string' },
   deviceName: { nullable: 'string' },
   sampleRate: 'number',
+  deviceSampleRate: 'number',
   channels: 'number',
   frameMs: 'number',
   startedAtMs: { nullable: 'number' },

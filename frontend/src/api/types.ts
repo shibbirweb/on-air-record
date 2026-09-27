@@ -13,7 +13,13 @@ export type Capture = {
   sessionId: number | null;
   deviceId: string | null;
   deviceName: string | null;
+  /** The rate being recorded, after the recording rate setting. */
   sampleRate: number;
+  /**
+   * The rate the microphone itself runs at, which the recording rates on offer go up to. Not `sampleRate`:
+   * recording at 8 kHz from a 48 kHz device must still offer everything up to 48 kHz.
+   */
+  deviceSampleRate: number;
   channels: number;
   frameMs: number;
   startedAtMs: number | null;

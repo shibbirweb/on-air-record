@@ -56,7 +56,8 @@ export function RetentionSettings() {
   const draft = useSettingsStore((state) => state.draft);
   const edit = useSettingsStore((state) => state.edit);
   const storage = useStorageStore((state) => state.storage);
-  const deviceRate = useStatusStore((state) => state.status?.capture.sampleRate ?? 0);
+  // What "Match the device" records at: the microphone's own rate, whatever is being recorded now.
+  const deviceRate = useStatusStore((state) => state.status?.capture.deviceSampleRate ?? 0);
 
   /**
    * Both overrides mean "the person is driving now"; `null` means follow the stored setting. Deriving the

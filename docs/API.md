@@ -244,6 +244,7 @@ The one call the UI polls for the state of the world.
     "deviceId": "MacBook Pro Microphone",
     "deviceName": "MacBook Pro Microphone",
     "sampleRate": 48000,
+    "deviceSampleRate": 48000,
     "channels": 1,
     "frameMs": 100,
     "startedAtMs": 1757030400000,
@@ -257,7 +258,10 @@ The one call the UI polls for the state of the world.
 }
 ```
 
-`capture.state` is one of `idle`, `starting`, `recording`, or `error`. `listeners` counts every open stream
+`capture.state` is one of `idle`, `starting`, `recording`, or `error`. `capture.sampleRate` is the rate
+being recorded, after the recording rate setting; `capture.deviceSampleRate` is the rate the microphone
+itself runs at, which is what the recording rates on offer go up to. They differ when a lower rate is set.
+Both are `0` before the first capture. `listeners` counts every open stream
 socket, whether it is following the live feed, playing back history, or paused.
 
 `capture.error` is why capture failed when `state` is `error`. While `state` is `recording` it is set when
