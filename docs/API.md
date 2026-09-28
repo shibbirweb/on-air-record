@@ -229,6 +229,63 @@ on-air-record auth reset-2fa owner@example.com         # two factor sign in off 
 on-air-record auth disable                            # accounts off, every account deleted
 ```
 
+Each is written to the activity log as done by the host, with no address.
+
+### `GET /api/activity` (admin)
+
+The activity log, newest first: every sign in and sign out, failed attempts, changes to accounts, listening
+sessions, downloads, and changes to the recorder. Admin only, like the account list, because it says who
+signed in from where and what they listened to. The scrape token does not open it.
+
+Query, every field optional:
+
+| Field | Meaning |
+| --- | --- |
+| `limit` | Entries in the page, 50 when left out, at most 200 |
+| `beforeId` | Only entries older than this id, for the next page. Paging by id rather than by page number means entries logged while somebody reads never shift the next page |
+| `email` | Only what this account did, however the email is cased |
+| `group` | `access` (signing in and out), `accounts`, `listening` or `recorder`. Any other word is refused with `400` |
+| `fromMs`, `toMs` | Only entries in this span, both ends included |
+
+```json
+{
+  "entries": [
+    {
+      "id": 42,
+      "atMs": 1757030400000,
+      "actor": { "kind": "account", "userId": 2, "email": "kitchen@example.com" },
+      "address": "192.168.1.20",
+      "userAgent": "Mozilla/5.0 (iPad)",
+      "event": {
+        "kind": "listened",
+        "startedAtMs": 1757029800000,
+        "connectedMs": 600000,
+        "playedMs": 540000,
+        "playedBack": true,
+        "earliestMs": 1757020000000
+      }
+    }
+  ]
+}
+```
+
+`actor.kind` is `account` (with the email as it was then, so the log still names a removed account),
+`guest` (nobody signed in, or an open recorder), or `host` (a recovery command). `address` is the
+connection's, so behind a reverse proxy it is the proxy's. `event.kind` is one of:
+
+| Group | Kinds and their details |
+| --- | --- |
+| `access` | `signed_in` (`method`: `password`, `code` or `recovery_code`), `sign_in_failed` (`email`: what was typed when it looked like an email, else `null`), `second_factor_failed`, `sign_in_blocked` (`email`), `signed_out` |
+| `accounts` | `accounts_set_up`, `stayed_open`, `password_changed`, `two_factor_enabled`, `two_factor_disabled`, `recovery_codes_replaced`, `account_created` (`email`, `role`), `account_removed` (`email`), `role_changed` (`email`, `from`, `to`), `password_set` (`email`), `two_factor_removed` (`email`), `accounts_disabled` |
+| `listening` | `listened` (as above, one entry per stream when it closes, however it closes; `playedMs` is what the page reported playing), `exported` (`fromMs`, `toMs`) |
+| `recorder` | `capture_started`, `capture_stopped`, `device_selected` (`deviceId`, `null` for the default), `settings_changed` (`changes`: `key`, `from`, `to` for each setting a save changed), `settings_reset`, `bookmark_added` (`label`, `timestampMs`), `bookmark_removed` (`label`), `metrics_token_created` (`replaced`), `metrics_token_revoked` |
+
+An entry is written only once the action has happened, so a refused request leaves nothing. No entry ever
+holds a password, a code, a token or a cookie; the event types have nowhere to put one. Writing the log
+never fails the action it records: if the database refuses the entry, the action still succeeds and the
+service logs a warning. Nothing in the API edits or deletes an entry; they leave only by the
+`activityRetentionDays` window.
+
 ## Service
 
 ### `GET /api/health`
@@ -330,7 +387,8 @@ a new recording session because the sample rate may differ. Returns the status b
   "autoStartDelaySeconds": 0,
   "frameMs": 100,
   "checkForUpdates": true,
-  "soundSensitivity": "medium"
+  "soundSensitivity": "medium",
+  "activityRetentionDays": 90
 }
 ```
 
@@ -353,6 +411,7 @@ Accepts any subset of the settings object and returns the full updated object.
 | `frameMs` | integer | 20 to 500 | On next capture start |
 | `checkForUpdates` | boolean | | On the next scheduled check. Whether the service asks GitHub every six hours for a newer release; see `GET /api/updates` |
 | `soundSensitivity` | string | `low`, `medium`, `high` | Immediately, for the next sounds request. How far above each room's own background a moment must rise to count as a sound; see `GET /api/timeline/sounds`. Any other word is refused |
+| `activityRetentionDays` | integer | 1 to 3650 | On next janitor pass. How long the activity log keeps an entry, on its own window: keeping recordings forever does not keep the log forever; see `GET /api/activity` |
 
 ### `GET /api/settings/defaults`
 

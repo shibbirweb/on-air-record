@@ -132,6 +132,27 @@ keep `a_wavering_background_is_not_a_sound_at_any_sensitivity`. `TimelineService
 scans a day at a time. The frontend only draws and seeks; with nothing playing or cued, the buttons search
 from the timeline's left edge unless it is following live.
 
+### The activity log
+
+`services/activity_service.rs` writes who did what, when and from where, and admins read it at
+`GET /api/activity` (in the guard's admin exceptions; the scrape token never opens it). Rules that keep it
+trustworthy:
+
+- **Record after the action succeeds**, in the controller, never before, so a refused request leaves
+  nothing claiming it worked. Read what the entry needs to name (an email, a label, the old role) before a
+  delete. `routes/activity_tests.rs` has a case per event and a refused case beside the ones that matter.
+- **Never a secret.** Each `ActivityEvent` variant carries only the details it needs, so there is nowhere
+  to put a password, code or token; a failed sign in keeps the typed email only through `attempted_email`,
+  so a password typed into the email box is dropped. `no_password_code_token_or_cookie_ever_reaches_the_log`
+  scans the whole log after a day's worth of secrets; add any new secret the API handles to it.
+- **Writing never fails the action**: `record` returns nothing and warns on failure.
+- **Listening is one entry per stream, on `Drop`** (`ListeningRecord` in `ws/session.rs`), fed by the same
+  top of loop report as the listener list, so every way a session ends is logged and seeks cost nothing.
+- **Append only.** Nothing edits or deletes an entry but the janitor, on `activityRetentionDays`, pruned
+  even while recordings are kept forever.
+- A new kind of event is a variant, a row in `KINDS`, a case in `every_event` (the exhaustive match forces
+  it), a sentence in `frontend/src/lib/activityText.ts`, and a regenerated contract.
+
 ### Update notices
 
 `services/update_service.rs` asks GitHub for the releases list a minute after start and every six hours,

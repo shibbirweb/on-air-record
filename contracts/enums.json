@@ -1,4 +1,40 @@
 {
+  "activityGroup": [
+    "access",
+    "accounts",
+    "listening",
+    "recorder"
+  ],
+  "activityKind": [
+    "signed_in",
+    "sign_in_failed",
+    "second_factor_failed",
+    "sign_in_blocked",
+    "signed_out",
+    "accounts_set_up",
+    "stayed_open",
+    "password_changed",
+    "two_factor_enabled",
+    "two_factor_disabled",
+    "recovery_codes_replaced",
+    "account_created",
+    "account_removed",
+    "role_changed",
+    "password_set",
+    "two_factor_removed",
+    "accounts_disabled",
+    "listened",
+    "exported",
+    "capture_started",
+    "capture_stopped",
+    "device_selected",
+    "settings_changed",
+    "settings_reset",
+    "bookmark_added",
+    "bookmark_removed",
+    "metrics_token_created",
+    "metrics_token_revoked"
+  ],
   "authMode": [
     "undecided",
     "open",
@@ -28,6 +64,11 @@
   "role": [
     "admin",
     "listener"
+  ],
+  "signInMethod": [
+    "password",
+    "code",
+    "recovery_code"
   ],
   "soundSensitivity": [
     "low",

@@ -35,6 +35,7 @@ use serde_json::{json, Value};
 
 use crate::audio::activity::Sound;
 use crate::audio::{build_encoder, FrameFormat};
+use crate::dto::activity_dto::{ActivityEntryDto, ActivityListQuery, ActivityListResponse};
 use crate::dto::session_dto::StorageContext;
 use crate::dto::timeline_dto::DirectionParam;
 use crate::dto::update_dto::{InstallDto, ReleaseDto};
@@ -51,6 +52,7 @@ use crate::dto::{
     UpdateStatusResponse, UpdateUserRequest, UserDto, UserListResponse,
 };
 use crate::error::AppError;
+use crate::models::activity::{ActivityEvent, ActivityGroup, Actor, SignInMethod};
 use crate::models::update::{Channel, InstallKind, Release};
 use crate::models::{
     AudioFrame, AuthMode, Bookmark, CaptureSnapshot, CaptureState, InputDevice, LevelSnapshot,
@@ -477,6 +479,7 @@ async fn rest_responses() -> Examples {
                 effective_recordings_dir: "/srv/recordings".to_string(),
                 check_for_updates: true,
                 sound_sensitivity: SoundSensitivity::High,
+                activity_retention_days: 30,
             }),
             wire(SettingsDto {
                 input_device_id: None,
@@ -491,8 +494,52 @@ async fn rest_responses() -> Examples {
                 effective_recordings_dir: "/var/lib/on-air-record/recordings".to_string(),
                 check_for_updates: false,
                 sound_sensitivity: SoundSensitivity::Medium,
+                activity_retention_days: 90,
             }),
         ],
+    );
+
+    // Every kind of event, by every kind of actor, with and without an address and a browser, so each
+    // detail's shape and every nullable field is on record for the frontend's union type.
+    let actors = [
+        Actor::Account {
+            user_id: 1,
+            email: "owner@example.com".to_string(),
+        },
+        Actor::Guest,
+        Actor::Host,
+    ];
+    add(
+        "activityList",
+        vec![wire(ActivityListResponse {
+            entries: crate::models::activity::every_event()
+                .into_iter()
+                // Each nullable detail the other way round from `every_event`, so both are on record.
+                .chain([
+                    ActivityEvent::SignInFailed { email: None },
+                    ActivityEvent::SignInBlocked {
+                        email: Some("owner@example.com".to_string()),
+                    },
+                    ActivityEvent::DeviceSelected { device_id: None },
+                    ActivityEvent::Listened {
+                        started_at_ms: T0,
+                        connected_ms: 60_000,
+                        played_ms: 0,
+                        played_back: false,
+                        earliest_ms: None,
+                    },
+                ])
+                .enumerate()
+                .map(|(index, event)| ActivityEntryDto {
+                    id: 100 - index as i64,
+                    at_ms: T0 - index as i64 * 60_000,
+                    actor: actors[index % actors.len()].clone(),
+                    address: (index % 2 == 0).then(|| "192.168.1.20".to_string()),
+                    user_agent: (index % 2 == 0).then(|| "Mozilla/5.0 (iPad)".to_string()),
+                    event,
+                })
+                .collect(),
+        })],
     );
 
     add(
@@ -979,6 +1026,30 @@ fn words<T: Serialize>(values: Vec<T>) -> Vec<Value> {
 #[test]
 fn contract_enums() {
     let mut examples = Examples::new();
+    examples.insert(
+        "activityGroup".to_string(),
+        words(vec![
+            ActivityGroup::Access,
+            ActivityGroup::Accounts,
+            ActivityGroup::Listening,
+            ActivityGroup::Recorder,
+        ]),
+    );
+    examples.insert(
+        "activityKind".to_string(),
+        crate::models::activity::every_event()
+            .iter()
+            .map(|event| Value::String(event.kind().to_string()))
+            .collect(),
+    );
+    examples.insert(
+        "signInMethod".to_string(),
+        words(vec![
+            SignInMethod::Password,
+            SignInMethod::Code,
+            SignInMethod::RecoveryCode,
+        ]),
+    );
     examples.insert("authMode".to_string(), words(every_auth_mode()));
     examples.insert("captureState".to_string(), words(every_capture_state()));
     examples.insert("channel".to_string(), words(every_channel()));
@@ -1257,7 +1328,14 @@ const BODY_CALLS: [&str; 15] = [
 ];
 
 /// Every `api` method that sends its arguments in a query string.
-const QUERY_CALLS: [&str; 5] = ["exportPlan", "exportUrl", "nextSound", "peaks", "sounds"];
+const QUERY_CALLS: [&str; 6] = [
+    "activity",
+    "exportPlan",
+    "exportUrl",
+    "nextSound",
+    "peaks",
+    "sounds",
+];
 
 /// A field the frontend sends as a value or as `null`, which the server reads into a nested option so
 /// that `null` means "clear it" and absence means "leave it alone".
@@ -1385,6 +1463,10 @@ fn check_body(call: &str, body: &Value, read: &mut BTreeSet<String>) {
                 request.sound_sensitivity.map(wire),
                 body.get("soundSensitivity").cloned()
             );
+            assert_eq!(
+                request.activity_retention_days.map(u64::from),
+                body.get("activityRetentionDays").and_then(Value::as_u64)
+            );
         }
         other => panic!(
             "requests.json has a body for `api.{other}`, which this test does not know: add it to \
@@ -1453,6 +1535,18 @@ fn check_query(call: &str, path: &str, fields: &Value, read: &mut BTreeSet<Strin
             };
             let direction: DirectionParam = parsed.direction;
             assert_eq!(SeekDirection::from(direction), expected);
+        }
+        "activity" => {
+            assert_eq!(path, "/activity");
+            let parsed: ActivityListQuery = query(call, path, fields, read);
+            let optional_int = |key: &str| fields.get(key).and_then(Value::as_i64);
+            assert_eq!(parsed.before_id, optional_int("beforeId"));
+            assert_eq!(parsed.limit.map(i64::from), optional_int("limit"));
+            assert_eq!(parsed.email.as_deref(), optional_text(fields, "email"));
+            assert_eq!(parsed.group.as_deref(), optional_text(fields, "group"));
+            assert_eq!(parsed.from_ms, optional_int("fromMs"));
+            assert_eq!(parsed.to_ms, optional_int("toMs"));
+            parsed.parsed().expect("a query the route accepts");
         }
         "exportPlan" | "exportUrl" => {
             let parsed: ExportQuery = query(call, path, fields, read);

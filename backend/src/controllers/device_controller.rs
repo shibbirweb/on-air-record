@@ -3,11 +3,13 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::Json;
+use axum::{Extension, Json};
 
 use crate::app::AppState;
+use crate::controllers::auth_context::{Caller, RequestOrigin};
 use crate::dto::{DeviceDto, DeviceListResponse, SelectDeviceRequest, StatusResponse};
 use crate::error::AppResult;
+use crate::models::activity::ActivityEvent;
 
 /// `GET /api/devices`
 pub async fn list(State(state): State<Arc<AppState>>) -> AppResult<Json<DeviceListResponse>> {
@@ -26,8 +28,16 @@ pub async fn list(State(state): State<Arc<AppState>>) -> AppResult<Json<DeviceLi
 /// `POST /api/devices/select`
 pub async fn select(
     State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    RequestOrigin(origin): RequestOrigin,
     Json(request): Json<SelectDeviceRequest>,
 ) -> AppResult<Json<StatusResponse>> {
+    let device_id = request.device_id.clone();
     state.devices.select(request.device_id).await?;
+    state.activity.record(
+        caller.actor(),
+        &origin,
+        ActivityEvent::DeviceSelected { device_id },
+    );
     Ok(Json(StatusResponse::from_state(&state)))
 }

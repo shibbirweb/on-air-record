@@ -25,7 +25,7 @@ import type { AnyShape, Json, Shape } from '@/test/contract';
 
 import { api } from '../client';
 import { StreamSocket } from '../streamSocket';
-import type { ClientMessage, PlayerState, Role, SettingsPatch } from '../types';
+import type { ActivityFilter, ClientMessage, PlayerState, Role, SettingsPatch } from '../types';
 
 type ClientMessageShapes = { [M in ClientMessage as M['type']]: Shape<M> };
 
@@ -51,6 +51,7 @@ const settingsPatchShape: Shape<SettingsPatch> = {
   recordingsDir: { nullable: 'string' },
   checkForUpdates: 'boolean',
   soundSensitivity: 'string',
+  activityRetentionDays: 'number',
 };
 
 type BookmarkPatch = NonNullable<Parameters<typeof api.updateBookmark>[1]>;
@@ -91,6 +92,7 @@ const payloads: Record<keyof typeof api, 'body' | 'query' | 'none'> = {
   settingsDefaults: 'none',
   updates: 'none',
   checkForUpdates: 'none',
+  activity: 'query',
   metricsToken: 'none',
   createMetricsToken: 'none',
   revokeMetricsToken: 'none',
@@ -164,6 +166,7 @@ const bodyCalls: Record<string, (body: Json, path: string) => Promise<unknown>> 
 
 /** Each `api` method that sends a query string, called with the fixture's own values. */
 const queryCalls: Record<string, (query: Record<string, string | number>) => unknown> = {
+  activity: (query) => api.activity(query as ActivityFilter),
   peaks: (query) => api.peaks(number(query, 'fromMs'), number(query, 'toMs'), number(query, 'buckets')),
   sounds: (query) => api.sounds(number(query, 'fromMs'), number(query, 'toMs')),
   nextSound: (query) =>

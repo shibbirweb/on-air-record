@@ -54,6 +54,7 @@ const CARDS = [
   'Updates',
   'Access',
   'Monitoring',
+  'Activity log',
 ];
 
 describe('the settings page', () => {

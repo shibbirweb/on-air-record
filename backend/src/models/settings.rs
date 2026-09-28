@@ -18,6 +18,7 @@ pub const KEY_RECORDINGS_DIR: &str = "recordings_dir";
 pub const KEY_RECORDING_SAMPLE_RATE: &str = "recording_sample_rate";
 pub const KEY_CHECK_FOR_UPDATES: &str = "check_for_updates";
 pub const KEY_SOUND_SENSITIVITY: &str = "sound_sensitivity";
+pub const KEY_ACTIVITY_RETENTION_DAYS: &str = "activity_retention_days";
 
 /// Sample rates the recorder will downmix to, highest first.
 ///
@@ -40,6 +41,9 @@ pub const FRAME_MS_RANGE: (u32, u32) = (20, 500);
 /// Ten minutes is far longer than any USB interface takes to enumerate. A delay beyond that is more
 /// likely a typo than a plan, and would leave a freshly booted recorder silently idle for too long.
 pub const AUTO_START_DELAY_SECONDS_RANGE: (u32, u32) = (0, 600);
+/// A day at least, so yesterday's sign ins are always there to look at, and ten years at most. There is no
+/// "forever": the log grows with every sign in and listening session, and a window keeps it bounded.
+pub const ACTIVITY_RETENTION_DAYS_RANGE: (u32, u32) = (1, 3_650);
 
 /// How far above the room's own background a sound has to rise before the timeline calls it a sound.
 ///
@@ -107,6 +111,9 @@ pub struct Settings {
     pub check_for_updates: bool,
     /// How readily the timeline marks a moment as a sound, for finding them and jumping between them.
     pub sound_sensitivity: SoundSensitivity,
+    /// How long the activity log keeps an entry. Separate from the recordings' window: who signed in is
+    /// often worth keeping longer than what the microphone heard.
+    pub activity_retention_days: u32,
 }
 
 impl Default for Settings {
@@ -123,6 +130,7 @@ impl Default for Settings {
             recordings_dir: None,
             check_for_updates: true,
             sound_sensitivity: SoundSensitivity::Medium,
+            activity_retention_days: 90,
         }
     }
 }
@@ -168,6 +176,10 @@ impl Settings {
                 .get(KEY_SOUND_SENSITIVITY)
                 .and_then(|value| SoundSensitivity::parse(value))
                 .unwrap_or(defaults.sound_sensitivity),
+            activity_retention_days: parse_u32(
+                pairs.get(KEY_ACTIVITY_RETENTION_DAYS),
+                defaults.activity_retention_days,
+            ),
         }
         .clamped()
     }
@@ -216,6 +228,10 @@ impl Settings {
                 KEY_SOUND_SENSITIVITY.to_string(),
                 self.sound_sensitivity.as_str().to_string(),
             ),
+            (
+                KEY_ACTIVITY_RETENTION_DAYS.to_string(),
+                self.activity_retention_days.to_string(),
+            ),
         ]
     }
 
@@ -238,6 +254,10 @@ impl Settings {
             AUTO_START_DELAY_SECONDS_RANGE.1,
         );
         self.recording_sample_rate = self.recording_sample_rate.map(nearest_supported_rate);
+        self.activity_retention_days = self.activity_retention_days.clamp(
+            ACTIVITY_RETENTION_DAYS_RANGE.0,
+            ACTIVITY_RETENTION_DAYS_RANGE.1,
+        );
         self
     }
 
@@ -256,6 +276,11 @@ impl Settings {
     /// How long the janitor keeps material, in milliseconds, or `None` to keep it forever.
     pub fn retention_ms(&self) -> Option<i64> {
         self.retention_hours.map(|hours| hours as i64 * 3_600_000)
+    }
+
+    /// How long the activity log keeps an entry, in milliseconds.
+    pub fn activity_retention_ms(&self) -> i64 {
+        i64::from(self.activity_retention_days) * 86_400_000
     }
 
     /// True when nothing is ever pruned.
@@ -286,6 +311,7 @@ pub struct SettingsPatch {
     pub recordings_dir: Option<Option<String>>,
     pub check_for_updates: Option<bool>,
     pub sound_sensitivity: Option<SoundSensitivity>,
+    pub activity_retention_days: Option<u32>,
 }
 
 impl SettingsPatch {
@@ -301,6 +327,7 @@ impl SettingsPatch {
             && self.recordings_dir.is_none()
             && self.check_for_updates.is_none()
             && self.sound_sensitivity.is_none()
+            && self.activity_retention_days.is_none()
     }
 
     /// Apply the patch to `base` and return the clamped result.
@@ -330,6 +357,9 @@ impl SettingsPatch {
         }
         if let Some(sound_sensitivity) = self.sound_sensitivity {
             updated.sound_sensitivity = sound_sensitivity;
+        }
+        if let Some(activity_retention_days) = self.activity_retention_days {
+            updated.activity_retention_days = activity_retention_days;
         }
         if let Some(auto_start_delay_seconds) = self.auto_start_delay_seconds {
             updated.auto_start_delay_seconds = auto_start_delay_seconds;
@@ -401,6 +431,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_activity_log_keeps_ninety_days_unless_told_otherwise() {
+        let settings = Settings::default();
+        assert_eq!(settings.activity_retention_days, 90);
+        assert_eq!(settings.activity_retention_ms(), 90 * 86_400_000);
+        assert_eq!(
+            Settings::from_pairs(&HashMap::new()).activity_retention_days,
+            90
+        );
+    }
+
+    #[test]
+    fn the_activity_window_is_stored_read_back_and_kept_in_range() {
+        let settings = Settings {
+            activity_retention_days: 30,
+            ..Settings::default()
+        };
+        let pairs: HashMap<String, String> = settings.to_pairs().into_iter().collect();
+        assert_eq!(
+            pairs.get(KEY_ACTIVITY_RETENTION_DAYS).map(String::as_str),
+            Some("30")
+        );
+        assert_eq!(Settings::from_pairs(&pairs).activity_retention_days, 30);
+
+        for (stored, kept) in [("0", 1), ("99999", 3_650), ("soon", 90)] {
+            let pairs =
+                HashMap::from([(KEY_ACTIVITY_RETENTION_DAYS.to_string(), stored.to_string())]);
+            assert_eq!(
+                Settings::from_pairs(&pairs).activity_retention_days,
+                kept,
+                "{stored}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_patch_changes_the_activity_window_and_nothing_else() {
+        let patch = SettingsPatch {
+            activity_retention_days: Some(7),
+            ..SettingsPatch::default()
+        };
+        assert!(!patch.is_empty());
+        let updated = patch.apply_to(&Settings::default());
+        assert_eq!(updated.activity_retention_days, 7);
+        assert_eq!(
+            Settings {
+                activity_retention_days: 90,
+                ..updated
+            },
+            Settings::default()
+        );
+        let clamped = SettingsPatch {
+            activity_retention_days: Some(0),
+            ..SettingsPatch::default()
+        }
+        .apply_to(&Settings::default());
+        assert_eq!(clamped.activity_retention_days, 1);
+    }
+
+    #[test]
     fn round_trips_through_pairs() {
         let settings = Settings {
             input_device_id: Some("Scarlett Solo USB".to_string()),
@@ -414,6 +503,7 @@ mod tests {
             recordings_dir: Some("/mnt/audio".to_string()),
             check_for_updates: false,
             sound_sensitivity: crate::models::SoundSensitivity::High,
+            activity_retention_days: 14,
         };
         let pairs: HashMap<String, String> = settings.to_pairs().into_iter().collect();
         assert_eq!(Settings::from_pairs(&pairs), settings);
@@ -605,7 +695,7 @@ mod tests {
         use super::*;
         use proptest::prelude::*;
 
-        const KEYS: [&str; 11] = [
+        const KEYS: [&str; 12] = [
             KEY_INPUT_DEVICE_ID,
             KEY_GAIN,
             KEY_SEGMENT_SECONDS,
@@ -617,6 +707,7 @@ mod tests {
             KEY_RECORDING_SAMPLE_RATE,
             KEY_CHECK_FOR_UPDATES,
             KEY_SOUND_SENSITIVITY,
+            KEY_ACTIVITY_RETENTION_DAYS,
         ];
 
         /// What a stored value might hold after years of upgrades or a hand edit: anything at all, or
@@ -675,6 +766,10 @@ mod tests {
                 (AUTO_START_DELAY_SECONDS_RANGE.0..=AUTO_START_DELAY_SECONDS_RANGE.1)
                     .contains(&settings.auto_start_delay_seconds)
             );
+            prop_assert!(
+                (ACTIVITY_RETENTION_DAYS_RANGE.0..=ACTIVITY_RETENTION_DAYS_RANGE.1)
+                    .contains(&settings.activity_retention_days)
+            );
             prop_assert!(settings
                 .recording_sample_rate
                 .is_none_or(|rate| SUPPORTED_SAMPLE_RATES.contains(&rate)));
@@ -720,6 +815,7 @@ mod tests {
                 rate in proptest::option::of(proptest::option::of(any::<u32>())),
                 device in proptest::option::of(proptest::option::of(".{0,8}")),
                 dir in proptest::option::of(proptest::option::of(".{0,8}")),
+                activity_days in proptest::option::of(any::<u32>()),
             ) {
                 let base = Settings::from_pairs(&pairs);
                 prop_assert_eq!(SettingsPatch::default().apply_to(&base), base.clone());
@@ -733,6 +829,7 @@ mod tests {
                     frame_ms,
                     recording_sample_rate: rate,
                     recordings_dir: dir,
+                    activity_retention_days: activity_days,
                     ..SettingsPatch::default()
                 };
                 let updated = patch.apply_to(&base);

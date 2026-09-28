@@ -149,6 +149,7 @@
     "updateSettings": [
       {
         "body": {
+          "activityRetentionDays": 30,
           "autoStart": false,
           "autoStartDelaySeconds": 20,
           "checkForUpdates": false,
@@ -195,6 +196,23 @@
     ]
   },
   "queries": {
+    "activity": [
+      {
+        "path": "/activity",
+        "query": {}
+      },
+      {
+        "path": "/activity",
+        "query": {
+          "beforeId": 120,
+          "email": "kitchen@example.com",
+          "fromMs": 1757030400000,
+          "group": "listening",
+          "limit": 50,
+          "toMs": 1757116800000
+        }
+      }
+    ],
     "exportPlan": [
       {
         "path": "/export/plan",

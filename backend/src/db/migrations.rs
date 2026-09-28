@@ -165,6 +165,30 @@ const MIGRATIONS: &[Migration] = &[
         );
     "#,
     },
+    Migration {
+        version: 7,
+        name: "activity log",
+        // Who did what, when and from where. The actor's email is copied rather than joined, so the log
+        // still names an account after it is removed, and there is no foreign key for the same reason.
+        // The kind has its own column for filtering; the rest of the event is JSON, so a new kind of event
+        // needs no migration.
+        sql: r#"
+        CREATE TABLE activity (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            at_ms         INTEGER NOT NULL,
+            actor_kind    TEXT NOT NULL,
+            actor_user_id INTEGER,
+            actor_email   TEXT,
+            address       TEXT,
+            user_agent    TEXT,
+            kind          TEXT NOT NULL,
+            detail        TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_activity_at ON activity (at_ms);
+        CREATE INDEX idx_activity_email ON activity (actor_email, id);
+    "#,
+    },
 ];
 
 /// Apply every migration newer than the database's recorded version.

@@ -48,6 +48,7 @@ running it on macOS, Linux and Windows. On Linux, the recommended way is its
 - [Checking that it is still recording](#checking-that-it-is-still-recording)
 - [Disk space](#disk-space)
 - [Settings](#settings)
+- [The activity log](#the-activity-log)
 - [On a phone or a tablet](#on-a-phone-or-a-tablet)
 - [Dark mode](#dark-mode)
 - [Questions and problems](#questions-and-problems)
@@ -720,6 +721,44 @@ now keeps Prometheus working if logins are turned on later.
 
 What Prometheus can watch, and alerts worth setting up, are in the setup guide under
 [Monitoring with Prometheus](SETUP.md#monitoring-with-prometheus).
+
+### The activity log setting
+
+The **Activity log** card says how many days the [activity log](#the-activity-log) keeps each entry: 90 to
+start with, anything from a day to ten years, with buttons for 30 days, 90 days and a year. Like the other
+settings it waits for **Save changes**. Old entries are cleared by the same clean up as old recordings, but
+on their own window, so keeping recordings forever does not keep the log forever. **Open the activity log**
+goes to the page itself.
+
+## The activity log
+
+**Activity**, beside Settings in the top bar, is a record of who did what on the recorder and when. Only
+admins have it, like the settings page; on a recorder without logins, anyone can open it.
+
+Each line says who, what, when, and from where:
+
+- **Signing in and out**: every sign in, and whether it took a code from an authenticator app or a recovery
+  code; every wrong password, with the email that was tried, as long as it looked like an email; wrong codes;
+  sign ins refused after too many failures; and signing out.
+- **Accounts**: passwords changed, two factor sign in turned on or off, new recovery codes, and every
+  account an admin added, removed, changed the role of, set a password for or took two factor sign in off.
+- **Listening**: one line each time somebody had the stream open, written when they closed it: how long
+  they listened, whether they went back into the recordings and how far back, or that they had it open
+  without pressing play. And every download of audio, with the times it covered.
+- **The recorder**: recording started and stopped, the microphone chosen, each setting saved with its old and
+  new value, defaults restored, bookmarks added or removed, and the Prometheus scrape token made, replaced or
+  revoked.
+- **On the host**: the recovery commands, `auth reset-password`, `auth reset-2fa` and `auth disable`, marked
+  as done from the command line.
+
+The log never holds a password, a code or a token, not even a wrong one. An account's email stays on its
+lines after the account is removed. Where each line came from is the address of the device, or of your
+reverse proxy if the recorder is behind one, and the browser's description of itself.
+
+Use the choices at the top to show only one kind of line, **Only this person** to show one account's
+(the box suggests the accounts there are; press **Show** or Enter), or both. The newest lines come first, and
+**Load older entries** fetches more. Nothing on the page edits or deletes a line: they leave only when they
+are older than the Activity log setting allows.
 
 ## On a phone or a tablet
 

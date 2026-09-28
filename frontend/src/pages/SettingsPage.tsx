@@ -10,6 +10,7 @@ import { Navigate } from 'react-router';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AccessSettings } from '@/features/settings/AccessSettings';
+import { ActivityLogSettings } from '@/features/settings/ActivityLogSettings';
 import { MetricsSettings } from '@/features/settings/MetricsSettings';
 import { RecordingLocation } from '@/features/settings/RecordingLocation';
 import { RecordingQuality } from '@/features/settings/RecordingQuality';
@@ -132,6 +133,18 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent>
           <MetricsSettings />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Activity log</CardTitle>
+          <CardDescription>
+            How long the record of sign ins, listening and changes is kept, and the way to read it.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ActivityLogSettings />
         </CardContent>
       </Card>
 

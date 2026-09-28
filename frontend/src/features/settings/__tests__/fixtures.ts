@@ -20,6 +20,7 @@ export const STORED: Settings = {
   effectiveRecordingsDir: '/srv/oar/recordings',
   checkForUpdates: true,
   soundSensitivity: 'medium',
+  activityRetentionDays: 90,
 };
 
 /** A service status whose capture runs at `sampleRate`, recording or not. */

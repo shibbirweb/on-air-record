@@ -6,7 +6,7 @@
  * unmounted with it. Pages reach the engine through the router outlet context.
  */
 
-import { Radio, Settings2, SlidersHorizontal, Wifi, WifiOff } from 'lucide-react';
+import { History, Radio, Settings2, SlidersHorizontal, Wifi, WifiOff } from 'lucide-react';
 import { NavLink, Outlet, useOutletContext } from 'react-router';
 
 import { AppFooter } from '@/components/AppFooter';
@@ -46,6 +46,7 @@ export function useAppContext(): AppOutletContext {
 const NAV = [
   { to: '/', label: 'Control room', icon: SlidersHorizontal },
   { to: '/settings', label: 'Settings', icon: Settings2 },
+  { to: '/activity', label: 'Activity', icon: History },
 ] as const;
 
 export function AppShell() {
@@ -83,7 +84,7 @@ export function AppShell() {
           </div>
 
           <nav className="bg-muted ml-2 flex items-center gap-1 rounded-lg p-1">
-            {NAV.filter((item) => item.to !== '/settings' || mayAdminister).map((item) => (
+            {NAV.filter((item) => item.to === '/' || mayAdminister).map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -98,7 +99,8 @@ export function AppShell() {
                 }
               >
                 <item.icon className="size-3.5" />
-                {item.label}
+                {/* Icons alone on a phone, where three labels would not fit beside the logo. */}
+                <span className="sr-only sm:not-sr-only">{item.label}</span>
               </NavLink>
             ))}
           </nav>

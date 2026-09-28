@@ -30,6 +30,7 @@ const STORED: Settings = {
   effectiveRecordingsDir: '/srv/oar/recordings',
   checkForUpdates: true,
   soundSensitivity: 'medium',
+  activityRetentionDays: 90,
 };
 
 const trigger = () => screen.getByRole('combobox', { name: 'Sound detection' });

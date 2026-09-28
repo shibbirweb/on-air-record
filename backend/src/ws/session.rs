@@ -28,6 +28,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 
 use crate::app::AppState;
+use crate::models::activity::{Actor, ListeningTally, Origin};
 use crate::models::{AudioFrame, ListenerAccount, ListenerActivity};
 use crate::services::{CursorOutput, PlaybackCursor};
 use crate::util::time::now_ms;
@@ -148,12 +149,31 @@ enum PlaybackStep {
     SocketClosed,
 }
 
-/// Who is on the other end of a socket, for the listener list.
+/// Who is on the other end of a socket, for the listener list and the activity log.
 pub struct ListenerIdentity {
     /// `None` for a guest on an open recorder.
     pub account: Option<ListenerAccount>,
     pub address: IpAddr,
     pub user_agent: Option<String>,
+    pub actor: Actor,
+}
+
+/// Writes the session's one activity entry when it is dropped, so every way the session ends is logged,
+/// the same rule that takes it off the listener list.
+struct ListeningRecord {
+    state: Arc<AppState>,
+    actor: Actor,
+    origin: Origin,
+    tally: ListeningTally,
+}
+
+impl Drop for ListeningRecord {
+    fn drop(&mut self) {
+        let event = self.tally.finish(now_ms());
+        self.state
+            .activity
+            .record(self.actor.clone(), &self.origin, event);
+    }
 }
 
 pub struct StreamSession {
@@ -184,6 +204,15 @@ impl StreamSession {
 
         // On the list for exactly as long as this function runs: the handle removes the entry when it is
         // dropped, however the session ends.
+        let mut listening = ListeningRecord {
+            state: state.clone(),
+            actor: self.identity.actor,
+            origin: Origin {
+                address: Some(self.identity.address.to_string()),
+                user_agent: self.identity.user_agent.clone(),
+            },
+            tally: ListeningTally::new(now_ms()),
+        };
         let registered = state.listeners.register(
             self.identity.account,
             self.identity.address,
@@ -232,6 +261,9 @@ impl StreamSession {
                 || repositioned
             {
                 registered.set_activity(activity);
+                if let ListenerActivity::Playback { from_ms } = activity {
+                    listening.tally.went_back_to(from_ms);
+                }
                 reported = activity;
                 repositioned = false;
             }
@@ -332,6 +364,7 @@ impl StreamSession {
                             // Only the listener list cares, so it never reaches the transport.
                             if let ClientMessage::Player { state: player } = command {
                                 registered.set_player(player);
+                                listening.tally.player(player, now_ms());
                                 continue;
                             }
 

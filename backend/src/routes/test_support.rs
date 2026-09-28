@@ -169,10 +169,26 @@ pub(super) async fn send(
     body: Option<Value>,
     origin: Option<&str>,
 ) -> Reply {
+    send_with(app, method, path, cookie_header, body, origin, &[]).await
+}
+
+/// [`send`] with headers of the test's choosing as well, such as a browser's `User-Agent`.
+pub(super) async fn send_with(
+    app: &TestApp,
+    method: Method,
+    path: &str,
+    cookie_header: Option<String>,
+    body: Option<Value>,
+    origin: Option<&str>,
+    extra: &[(&str, &str)],
+) -> Reply {
     let mut request = Request::builder()
         .method(method)
         .uri(path)
         .header(HOST, HOST_NAME);
+    for (name, value) in extra {
+        request = request.header(*name, *value);
+    }
     if let Some(cookie_header) = cookie_header {
         request = request.header(COOKIE, cookie_header);
     }
@@ -303,4 +319,58 @@ pub(super) fn seed_recording(app: &TestApp, segments: &[SeedSegment]) -> i64 {
             .expect("segment");
     }
     session.id
+}
+
+pub(super) async fn log_in(app: &TestApp, email: &str, password: &str) -> Reply {
+    call(
+        app,
+        Method::POST,
+        "/api/auth/login",
+        None,
+        Some(json!({ "email": email, "password": password })),
+    )
+    .await
+}
+
+/// Switch on two factor sign in for the signed in account over HTTP, the way the page does, and
+/// return the secret the phone would hold plus the recovery codes shown at the end.
+pub(super) async fn enable_two_factor(app: &TestApp, session: &str) -> (Vec<u8>, Vec<String>) {
+    let setup = call(
+        app,
+        Method::POST,
+        "/api/auth/two-factor/setup",
+        Some(session),
+        None,
+    )
+    .await;
+    assert_eq!(setup.status, StatusCode::OK, "{}", setup.body);
+    assert!(setup.body["qrSvg"]
+        .as_str()
+        .is_some_and(|svg| svg.contains("<svg")));
+    let secret =
+        crate::services::totp::base32_decode(setup.body["secretKey"].as_str().expect("key"));
+
+    let enabled = call(
+        app,
+        Method::POST,
+        "/api/auth/two-factor/enable",
+        Some(session),
+        Some(json!({ "code": code_for(&secret, 0) })),
+    )
+    .await;
+    assert_eq!(enabled.status, StatusCode::OK, "{}", enabled.body);
+    let codes = enabled.body["recoveryCodes"]
+        .as_array()
+        .expect("codes")
+        .iter()
+        .filter_map(|code| code.as_str().map(str::to_string))
+        .collect();
+    (secret, codes)
+}
+
+/// What the phone shows `steps_ahead` steps from now.
+pub(super) fn code_for(secret: &[u8], steps_ahead: i64) -> String {
+    use crate::services::totp::{code_at, step_at};
+    let now = crate::util::time::now_ms();
+    format!("{:06}", code_at(secret, step_at(now) + steps_ahead))
 }

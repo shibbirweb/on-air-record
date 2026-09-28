@@ -11,17 +11,20 @@ use crate::config::AppConfig;
 use crate::db::Database;
 use crate::error::AppResult;
 use crate::repositories::{
-    AuthRepository, BookmarkRepository, SegmentRepository, SessionRepository, SettingsRepository,
+    ActivityRepository, AuthRepository, BookmarkRepository, SegmentRepository, SessionRepository,
+    SettingsRepository,
 };
 use crate::services::{
-    AuthService, BookmarkService, BroadcastHub, CaptureService, DeviceService, ExportService,
-    ListenerRegistry, PlaybackService, RetentionService, SettingsService, TimelineService,
-    UpdateService,
+    ActivityService, AuthService, BookmarkService, BroadcastHub, CaptureService, DeviceService,
+    ExportService, ListenerRegistry, PlaybackService, RetentionService, SettingsService,
+    TimelineService, UpdateService,
 };
 use crate::util::time::now_ms;
 
 pub struct AppState {
     pub config: Arc<AppConfig>,
+    /// Who did what and when, for the admin's activity page.
+    pub activity: Arc<ActivityService>,
     pub auth: Arc<AuthService>,
     pub settings: Arc<SettingsService>,
     pub devices: Arc<DeviceService>,
@@ -55,6 +58,9 @@ impl AppState {
         let sessions = Arc::new(SessionRepository::new(database.clone()));
         let segments = Arc::new(SegmentRepository::new(database.clone()));
         let bookmark_repository = Arc::new(BookmarkRepository::new(database.clone()));
+        let activity = Arc::new(ActivityService::new(Arc::new(ActivityRepository::new(
+            database.clone(),
+        ))));
         let auth = Arc::new(AuthService::new(Arc::new(AuthRepository::new(database))));
 
         // A hard kill leaves the last session marked as still recording. Closing it now keeps the
@@ -84,16 +90,20 @@ impl AppState {
         let playback = Arc::new(PlaybackService::new(config.clone(), segments.clone()));
         let timeline = Arc::new(TimelineService::new(segments.clone(), hub.clone()));
         let export = Arc::new(ExportService::new(segments.clone(), playback.clone()));
-        let retention = Arc::new(RetentionService::new(
-            config.clone(),
-            settings.clone(),
-            segments.clone(),
-            sessions.clone(),
-            bookmark_repository.clone(),
-        ));
+        let retention = Arc::new(
+            RetentionService::new(
+                config.clone(),
+                settings.clone(),
+                segments.clone(),
+                sessions.clone(),
+                bookmark_repository.clone(),
+            )
+            .with_activity(activity.clone()),
+        );
 
         Ok(Arc::new(Self {
             config,
+            activity,
             auth,
             settings,
             devices,

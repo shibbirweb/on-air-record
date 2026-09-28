@@ -9,14 +9,15 @@ use axum::{Extension, Json};
 
 use crate::app::AppState;
 use crate::controllers::auth_context::{
-    challenge_cookie, challenge_token, clear_challenge_cookie, clear_session_cookie,
-    session_cookie, session_token, Caller, ClientAddr,
+    actor_for, challenge_cookie, challenge_token, clear_challenge_cookie, clear_session_cookie,
+    session_cookie, session_token, Caller, ClientAddr, RequestOrigin,
 };
 use crate::dto::{
     AuthStateResponse, ChangePasswordRequest, CodeRequest, ConfirmPasswordRequest,
     CredentialsRequest, RecoveryCodesResponse, TwoFactorSetupResponse, TwoFactorStatusResponse,
 };
 use crate::error::{AppError, AppResult};
+use crate::models::activity::{attempted_email, ActivityEvent, Actor};
 use crate::services::{LoginOutcome, SignedIn};
 
 /// `GET /api/auth/state`
@@ -34,8 +35,14 @@ pub async fn state(
 /// `POST /api/auth/open`
 ///
 /// Answers the first run question with "keep it open". Refused once the question has been answered.
-pub async fn choose_open(State(state): State<Arc<AppState>>) -> AppResult<Json<AuthStateResponse>> {
+pub async fn choose_open(
+    State(state): State<Arc<AppState>>,
+    RequestOrigin(origin): RequestOrigin,
+) -> AppResult<Json<AuthStateResponse>> {
     state.auth.choose_open()?;
+    state
+        .activity
+        .record(Actor::Guest, &origin, ActivityEvent::StayedOpen);
     Ok(Json(current_state(&state, None, None)?))
 }
 
@@ -45,11 +52,17 @@ pub async fn choose_open(State(state): State<Arc<AppState>>) -> AppResult<Json<A
 /// the settings page of an install that chose to stay open; refused once accounts are on.
 pub async fn set_up(
     State(state): State<Arc<AppState>>,
+    RequestOrigin(origin): RequestOrigin,
     headers: HeaderMap,
     Json(request): Json<CredentialsRequest>,
 ) -> AppResult<(HeaderMap, Json<AuthStateResponse>)> {
     let auth = state.auth.clone();
     let signed_in = blocking(move || auth.set_up(&request.email, &request.password)).await?;
+    state.activity.record(
+        actor_for(&signed_in.user),
+        &origin,
+        ActivityEvent::AccountsSetUp,
+    );
     signed_in_response(&state, &headers, signed_in)
 }
 
@@ -60,14 +73,38 @@ pub async fn set_up(
 pub async fn log_in(
     State(state): State<Arc<AppState>>,
     ClientAddr(client): ClientAddr,
+    RequestOrigin(origin): RequestOrigin,
     headers: HeaderMap,
     Json(request): Json<CredentialsRequest>,
 ) -> AppResult<(HeaderMap, Json<AuthStateResponse>)> {
+    let typed_email = attempted_email(&request.email);
     let auth = state.auth.clone();
-    let outcome = blocking(move || auth.log_in(client, &request.email, &request.password)).await?;
+    let outcome =
+        match blocking(move || auth.log_in(client, &request.email, &request.password)).await {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let event = match &error {
+                    AppError::Unauthorized(_) => {
+                        Some(ActivityEvent::SignInFailed { email: typed_email })
+                    }
+                    AppError::TooManyRequests(_) => {
+                        Some(ActivityEvent::SignInBlocked { email: typed_email })
+                    }
+                    // Refused for another reason, such as a recorder with no accounts: not an attempt.
+                    _ => None,
+                };
+                if let Some(event) = event {
+                    state.activity.record(Actor::Guest, &origin, event);
+                }
+                return Err(error);
+            }
+        };
 
     match outcome {
-        LoginOutcome::SignedIn(signed_in) => signed_in_response(&state, &headers, signed_in),
+        LoginOutcome::SignedIn(signed_in) => {
+            record_sign_in(&state, &origin, &signed_in);
+            signed_in_response(&state, &headers, signed_in)
+        }
         LoginOutcome::SecondFactorRequired { challenge } => {
             let mut response_headers = HeaderMap::new();
             response_headers.insert(SET_COOKIE, challenge_cookie(&challenge, &headers));
@@ -86,16 +123,54 @@ pub async fn log_in(
 pub async fn verify_login(
     State(state): State<Arc<AppState>>,
     ClientAddr(client): ClientAddr,
+    RequestOrigin(origin): RequestOrigin,
     headers: HeaderMap,
     Json(request): Json<CodeRequest>,
 ) -> AppResult<(HeaderMap, Json<AuthStateResponse>)> {
     let challenge = challenge_token(&headers).ok_or_else(|| {
         AppError::unauthorized("that sign in has expired; enter your password again")
     })?;
-    let signed_in = state
+    // Read before the check, which forgets the sign in once its codes run out. With nobody waiting on
+    // this challenge, a wrong code is not an attempt at anybody's account, and nothing is logged.
+    let pending = state.auth.pending_user(&challenge);
+    match state
         .auth
-        .verify_second_factor(client, &challenge, &request.code)?;
-    signed_in_response(&state, &headers, signed_in)
+        .verify_second_factor(client, &challenge, &request.code)
+    {
+        Ok(signed_in) => {
+            record_sign_in(&state, &origin, &signed_in);
+            signed_in_response(&state, &headers, signed_in)
+        }
+        Err(error) => {
+            if let Some(user) = pending {
+                let event = match &error {
+                    AppError::Unauthorized(_) => Some(ActivityEvent::SecondFactorFailed),
+                    AppError::TooManyRequests(_) => Some(ActivityEvent::SignInBlocked {
+                        email: Some(user.email.clone()),
+                    }),
+                    _ => None,
+                };
+                if let Some(event) = event {
+                    state.activity.record(actor_for(&user), &origin, event);
+                }
+            }
+            Err(error)
+        }
+    }
+}
+
+fn record_sign_in(
+    state: &AppState,
+    origin: &crate::models::activity::Origin,
+    signed_in: &SignedIn,
+) {
+    state.activity.record(
+        actor_for(&signed_in.user),
+        origin,
+        ActivityEvent::SignedIn {
+            method: signed_in.method,
+        },
+    );
 }
 
 /// `POST /api/auth/logout`
@@ -104,10 +179,18 @@ pub async fn verify_login(
 /// state, including backing out of the code step, without first working out where it is.
 pub async fn log_out(
     State(state): State<Arc<AppState>>,
+    RequestOrigin(origin): RequestOrigin,
     headers: HeaderMap,
 ) -> AppResult<(HeaderMap, Json<AuthStateResponse>)> {
     if let Some(token) = session_token(&headers) {
+        // Who it was, read before the session goes. A cookie for no live session signs nobody out.
+        let user = state.auth.resolve(Some(&token)).ok().flatten();
         state.auth.log_out(&token)?;
+        if let Some(user) = user {
+            state
+                .activity
+                .record(actor_for(&user), &origin, ActivityEvent::SignedOut);
+        }
     }
     if let Some(challenge) = challenge_token(&headers) {
         state.auth.abandon_challenge(&challenge);
@@ -123,6 +206,7 @@ pub async fn log_out(
 pub async fn change_password(
     State(state): State<Arc<AppState>>,
     Extension(caller): Extension<Caller>,
+    RequestOrigin(origin): RequestOrigin,
     Json(request): Json<ChangePasswordRequest>,
 ) -> AppResult<StatusCode> {
     let (user, token) = caller.signed_in()?;
@@ -139,6 +223,9 @@ pub async fn change_password(
     })
     .await?;
 
+    state
+        .activity
+        .record(caller.actor(), &origin, ActivityEvent::PasswordChanged);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -176,10 +263,14 @@ pub async fn two_factor_setup(
 pub async fn two_factor_enable(
     State(state): State<Arc<AppState>>,
     Extension(caller): Extension<Caller>,
+    RequestOrigin(origin): RequestOrigin,
     Json(request): Json<CodeRequest>,
 ) -> AppResult<Json<RecoveryCodesResponse>> {
     let (user, _) = caller.signed_in()?;
     let recovery_codes = state.auth.enable_two_factor(user.id, &request.code)?;
+    state
+        .activity
+        .record(caller.actor(), &origin, ActivityEvent::TwoFactorEnabled);
     Ok(Json(RecoveryCodesResponse { recovery_codes }))
 }
 
@@ -187,12 +278,16 @@ pub async fn two_factor_enable(
 pub async fn two_factor_disable(
     State(state): State<Arc<AppState>>,
     Extension(caller): Extension<Caller>,
+    RequestOrigin(origin): RequestOrigin,
     Json(request): Json<ConfirmPasswordRequest>,
 ) -> AppResult<StatusCode> {
     let (user, _) = caller.signed_in()?;
     let user_id = user.id;
     let auth = state.auth.clone();
     blocking(move || auth.disable_two_factor(user_id, &request.password)).await?;
+    state
+        .activity
+        .record(caller.actor(), &origin, ActivityEvent::TwoFactorDisabled);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -200,6 +295,7 @@ pub async fn two_factor_disable(
 pub async fn recovery_codes(
     State(state): State<Arc<AppState>>,
     Extension(caller): Extension<Caller>,
+    RequestOrigin(origin): RequestOrigin,
     Json(request): Json<ConfirmPasswordRequest>,
 ) -> AppResult<Json<RecoveryCodesResponse>> {
     let (user, _) = caller.signed_in()?;
@@ -207,6 +303,11 @@ pub async fn recovery_codes(
     let auth = state.auth.clone();
     let recovery_codes =
         blocking(move || auth.regenerate_recovery_codes(user_id, &request.password)).await?;
+    state.activity.record(
+        caller.actor(),
+        &origin,
+        ActivityEvent::RecoveryCodesReplaced,
+    );
     Ok(Json(RecoveryCodesResponse { recovery_codes }))
 }
 

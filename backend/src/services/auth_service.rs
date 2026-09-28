@@ -20,6 +20,7 @@ use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, AppResult};
+use crate::models::activity::SignInMethod;
 use crate::models::{AuthMode, Role, User};
 use crate::repositories::AuthRepository;
 use crate::services::totp;
@@ -56,6 +57,8 @@ const ISSUER: &str = "On Air Record";
 pub struct SignedIn {
     pub user: User,
     pub token: String,
+    /// How the sign in was completed, for the activity log.
+    pub method: SignInMethod,
 }
 
 /// What a right password leads to.
@@ -155,7 +158,11 @@ impl AuthService {
         tracing::info!(email = %user.email, "accounts switched on with a first admin");
 
         let token = self.start_session(user.id)?;
-        Ok(SignedIn { user, token })
+        Ok(SignedIn {
+            user,
+            token,
+            method: SignInMethod::Password,
+        })
     }
 
     /// Check an email and password. With two factor sign in on the account, the right password only
@@ -205,7 +212,11 @@ impl AuthService {
 
         let token = self.start_session(user.id)?;
         tracing::info!(email = %user.email, "logged in");
-        Ok(LoginOutcome::SignedIn(SignedIn { user, token }))
+        Ok(LoginOutcome::SignedIn(SignedIn {
+            user,
+            token,
+            method: SignInMethod::Password,
+        }))
     }
 
     /// Whether a challenge cookie still has a sign in waiting on it, so a reload keeps showing the code
@@ -249,7 +260,7 @@ impl AuthService {
             }
         };
 
-        if !self.check_second_factor(user_id, code, now)? {
+        let Some(method) = self.check_second_factor(user_id, code, now)? else {
             self.throttle.record_failure(client, now);
             let exhausted = self.count_code_attempt(&challenge_hash);
             tracing::info!(%client, user_id, "wrong sign in code");
@@ -258,7 +269,7 @@ impl AuthService {
             } else {
                 "that code is not right"
             }));
-        }
+        };
 
         if let Ok(mut challenges) = self.challenges.lock() {
             challenges.remove(&challenge_hash);
@@ -271,7 +282,22 @@ impl AuthService {
             .ok_or_else(|| AppError::unauthorized("enter your password again"))?;
         let token = self.start_session(user.id)?;
         tracing::info!(email = %user.email, "logged in with a second factor");
-        Ok(SignedIn { user, token })
+        Ok(SignedIn {
+            user,
+            token,
+            method,
+        })
+    }
+
+    /// The account a pending sign in belongs to, while it is still waiting for its code, so a wrong code
+    /// can be logged against the account it was for.
+    pub fn pending_user(&self, challenge: &str) -> Option<User> {
+        let user_id = {
+            let challenges = self.challenges.lock().ok()?;
+            let pending = challenges.get(&hash_token(challenge))?;
+            (pending.expires_at_ms > now_ms()).then_some(pending.user_id)?
+        };
+        self.repository.find_user(user_id).ok().flatten()
     }
 
     /// Forget a pending sign in, when somebody goes back from the code step.
@@ -412,20 +438,26 @@ impl AuthService {
 
     /// Check a code from the app, or failing that a recovery code. A six digit entry is only ever an app
     /// code; anything else is only ever a recovery code, so one cannot be mistaken for the other.
-    fn check_second_factor(&self, user_id: i64, code: &str, now: i64) -> AppResult<bool> {
+    /// Which kind of code it was, when it was right.
+    fn check_second_factor(
+        &self,
+        user_id: i64,
+        code: &str,
+        now: i64,
+    ) -> AppResult<Option<SignInMethod>> {
         let compact: String = code.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
 
         if compact.len() == 6 && compact.chars().all(|c| c.is_ascii_digit()) {
             let record = self.repository.find_totp(user_id)?;
             let Some(secret) = record.secret else {
-                return Ok(false);
+                return Ok(None);
             };
             return match totp::verify(&secret, &compact, now, record.last_step) {
                 Some(step) => {
                     self.repository.record_totp_step(user_id, step)?;
-                    Ok(true)
+                    Ok(Some(SignInMethod::Code))
                 }
-                None => Ok(false),
+                None => Ok(None),
             };
         }
 
@@ -435,7 +467,7 @@ impl AuthService {
         if used {
             tracing::info!(user_id, "signed in with a recovery code");
         }
-        Ok(used)
+        Ok(used.then_some(SignInMethod::RecoveryCode))
     }
 
     fn start_challenge(&self, user_id: i64, now: i64) -> String {

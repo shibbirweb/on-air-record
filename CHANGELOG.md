@@ -9,6 +9,12 @@ Every release of On Air Record, newest first. The format follows
 
 ### Added
 
+- **Activity log.** Admins have a new Activity page, beside Settings, recording who did what and when:
+  every sign in and failed attempt, sign outs, password and two factor changes, accounts added, removed or
+  changed, each listening session with how long and how far back it went, audio downloads, and every change
+  to the recorder, down to each setting's old and new value. Each line says where it came from. It can be
+  narrowed to one kind of event or one person, keeps entries for 90 days unless Settings, Activity log says
+  otherwise, and never holds a password, a code or a token. (OAR-112)
 - **The whole compose file, to copy.** The README, the setup guide and the Docker Hub page now show the
   complete `compose.yaml` with a note on each line, and an example `.env`, so it can be written by hand
   instead of downloaded. (OAR-105)

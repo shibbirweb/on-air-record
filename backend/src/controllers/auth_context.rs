@@ -6,11 +6,12 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use axum::extract::{ConnectInfo, FromRequestParts};
-use axum::http::header::{AUTHORIZATION, COOKIE, HOST, ORIGIN};
+use axum::http::header::{AUTHORIZATION, COOKIE, HOST, ORIGIN, USER_AGENT};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue};
 
 use crate::error::AppError;
+use crate::models::activity::{Actor, Origin};
 use crate::models::User;
 use crate::services::auth_service::SESSION_TTL_MS;
 
@@ -25,7 +26,20 @@ pub struct Caller {
     pub token: Option<String>,
 }
 
+/// The activity log's name for an account: its id and its email as it is now.
+pub fn actor_for(user: &User) -> Actor {
+    Actor::Account {
+        user_id: user.id,
+        email: user.email.clone(),
+    }
+}
+
 impl Caller {
+    /// Who the activity log says did it: the account, or a guest on a recorder without accounts.
+    pub fn actor(&self) -> Actor {
+        self.user.as_ref().map(actor_for).unwrap_or(Actor::Guest)
+    }
+
     /// The signed in account, for routes that only make sense with one.
     pub fn signed_in(&self) -> Result<(&User, &str), AppError> {
         match (&self.user, &self.token) {
@@ -179,6 +193,38 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientAddr {
             .map(|info| info.0.ip())
             .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
         Ok(Self(address))
+    }
+}
+
+/// Longer than any real browser sends, short enough that a hostile client cannot park a large string in
+/// every admin's listener list or in every entry of the activity log.
+pub const USER_AGENT_LIMIT: usize = 512;
+
+/// The browser's description of itself, trimmed and bounded.
+pub fn user_agent(headers: &HeaderMap) -> Option<String> {
+    let sent = headers.get(USER_AGENT)?.to_str().ok()?.trim();
+    if sent.is_empty() {
+        return None;
+    }
+    Some(sent.chars().take(USER_AGENT_LIMIT).collect())
+}
+
+/// Where a request came from, for the activity log: the connection's address and the browser. The address
+/// is left out when the server has no connection info, which only happens in tests.
+pub struct RequestOrigin(pub Origin);
+
+impl<S: Send + Sync> FromRequestParts<S> for RequestOrigin {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let address = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|info| info.0.ip().to_string());
+        Ok(Self(Origin {
+            address,
+            user_agent: user_agent(&parts.headers),
+        }))
     }
 }
 

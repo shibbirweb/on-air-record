@@ -4,6 +4,7 @@
 //! Anything longer than that belongs in a service, because logic that lives in a handler can only ever be
 //! reached over HTTP.
 
+pub mod activity_controller;
 pub mod auth_context;
 pub mod auth_controller;
 pub mod bookmark_controller;

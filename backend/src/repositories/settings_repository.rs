@@ -112,6 +112,7 @@ mod tests {
             recordings_dir: None,
             check_for_updates: false,
             sound_sensitivity: crate::models::SoundSensitivity::Low,
+            activity_retention_days: 14,
         };
         repository.save(&settings).expect("save");
         assert_eq!(repository.load().expect("load"), settings);
