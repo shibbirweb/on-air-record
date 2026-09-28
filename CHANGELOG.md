@@ -18,6 +18,12 @@ Every release of On Air Record, newest first. The format follows
   against the room's own background, so it suits a quiet bedroom and a noisy kitchen alike; admins can
   make it more or less sensitive under Settings, Finding sounds. (OAR-107)
 
+- **Prometheus metrics.** The recorder now reports its state at `/api/metrics` for Prometheus: whether
+  it is recording, whether writing to disk works, the microphone level, disk use, how far back the
+  recordings reach and who is listening. Settings, Monitoring has a scrape config to copy and, for a
+  recorder with logins, a scrape token that lets Prometheus read the metrics and nothing else. The setup
+  guide suggests three alerts for an unattended recorder. (OAR-110)
+
 ### Fixed
 
 - **Playback faster or slower than real time is smooth.** At double speed each moment of audio was

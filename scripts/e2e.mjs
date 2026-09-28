@@ -684,7 +684,22 @@ async function checkTimeline(page, plan) {
   const timeline = { clusters: await marksOn('Timeline') };
   const overview = { clusters: await marksOn('Day overview') };
   check('the timeline marks three sounds, and nothing for the click', timeline?.clusters === 3, `${timeline?.clusters} marks`);
-  check('the day overview marks the same three', overview?.clusters === 3, `${overview?.clusters} marks`);
+  // The overview draws one calendar day, the one the timeline's centre is in, captioned under it. A run
+  // just after midnight UTC has the sounds either side of midnight, so it counts those on the day shown.
+  const dayCaption = (ms) => new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const sounds = [plan.clap, plan.speech, plan.door];
+  let shownDay = null;
+  for (const caption of new Set(sounds.map(dayCaption))) {
+    if (await page.run(hasText(`${caption} overview`))) {
+      shownDay = caption;
+    }
+  }
+  const onShownDay = sounds.filter((at) => dayCaption(at) === shownDay).length;
+  check(
+    'the day overview marks the sounds on the day it shows',
+    onShownDay > 0 && overview?.clusters === onShownDay,
+    `${overview?.clusters} marks, ${onShownDay} of them on ${shownDay}`,
+  );
 
   // Browsing without playing: next goes from the left edge of the timeline, through every sound.
   const expected = [plan.clap, plan.speech, plan.door].map((start) => clock(start - 1000));

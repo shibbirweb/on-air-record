@@ -134,12 +134,19 @@ pub(super) async fn call_with_challenge(
 
 /// A GET, with no session, answered as bytes.
 pub(super) async fn get_raw(app: &TestApp, path: &str) -> RawReply {
-    let request = Request::builder()
+    get_raw_with(app, path, &[]).await
+}
+
+/// A GET with headers of the test's choosing, such as a scraper's `Authorization`, answered as bytes.
+pub(super) async fn get_raw_with(app: &TestApp, path: &str, headers: &[(&str, &str)]) -> RawReply {
+    let mut request = Request::builder()
         .method(Method::GET)
         .uri(path)
-        .header(HOST, HOST_NAME)
-        .body(Body::empty())
-        .expect("request");
+        .header(HOST, HOST_NAME);
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    let request = request.body(Body::empty()).expect("request");
     let response = app.router.clone().oneshot(request).await.expect("response");
     let status = response.status();
     let headers = response.headers().clone();

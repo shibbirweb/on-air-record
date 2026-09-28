@@ -65,6 +65,15 @@ pub struct RecorderContext {
 /// audio. Writing, indexing and the disk queue overflowing are tracked apart because they recover apart: a
 /// successful write must not clear an index that is still refusing rows, nor frames still being left out
 /// because the queue is full, or the error would flicker on and off while the problem went on.
+/// A copy of [`RecorderHealth`] at one moment, which holds locks and atomics and so cannot be passed around.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RecorderReport {
+    pub frames_written: u64,
+    pub frames_not_written: u64,
+    /// Whether writing, indexing or the disk queue is failing right now.
+    pub problem: bool,
+}
+
 #[derive(Debug, Default)]
 pub struct RecorderHealth {
     frames_written: AtomicU64,
@@ -94,6 +103,15 @@ impl RecorderHealth {
     /// Captured frames that were broadcast but never reached a segment file.
     pub fn frames_not_written(&self) -> u64 {
         self.frames_not_written.load(Ordering::Relaxed)
+    }
+
+    /// The counters and whether anything is wrong, read together for the metrics endpoint.
+    pub fn report(&self) -> RecorderReport {
+        RecorderReport {
+            frames_written: self.frames_written(),
+            frames_not_written: self.frames_not_written(),
+            problem: self.problem().is_some(),
+        }
     }
 
     /// Forget the previous session's trouble. Called when capture starts.
@@ -501,6 +519,33 @@ fn will_never_be_accepted(error: &AppError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_report_carries_the_counters_and_whether_anything_is_wrong() {
+        let health = RecorderHealth::default();
+        assert_eq!(health.report(), RecorderReport::default());
+
+        health.frame_written();
+        health.frame_written();
+        health.frames_not_written.fetch_add(3, Ordering::Relaxed);
+        report_failure(&health.indexing, "database is locked".to_string());
+        assert_eq!(
+            health.report(),
+            RecorderReport {
+                frames_written: 2,
+                frames_not_written: 3,
+                problem: true,
+            }
+        );
+
+        report_recovery(&health.indexing, "indexing");
+        assert!(!health.report().problem, "recovered");
+        assert_eq!(
+            health.report().frames_written,
+            2,
+            "counters survive a recovery"
+        );
+    }
 
     fn frame_at(timestamp_ms: i64) -> AudioFrame {
         AudioFrame::from_samples(timestamp_ms, 48_000, 1, vec![0; 4800], true)

@@ -42,12 +42,13 @@ use crate::dto::{
     AuthStateResponse, BookmarkDto, BookmarkListResponse, CaptureDto, ChangePasswordRequest,
     CodeRequest, ConfirmPasswordRequest, CoverageDto, CreateBookmarkRequest, CreateUserRequest,
     CredentialsRequest, DeviceDto, DeviceListResponse, ExportPlanResponse, ExportQuery,
-    HealthResponse, LevelsDto, NextSoundQuery, NextSoundResponse, PeaksQuery, PeaksResponse,
-    RecordingDayDto, RecordingDaysResponse, RecoveryCodesResponse, SelectDeviceRequest, SessionDto,
-    SessionListResponse, SetPasswordRequest, SettingsDto, SettingsPatchRequest, SoundDto,
-    SoundsQuery, SoundsResponse, StatusResponse, StorageResponse, TestDirectoryRequest,
-    TestDirectoryResponse, TimelineRangeResponse, TwoFactorSetupResponse, TwoFactorStatusResponse,
-    UpdateBookmarkRequest, UpdateStatusResponse, UpdateUserRequest, UserDto, UserListResponse,
+    HealthResponse, LevelsDto, MetricsTokenResponse, NewMetricsTokenResponse, NextSoundQuery,
+    NextSoundResponse, PeaksQuery, PeaksResponse, RecordingDayDto, RecordingDaysResponse,
+    RecoveryCodesResponse, SelectDeviceRequest, SessionDto, SessionListResponse,
+    SetPasswordRequest, SettingsDto, SettingsPatchRequest, SoundDto, SoundsQuery, SoundsResponse,
+    StatusResponse, StorageResponse, TestDirectoryRequest, TestDirectoryResponse,
+    TimelineRangeResponse, TwoFactorSetupResponse, TwoFactorStatusResponse, UpdateBookmarkRequest,
+    UpdateStatusResponse, UpdateUserRequest, UserDto, UserListResponse,
 };
 use crate::error::AppError;
 use crate::models::update::{Channel, InstallKind, Release};
@@ -761,6 +762,26 @@ async fn rest_responses() -> Examples {
                 "b83e-06d5".to_string(),
                 "c1a9-7e44".to_string(),
             ],
+        })],
+    );
+
+    add(
+        "metricsToken",
+        vec![
+            wire(MetricsTokenResponse {
+                created_at_ms: Some(T0),
+            }),
+            wire(MetricsTokenResponse {
+                created_at_ms: None,
+            }),
+        ],
+    );
+
+    add(
+        "newMetricsToken",
+        vec![wire(NewMetricsTokenResponse {
+            token: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".to_string(),
+            created_at_ms: T0,
         })],
     );
 

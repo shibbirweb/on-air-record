@@ -47,6 +47,12 @@ impl AuthRepository {
         Self { database }
     }
 
+    /// The connection, for tests that check what is stored rather than what is returned.
+    #[cfg(test)]
+    pub(crate) fn database(&self) -> &Arc<Database> {
+        &self.database
+    }
+
     pub fn mode(&self) -> AppResult<AuthMode> {
         self.database.with_connection(read_mode)
     }
@@ -424,6 +430,48 @@ impl AuthRepository {
             )?)
         })
     }
+
+    /// When the scrape token was made, or `None` when there is none.
+    pub fn metrics_token_created_at(&self) -> AppResult<Option<i64>> {
+        self.database.with_connection(|conn| {
+            conn.query_row("SELECT created_at_ms FROM metrics_token", [], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(AppError::from)
+        })
+    }
+
+    /// Store a new scrape token, replacing any old one, which stops working at once.
+    pub fn replace_metrics_token(&self, token_hash: &[u8], created_at_ms: i64) -> AppResult<()> {
+        self.database.with_connection(|conn| {
+            conn.execute(
+                "INSERT OR REPLACE INTO metrics_token (id, token_hash, created_at_ms) VALUES (1, ?1, ?2)",
+                rusqlite::params![token_hash, created_at_ms],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn delete_metrics_token(&self) -> AppResult<()> {
+        self.database.with_connection(|conn| {
+            conn.execute("DELETE FROM metrics_token", [])?;
+            Ok(())
+        })
+    }
+
+    /// Whether a hash is the scrape token's. Compared in SQL like a session's: the hash of a guess tells
+    /// its sender nothing about the token, so there is no timing to hide.
+    pub fn metrics_token_matches(&self, token_hash: &[u8]) -> AppResult<bool> {
+        self.database.with_connection(|conn| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM metrics_token WHERE token_hash = ?1",
+                rusqlite::params![token_hash],
+                |row| row.get(0),
+            )?;
+            Ok(count > 0)
+        })
+    }
 }
 
 /// Replace an account's recovery codes with new ones. Old codes stop working, used or not.
@@ -521,6 +569,57 @@ mod tests {
 
     fn repository() -> AuthRepository {
         AuthRepository::new(Arc::new(Database::open_in_memory().expect("database")))
+    }
+
+    #[test]
+    fn there_is_no_scrape_token_until_one_is_made() {
+        let repository = repository();
+        assert_eq!(repository.metrics_token_created_at().expect("read"), None);
+        assert!(!repository
+            .metrics_token_matches(b"anything")
+            .expect("match"));
+    }
+
+    #[test]
+    fn a_new_scrape_token_replaces_the_old_one() {
+        let repository = repository();
+        repository
+            .replace_metrics_token(b"first", 1_000)
+            .expect("first");
+        assert!(repository.metrics_token_matches(b"first").expect("match"));
+        assert_eq!(
+            repository.metrics_token_created_at().expect("read"),
+            Some(1_000)
+        );
+
+        repository
+            .replace_metrics_token(b"second", 2_000)
+            .expect("second");
+        assert!(!repository.metrics_token_matches(b"first").expect("match"));
+        assert!(repository.metrics_token_matches(b"second").expect("match"));
+        assert_eq!(
+            repository.metrics_token_created_at().expect("read"),
+            Some(2_000)
+        );
+        let rows: i64 = repository
+            .database
+            .with_connection(|conn| {
+                Ok(conn.query_row("SELECT COUNT(*) FROM metrics_token", [], |row| row.get(0))?)
+            })
+            .expect("count");
+        assert_eq!(rows, 1, "never a second token");
+    }
+
+    #[test]
+    fn a_deleted_scrape_token_matches_nothing() {
+        let repository = repository();
+        repository.replace_metrics_token(b"token", 1).expect("make");
+        repository.delete_metrics_token().expect("delete");
+        assert!(!repository.metrics_token_matches(b"token").expect("match"));
+        assert_eq!(repository.metrics_token_created_at().expect("read"), None);
+        repository
+            .delete_metrics_token()
+            .expect("deleting nothing is fine");
     }
 
     #[test]

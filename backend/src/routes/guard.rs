@@ -19,7 +19,9 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 use crate::app::AppState;
-use crate::controllers::auth_context::{same_origin, session_token, Caller};
+use crate::controllers::auth_context::{
+    presented_credentials, same_origin, session_token, Caller, Presented,
+};
 use crate::error::AppError;
 use crate::models::{authorize, Access, Denied};
 
@@ -49,11 +51,12 @@ pub fn required_access(method: &Method, path: &str) -> Option<Access> {
         return Some(Access::Listen);
     }
     // Reading the update notice is admin only too: listeners cannot act on it, and it names the
-    // install folder.
+    // install folder. Whether a scrape token exists is an admin's business, like the accounts.
     if path == "/users"
         || path.starts_with("/users/")
         || path == "/updates"
         || path.starts_with("/updates/")
+        || path.starts_with("/metrics/")
     {
         return Some(Access::Administer);
     }
@@ -61,6 +64,12 @@ pub fn required_access(method: &Method, path: &str) -> Option<Access> {
         return Some(Access::Listen);
     }
     Some(Access::Administer)
+}
+
+/// The only route a scrape token opens. Kept to one exact path, so the token can never become a key to
+/// anything the metrics summarise, let alone to a change.
+fn accepts_scrape_token(method: &Method, path: &str) -> bool {
+    method == Method::GET && path == "/metrics"
 }
 
 /// Whether a request from another site must be refused: anything that changes state, and the stream.
@@ -78,6 +87,30 @@ pub async fn guard(
     {
         return AppError::forbidden("requests from other websites are not accepted")
             .into_response();
+    }
+
+    // A scraper cannot sign in, so on its one route a bearer token stands in for a session. A token that
+    // is present but wrong is refused outright, in every mode, rather than falling back to the cookie:
+    // a misconfigured scraper should find out now, not on the day accounts are turned on.
+    if accepts_scrape_token(request.method(), request.uri().path()) {
+        match presented_credentials(request.headers()) {
+            Presented::Nothing => {}
+            Presented::Bearer(token) => {
+                return match state.auth.verify_metrics_token(token) {
+                    Ok(true) => next.run(request).await,
+                    Ok(false) => {
+                        AppError::unauthorized("that scrape token is not valid").into_response()
+                    }
+                    Err(error) => error.into_response(),
+                };
+            }
+            Presented::Malformed => {
+                return AppError::unauthorized(
+                    "send the scrape token as Authorization: Bearer <token>",
+                )
+                .into_response();
+            }
+        }
     }
 
     let Some(needed) = required_access(request.method(), request.uri().path()) else {

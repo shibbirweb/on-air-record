@@ -40,6 +40,8 @@ import type {
   InputDevice,
   InstallInfo,
   ListenerView,
+  MetricsToken,
+  NewMetricsToken,
   NextSound,
   Peaks,
   PlayerState,
@@ -285,6 +287,8 @@ const responseShapes: Record<string, AnyShape> = {
     qrSvg: 'string',
   }),
   recoveryCodes: shape<RecoveryCodes>({ recoveryCodes: { array: 'string' } }),
+  metricsToken: shape<MetricsToken>({ createdAtMs: { nullable: 'number' } }),
+  newMetricsToken: shape<NewMetricsToken>({ token: 'string', createdAtMs: 'number' }),
   updateStatus: shape<UpdateStatus>({
     currentVersion: 'string',
     channel: 'string',

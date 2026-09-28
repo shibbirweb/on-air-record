@@ -336,6 +336,21 @@ const METHODS: MethodCase[] = [
   },
   { name: 'updates', call: () => api.updates(), path: '/updates', method: 'GET' },
   { name: 'checkForUpdates', call: () => api.checkForUpdates(), path: '/updates/check', method: 'POST' },
+  { name: 'metricsToken', call: () => api.metricsToken(), path: '/metrics/token', method: 'GET' },
+  {
+    name: 'createMetricsToken',
+    call: () => api.createMetricsToken(),
+    path: '/metrics/token',
+    method: 'POST',
+    answer: { token: 'abc123', createdAtMs: 5 },
+  },
+  {
+    name: 'revokeMetricsToken',
+    call: () => api.revokeMetricsToken(),
+    path: '/metrics/token',
+    method: 'DELETE',
+    answer: { createdAtMs: null },
+  },
   {
     name: 'testRecordingsDir',
     call: () => api.testRecordingsDir('/mnt/audio'),

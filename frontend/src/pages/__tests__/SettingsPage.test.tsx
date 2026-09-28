@@ -19,6 +19,7 @@ import { account, serviceStatus, storageUsage, STORED } from '@/features/setting
 import { upToDate } from '@/features/updates/__tests__/fixtures';
 import { useAccountsStore } from '@/store/useAccountsStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useMetricsStore } from '@/store/useMetricsStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useStatusStore } from '@/store/useStatusStore';
 import { useStorageStore } from '@/store/useStorageStore';
@@ -52,6 +53,7 @@ const CARDS = [
   'Finding sounds',
   'Updates',
   'Access',
+  'Monitoring',
 ];
 
 describe('the settings page', () => {
@@ -70,6 +72,7 @@ describe('the settings page', () => {
     useStorageStore.setState({ storage: storageUsage(0, 48_000 * 2 * 3600), refresh: refreshStorage });
     useStatusStore.setState({ status: serviceStatus(48_000) });
     useUpdateStore.setState({ status: upToDate(), refresh: vi.fn(async () => undefined) });
+    useMetricsStore.setState({ refresh: vi.fn(async () => undefined) });
     useAccountsStore.setState({
       users: [ADMIN, LISTENER],
       roleDraft: {},

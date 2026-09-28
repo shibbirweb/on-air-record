@@ -25,6 +25,8 @@ mod embedded_ui;
 mod export_tests;
 pub mod guard;
 #[cfg(test)]
+mod metrics_tests;
+#[cfg(test)]
 mod recorder_tests;
 #[cfg(test)]
 mod stream_tests;
@@ -40,8 +42,8 @@ mod web_tests;
 use crate::app::AppState;
 use crate::controllers::{
     auth_controller, bookmark_controller, capture_controller, device_controller, export_controller,
-    session_controller, settings_controller, status_controller, stream_controller,
-    timeline_controller, update_controller, user_controller,
+    metrics_controller, session_controller, settings_controller, status_controller,
+    stream_controller, timeline_controller, update_controller, user_controller,
 };
 
 /// Build the complete application router.
@@ -126,6 +128,13 @@ pub fn build(state: Arc<AppState>) -> Router {
         .route("/export", get(export_controller::download))
         .route("/export/plan", get(export_controller::plan))
         .route("/ws/stream", get(stream_controller::stream))
+        .route("/metrics", get(metrics_controller::scrape))
+        .route(
+            "/metrics/token",
+            get(metrics_controller::token_status)
+                .post(metrics_controller::create_token)
+                .delete(metrics_controller::revoke_token),
+        )
         .route_layer(from_fn_with_state(state.clone(), guard::guard))
         .fallback(unknown_endpoint)
         .with_state(state.clone());

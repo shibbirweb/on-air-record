@@ -203,6 +203,14 @@ HTTP so it is tested exhaustively.
   the `oar_challenge` cookie, and `verify_second_factor` turns it into a session. Keep it that way; a
   session must never exist before the code is checked. `totp_last_step` blocks replays, and wrong codes
   feed the same throttle as wrong passwords.
+- **The scrape token opens `GET /api/metrics` and nothing else.** Prometheus cannot sign in, so the guard
+  takes `Authorization: Bearer` on that one exact path (`accepts_scrape_token`) before the normal rules,
+  and refuses a wrong or malformed one outright in every mode rather than falling back to the cookie.
+  Never widen it to other paths; `the_scrape_token_opens_nothing_but_the_metrics` pins that. One token,
+  stored as SHA-256 like a session, shown once. The metrics are rendered by hand (`models/metrics.rs`,
+  text format 0.0.4) from `dto/metrics_dto.rs`, which leaves a reading out rather than reporting 0 when
+  it does not exist. **Metric names are a public contract** that dashboards depend on; the full list is
+  pinned in `every_metric_name_and_type_is_pinned`, and a rename is a breaking change for the changelog.
 - **Recovery is on the host**: `on-air-record auth reset-password <email>`, `auth reset-2fa <email>` and
   `auth disable`, in `cli.rs`. There is no mail server; shell access is what proves ownership.
 

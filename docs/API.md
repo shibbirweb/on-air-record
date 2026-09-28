@@ -36,6 +36,11 @@ no CORS policy, so another site's scripts cannot read any response either.
 `429 rate_limited` until the window passes. The count is kept in memory, so restarting the service clears
 it.
 
+**Scrape token**: `GET /api/metrics` also accepts `Authorization: Bearer <token>`, for a Prometheus
+scraper, which cannot sign in. The token opens that one route and nothing else, in every mode. A token that
+is present but wrong, revoked or not a bearer token gets `401` even on an open recorder, rather than being
+ignored. See [Metrics](#metrics).
+
 **Scripting with accounts on**: log in once, keep the cookie, send it with each request:
 
 ```sh
@@ -639,6 +644,69 @@ longer reaches that far back, the bookmark is a link to nothing.
   "dataDir": "/Users/me/on-air-record/data"
 }
 ```
+
+## Metrics
+
+### `GET /api/metrics`
+
+The recorder's state in the [Prometheus text format](https://prometheus.io/docs/instrumenting/exposition_formats/),
+served as `text/plain; version=0.0.4; charset=utf-8`. Needs a listener, like any read, or the scrape
+token. Cheap to call: the only query is the same aggregate row `/api/storage` reads.
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `oar_build_info{version,channel}` | gauge | Always 1; the labels name the running version and its release channel |
+| `oar_start_time_seconds` | gauge | When the service started, Unix seconds |
+| `oar_capture_state{state}` | gauge | One series each for `idle`, `starting`, `recording` and `error`; the current one is 1 |
+| `oar_capture_sample_rate_hertz` | gauge | The rate being recorded; only while capture runs |
+| `oar_capture_device_sample_rate_hertz` | gauge | The rate the microphone runs at; only while capture runs |
+| `oar_capture_dropped_frames_total` | counter | Frames the recorder had no room for, since the service started |
+| `oar_recorder_frames_written_total` | counter | Frames written to segment files since capture last started |
+| `oar_recorder_frames_not_written_total` | counter | Frames broadcast live that never reached disk since capture last started |
+| `oar_recorder_disk_healthy` | gauge | 1 while writing to disk works, 0 while it fails; only while recording |
+| `oar_input_level_rms`, `oar_input_level_peak` | gauge | Recent input level, 0 to 1; only while recording |
+| `oar_listeners{activity}` | gauge | Open audio streams by `live`, `playback` and `paused` |
+| `oar_recordings_bytes` | gauge | Bytes of closed segments on disk |
+| `oar_recordings_segments` | gauge | Closed segments on disk |
+| `oar_recordings_oldest_timestamp_seconds` | gauge | Start of the oldest recording kept; absent before anything is recorded |
+| `oar_recordings_newest_timestamp_seconds` | gauge | End of the newest closed segment; absent before anything is recorded |
+| `oar_retention_seconds` | gauge | The retention window; absent when recordings are kept forever |
+
+A reading that does not exist right now is left out rather than reported as 0, so an alert never mistakes
+"nothing recorded yet" for a recording from 1970. The names are a contract: renaming one is a breaking
+change and is called out in the changelog.
+
+```text
+# HELP oar_capture_state Where the recorder is, one series per state with the current one at 1.
+# TYPE oar_capture_state gauge
+oar_capture_state{state="idle"} 0
+oar_capture_state{state="starting"} 0
+oar_capture_state{state="recording"} 1
+oar_capture_state{state="error"} 0
+```
+
+### `GET /api/metrics/token` (admin)
+
+Whether a scrape token exists. The token itself is never returned here.
+
+```json
+{ "createdAtMs": 1757030400000 }
+```
+
+`createdAtMs` is `null` when there is none.
+
+### `POST /api/metrics/token` (admin)
+
+Makes a scrape token, replacing any old one, which stops working at once. This answer is the only time the
+token is ever sent; only its SHA-256 is stored.
+
+```json
+{ "token": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "createdAtMs": 1757030400000 }
+```
+
+### `DELETE /api/metrics/token` (admin)
+
+Revokes the token. Answers `{ "createdAtMs": null }`.
 
 ## WebSocket `GET /api/ws/stream`
 
