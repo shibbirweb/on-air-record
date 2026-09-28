@@ -475,7 +475,8 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Playback transport controls (pause, resume, jump to live)
 - [x] Keep alive ping and pong so idle connections survive proxies
 - [x] Variable speed playback from a quarter to four times real time, forced back to real time on live
-- [ ] Plain HTTP progressive stream for non JavaScript clients
+- [ ] Plain HTTP progressive stream for non JavaScript clients (VLC, smart speakers, Home Assistant), with a
+      per listener stream token when accounts are on, since such players cannot sign in with a cookie
 
 ### Milestone 5: web UI
 
@@ -494,6 +495,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Cue marker showing the selected moment before playback has started
 - [x] Calendar day picker, with days holding no recording shown as unselectable
 - [x] Sounds found against each room's own background, marked on the timeline and minimap, with next and previous sound buttons
+- [ ] Optionally skip long silences during playback, jumping straight to the next sound
 - [x] Picking a day frames it on the timeline and plays from its first recorded moment
 - [x] Transport controls: play, pause, jump back thirty seconds, go live, playback speed
 - [x] Volume slider and mute
@@ -520,6 +522,7 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Responsive layout that reflows to a single column on narrow screens
 - [x] Timeline bookmarks: name a moment, see it flagged on the timeline and the day overview, jump back
       to it from a list
+- [ ] Share a moment: a link that opens the timeline at a given time or range, to send "listen at 02:14"
 
 ### Milestone 6: packaging and operations
 
@@ -531,6 +534,10 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Betas and stable releases started from Actions and published by workflows after their pull requests merge
 - [x] systemd unit template, with the Windows service wrapper documented
 - [x] Container image for Linux on amd64 and arm64, published to ghcr.io and Docker Hub with each release, a health check, and a compose file passing the host's sound cards through
+- [ ] Local alerts, opt in: a webhook on your own network (Home Assistant, a self hosted ntfy) called for a
+      sustained loud sound, recording stopping unexpectedly, or the disk nearly full; never the internet
+- [ ] A `/metrics` endpoint for Prometheus: recorder state, dropped frames, disk use, history depth and
+      listener count, with a way for a scraper to authenticate when accounts are on
 
 ### Milestone 7: access control
 
