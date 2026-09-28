@@ -17,7 +17,7 @@ use crate::config::AppConfig;
 use crate::db::Database;
 use crate::models::{AudioFrame, SessionDraft, SoundSensitivity};
 use crate::repositories::{SegmentRepository, SessionRepository, SettingsRepository};
-use crate::services::recorder_service::{RecorderContext, RecorderService};
+use crate::services::recorder_service::{RecorderContext, RecorderHealth, RecorderService};
 use crate::services::{BroadcastHub, SettingsService, TimelineService};
 
 const RATE: u32 = 48_000;
@@ -31,6 +31,13 @@ const SPEECH_FROM_S: f64 = 60.0;
 const SPEECH_TO_S: f64 = 66.0;
 const CLICK_AT_S: f64 = 100.0;
 const DOOR_AT_S: f64 = 150.0;
+
+/// How far ahead of the disk thread the scene may be fed, in frames: ten seconds of audio, well inside the
+/// recorder's minute of queue. The scene is generated far faster than real time, and the recorder, rightly,
+/// leaves frames out of the recording rather than wait for a disk that has fallen a minute behind. A slow
+/// runner did fall that far behind, and the door vanished from a recording that was never going to have a
+/// gap in the field, where frames arrive ten a second.
+const LEAD_FRAMES: u64 = 100;
 
 /// Deterministic noise, uniform in -1..1, so the scene is identical on every run and every platform.
 struct Noise(u64);
@@ -107,6 +114,7 @@ fn record_scene(name: &str, gain: f64) -> Recorded {
         })
         .expect("session");
     let hub = Arc::new(BroadcastHub::new());
+    let health = Arc::new(RecorderHealth::default());
 
     let (sender, receiver) = bounded(64);
     let recorder = RecorderService::spawn(
@@ -118,7 +126,7 @@ fn record_scene(name: &str, gain: f64) -> Recorded {
             encoder: build_encoder(FrameFormat::PcmS16),
             session_id: session.id,
             layout: SegmentLayout::under_data_dir(&data_dir),
-            health: Default::default(),
+            health: health.clone(),
         },
         receiver,
     )
@@ -127,6 +135,7 @@ fn record_scene(name: &str, gain: f64) -> Recorded {
     let mut noise = Noise(0x9e37_79b9_7f4a_7c15);
     let frames = SCENE_SECONDS * 1000 / FRAME_MS;
     for frame in 0..frames {
+        wait_for_the_disk(&health, (frame as u64).saturating_sub(LEAD_FRAMES));
         let samples: Vec<i16> = (0..FRAME_SAMPLES)
             .map(|index| {
                 let sample_index = frame as usize * FRAME_SAMPLES + index;
@@ -149,10 +158,29 @@ fn record_scene(name: &str, gain: f64) -> Recorded {
     drop(sender);
     // Stopping closes and indexes the segment in progress, as shutting the service down does.
     recorder.stop();
+    assert_eq!(
+        health.frames_not_written(),
+        0,
+        "the recorder left frames out of the recording, so the scene has gaps the tests below do not expect"
+    );
+    assert_eq!(health.frames_written(), frames as u64);
 
     Recorded {
         timeline: TimelineService::new(segments, hub),
         data_dir,
+    }
+}
+
+/// Block until the disk thread has dealt with `frames`, one way or the other.
+fn wait_for_the_disk(health: &RecorderHealth, frames: u64) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while health.frames_written() + health.frames_not_written() < frames {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the disk thread stopped at {} of {frames} frames",
+            health.frames_written()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }
 
