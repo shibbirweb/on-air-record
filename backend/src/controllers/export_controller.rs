@@ -6,11 +6,13 @@ use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 
 use crate::app::AppState;
+use crate::controllers::auth_context::{Caller, RequestOrigin};
 use crate::dto::{ExportPlanResponse, ExportQuery};
 use crate::error::{AppError, AppResult};
+use crate::models::activity::ActivityEvent;
 use crate::models::TimeRange;
 
 /// Chunks buffered between the reader thread and the socket.
@@ -39,10 +41,20 @@ pub async fn plan(
 /// finished download from a dropped connection.
 pub async fn download(
     State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    RequestOrigin(origin): RequestOrigin,
     Query(query): Query<ExportQuery>,
 ) -> AppResult<Response> {
     let range = TimeRange::new(query.from_ms, query.to_ms);
     let plan = state.export.plan(range)?;
+    state.activity.record(
+        caller.actor(),
+        &origin,
+        ActivityEvent::Exported {
+            from_ms: query.from_ms,
+            to_ms: query.to_ms,
+        },
+    );
 
     let (sender, receiver) =
         tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(CHANNEL_DEPTH);

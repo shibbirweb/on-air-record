@@ -872,6 +872,25 @@ async function checkFirstRunAndSignIn(page) {
   check('the account menu leads to the account page', accountShown, await page.run('location.pathname'));
   await audit(page, 'the account page');
 
+  // The activity log holds what just happened: the setup, the wrong password and the right one, each by
+  // the email it concerned. The control room's stream is logged once, when it closes, which is as the
+  // page navigates here, so the page is reloaded until that entry has been written.
+  await page.open('/activity');
+  const logged = await page.waitFor(
+    `location.pathname === '/activity' && ${hasText('Turned sign in on, as the first admin')} && ${hasText('Failed to sign in as owner@example.com')} && ${hasText('Signed in')}`,
+  );
+  check('the activity page lists the setup and the failed and right sign ins', logged);
+  let streamLogged = false;
+  for (let attempt = 0; attempt < 5 && !streamLogged; attempt += 1) {
+    streamLogged = await page.waitFor(hasText('Had the stream open for'), 1500);
+    if (!streamLogged) {
+      await page.open('/activity');
+    }
+  }
+  check('the listening session is logged once the page has left it', streamLogged);
+  await page.shot('activity');
+  await audit(page, 'the activity page');
+
   // A listener, added by the admin, signs in and is shown only what a listener may use.
   const admin = await sessionFor('owner@example.com', 'a long password');
   await request('POST', '/api/users', { email: 'kitchen@example.com', password: 'listen only', role: 'listener' }, admin);
@@ -891,6 +910,9 @@ async function checkFirstRunAndSignIn(page) {
   check('a listener cannot add bookmarks', !(await page.run(`Boolean(${labelled('Add a bookmark here')})`)));
   await page.open('/settings');
   check('a listener who types the settings address is sent back', !(await page.run(`location.pathname.startsWith('/settings')`)), await page.run('location.pathname'));
+  await page.open('/activity');
+  check('a listener who types the activity address is sent back', !(await page.run(`location.pathname.startsWith('/activity')`)), await page.run('location.pathname'));
+  check('and the server refuses them the log', (await fetch(`${BASE}/api/activity`, { headers: { cookie: await sessionFor('kitchen@example.com', 'listen only') } })).status === 403);
 }
 
 main().then(

@@ -26,6 +26,8 @@ pub struct SettingsDto {
     pub check_for_updates: bool,
     /// `low`, `medium` or `high`: how readily the timeline marks a moment as a sound.
     pub sound_sensitivity: SoundSensitivity,
+    /// How many days the activity log keeps an entry.
+    pub activity_retention_days: u32,
 }
 
 impl SettingsDto {
@@ -49,6 +51,7 @@ impl SettingsDto {
             effective_recordings_dir,
             check_for_updates: settings.check_for_updates,
             sound_sensitivity: settings.sound_sensitivity,
+            activity_retention_days: settings.activity_retention_days,
         }
     }
 }
@@ -83,6 +86,8 @@ pub struct SettingsPatchRequest {
     pub check_for_updates: Option<bool>,
     #[serde(default)]
     pub sound_sensitivity: Option<SoundSensitivity>,
+    #[serde(default)]
+    pub activity_retention_days: Option<u32>,
 }
 
 impl From<SettingsPatchRequest> for SettingsPatch {
@@ -99,6 +104,7 @@ impl From<SettingsPatchRequest> for SettingsPatch {
             recordings_dir: request.recordings_dir,
             check_for_updates: request.check_for_updates,
             sound_sensitivity: request.sound_sensitivity,
+            activity_retention_days: request.activity_retention_days,
         }
     }
 }

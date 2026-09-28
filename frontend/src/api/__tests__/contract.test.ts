@@ -26,6 +26,11 @@ import {
 import type { AnyShape, Shape } from '@/test/contract';
 
 import type {
+  ActivityEntry,
+  ActivityEvent,
+  ActivityGroup,
+  ActivityKind,
+  Actor,
   AuthMode,
   AuthState,
   Bookmark,
@@ -53,6 +58,7 @@ import type {
   Role,
   ServerMessage,
   ServiceStatus,
+  SignInMethod,
   SessionList,
   Settings,
   Sound,
@@ -218,6 +224,7 @@ const responseShapes: Record<string, AnyShape> = {
     effectiveRecordingsDir: 'string',
     checkForUpdates: 'boolean',
     soundSensitivity: 'string',
+    activityRetentionDays: 'number',
   }),
   directoryTest: shape<DirectoryTest>({
     ok: 'boolean',
@@ -316,6 +323,38 @@ const enumMembers: Record<string, string[]> = {
   }),
   playerState: members<PlayerState>({ idle: true, playing: true, paused: true }),
   role: members<Role>({ admin: true, listener: true }),
+  activityGroup: members<ActivityGroup>({ access: true, accounts: true, listening: true, recorder: true }),
+  activityKind: members<ActivityKind>({
+    signed_in: true,
+    sign_in_failed: true,
+    second_factor_failed: true,
+    sign_in_blocked: true,
+    signed_out: true,
+    accounts_set_up: true,
+    stayed_open: true,
+    password_changed: true,
+    two_factor_enabled: true,
+    two_factor_disabled: true,
+    recovery_codes_replaced: true,
+    account_created: true,
+    account_removed: true,
+    role_changed: true,
+    password_set: true,
+    two_factor_removed: true,
+    accounts_disabled: true,
+    listened: true,
+    exported: true,
+    capture_started: true,
+    capture_stopped: true,
+    device_selected: true,
+    settings_changed: true,
+    settings_reset: true,
+    bookmark_added: true,
+    bookmark_removed: true,
+    metrics_token_created: true,
+    metrics_token_revoked: true,
+  }),
+  signInMethod: members<SignInMethod>({ password: true, code: true, recovery_code: true }),
   soundSensitivity: members<SoundSensitivity>({ low: true, medium: true, high: true }),
   streamMode: members<StreamMode>({ live: true, playback: true, paused: true }),
 };
@@ -387,9 +426,128 @@ describe('server messages', () => {
   });
 });
 
+// The activity log's entries hold two unions, the actor and the event, each told apart by `kind`. The
+// shape tables cannot say "one of these", so each union gets a table keyed by its tag, typed so the
+// compiler insists on every variant and every key, and each entry is checked against the variant it names.
+
+type ActorShapes = { [A in Actor as A['kind']]: Shape<A> };
+const actorShapes: ActorShapes = {
+  account: { kind: 'string', userId: 'number', email: 'string' },
+  guest: { kind: 'string' },
+  host: { kind: 'string' },
+};
+
+/** A changed setting's values are whatever that setting holds, so that one variant is checked by hand. */
+type EventShapes = {
+  [E in Exclude<ActivityEvent, { kind: 'settings_changed' }> as E['kind']]: Shape<E>;
+} & { settings_changed: 'checked by hand' };
+const eventShapes: EventShapes = {
+  signed_in: { kind: 'string', method: 'string' },
+  sign_in_failed: { kind: 'string', email: { nullable: 'string' } },
+  second_factor_failed: { kind: 'string' },
+  sign_in_blocked: { kind: 'string', email: { nullable: 'string' } },
+  signed_out: { kind: 'string' },
+  accounts_set_up: { kind: 'string' },
+  stayed_open: { kind: 'string' },
+  password_changed: { kind: 'string' },
+  two_factor_enabled: { kind: 'string' },
+  two_factor_disabled: { kind: 'string' },
+  recovery_codes_replaced: { kind: 'string' },
+  account_created: { kind: 'string', email: 'string', role: 'string' },
+  account_removed: { kind: 'string', email: 'string' },
+  role_changed: { kind: 'string', email: 'string', from: 'string', to: 'string' },
+  password_set: { kind: 'string', email: 'string' },
+  two_factor_removed: { kind: 'string', email: 'string' },
+  accounts_disabled: { kind: 'string' },
+  listened: {
+    kind: 'string',
+    startedAtMs: 'number',
+    connectedMs: 'number',
+    playedMs: 'number',
+    playedBack: 'boolean',
+    earliestMs: { nullable: 'number' },
+  },
+  exported: { kind: 'string', fromMs: 'number', toMs: 'number' },
+  capture_started: { kind: 'string' },
+  capture_stopped: { kind: 'string' },
+  device_selected: { kind: 'string', deviceId: { nullable: 'string' } },
+  settings_changed: 'checked by hand',
+  settings_reset: { kind: 'string' },
+  bookmark_added: { kind: 'string', label: 'string', timestampMs: 'number' },
+  bookmark_removed: { kind: 'string', label: 'string' },
+  metrics_token_created: { kind: 'string', replaced: 'boolean' },
+  metrics_token_revoked: { kind: 'string' },
+};
+
+const entryShape = shape<Omit<ActivityEntry, 'actor' | 'event'>>({
+  id: 'number',
+  atMs: 'number',
+  address: { nullable: 'string' },
+  userAgent: { nullable: 'string' },
+});
+
+describe('the activity log', () => {
+  const entries = (fixtures.responses.activityList?.[0]?.entries ?? []) as Record<string, unknown>[];
+
+  it('shows every kind of event and every kind of actor', () => {
+    const kinds = entries.map((entry) => (entry.event as { kind: string }).kind);
+    expect([...new Set(kinds)].sort()).toEqual(Object.keys(eventShapes).sort());
+    const actors = entries.map((entry) => (entry.actor as { kind: string }).kind);
+    expect([...new Set(actors)].sort()).toEqual(Object.keys(actorShapes).sort());
+  });
+
+  it('has exactly the keys and value kinds of each variant', () => {
+    const problems: string[] = [];
+    const coverage = new Coverage();
+    for (const entry of entries) {
+      const { actor, event, ...rest } = entry as { actor: { kind: string }; event: Record<string, unknown> };
+      checkObject(rest, entryShape, 'activityList entry', coverage, problems);
+      const actorShape = (actorShapes as unknown as Record<string, AnyShape>)[actor.kind];
+      if (!actorShape) {
+        problems.push(`an entry by an actor of kind ${actor.kind}`);
+        continue;
+      }
+      checkObject(actor, actorShape, `activityList actor ${actor.kind}`, coverage, problems);
+      if (event.kind === 'settings_changed') {
+        expect(Object.keys(event).sort()).toEqual(['changes', 'kind']);
+        const changes = event.changes as Record<string, unknown>[];
+        expect(changes.length).toBeGreaterThan(0);
+        for (const change of changes) {
+          expect(Object.keys(change).sort()).toEqual(['from', 'key', 'to']);
+          expect(typeof change.key).toBe('string');
+        }
+        continue;
+      }
+      const eventShape = (eventShapes as unknown as Record<string, AnyShape>)[String(event.kind)];
+      if (!eventShape) {
+        problems.push(`an event of kind ${String(event.kind)}`);
+        continue;
+      }
+      checkObject(event, eventShape, `activityList event ${String(event.kind)}`, coverage, problems);
+    }
+    expect([...new Set(problems), ...coverage.gaps()]).toEqual([]);
+  });
+
+  it('carries roles and sign in methods the unions know', () => {
+    for (const entry of entries) {
+      const event = entry.event as Record<string, unknown>;
+      if (event.kind === 'signed_in') {
+        expect(enumMembers.signInMethod).toContain(event.method);
+      }
+      for (const key of ['role', 'from', 'to']) {
+        if (event.kind !== 'settings_changed' && key in event) {
+          expect(enumMembers.role).toContain(event[key]);
+        }
+      }
+    }
+  });
+});
+
 describe('REST responses', () => {
   it('have exactly the keys and value kinds of the types the client reads them as', () => {
-    expect(checkGroups('responses.json', responseShapes, fixtures.responses)).toEqual([]);
+    // The activity log holds unions, checked in its own block above.
+    const { activityList: _unions, ...plain } = fixtures.responses;
+    expect(checkGroups('responses.json', responseShapes, plain)).toEqual([]);
   });
 
   it('carry enum values the TypeScript unions know', () => {

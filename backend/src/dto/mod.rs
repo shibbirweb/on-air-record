@@ -4,6 +4,7 @@
 //! column rename is a repository change rather than a breaking API change, and it gives one obvious place
 //! to enforce the `camelCase` convention the frontend expects.
 
+pub mod activity_dto;
 pub mod auth_dto;
 pub mod bookmark_dto;
 pub mod device_dto;

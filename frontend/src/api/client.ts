@@ -7,6 +7,8 @@
  */
 
 import type {
+  ActivityFilter,
+  ActivityList,
   AuthState,
   Bookmark,
   BookmarkList,
@@ -219,6 +221,19 @@ export const api = {
   updates: () => request<UpdateStatus>('/updates'),
 
   checkForUpdates: () => request<UpdateStatus>('/updates/check', { method: 'POST' }),
+
+  /** A page of the activity log, newest first. Only the filters given are sent. */
+  activity: (filter: ActivityFilter) => {
+    const query = new URLSearchParams();
+    for (const key of ['beforeId', 'limit', 'email', 'group', 'fromMs', 'toMs'] as const) {
+      const value = filter[key];
+      if (value !== undefined && value !== '') {
+        query.set(key, String(value));
+      }
+    }
+    const text = query.toString();
+    return request<ActivityList>(text ? `/activity?${text}` : '/activity');
+  },
 
   metricsToken: () => request<MetricsToken>('/metrics/token'),
 

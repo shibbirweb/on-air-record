@@ -3,6 +3,7 @@
 //! These types describe the vocabulary of the application and know nothing about SQL, HTTP, or the audio
 //! host. Repositories map rows onto them and DTOs project them onto the wire.
 
+pub mod activity;
 pub mod audio_frame;
 pub mod bookmark;
 pub mod capture_state;

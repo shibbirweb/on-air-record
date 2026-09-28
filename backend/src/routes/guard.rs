@@ -51,8 +51,10 @@ pub fn required_access(method: &Method, path: &str) -> Option<Access> {
         return Some(Access::Listen);
     }
     // Reading the update notice is admin only too: listeners cannot act on it, and it names the
-    // install folder. Whether a scrape token exists is an admin's business, like the accounts.
+    // install folder. Whether a scrape token exists is an admin's business, like the accounts, and so is
+    // the activity log, which says who signed in from where and what they listened to.
     if path == "/users"
+        || path == "/activity"
         || path.starts_with("/users/")
         || path == "/updates"
         || path.starts_with("/updates/")

@@ -1,4 +1,454 @@
 {
+  "activityList": [
+    {
+      "entries": [
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757030400000,
+          "event": {
+            "kind": "signed_in",
+            "method": "password"
+          },
+          "id": 100,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": null,
+          "atMs": 1757030340000,
+          "event": {
+            "email": "owner@example.com",
+            "kind": "sign_in_failed"
+          },
+          "id": 99,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "kind": "host"
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757030280000,
+          "event": {
+            "kind": "second_factor_failed"
+          },
+          "id": 98,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": null,
+          "atMs": 1757030220000,
+          "event": {
+            "email": null,
+            "kind": "sign_in_blocked"
+          },
+          "id": 97,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757030160000,
+          "event": {
+            "kind": "signed_out"
+          },
+          "id": 96,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "host"
+          },
+          "address": null,
+          "atMs": 1757030100000,
+          "event": {
+            "kind": "accounts_set_up"
+          },
+          "id": 95,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757030040000,
+          "event": {
+            "kind": "stayed_open"
+          },
+          "id": 94,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": null,
+          "atMs": 1757029980000,
+          "event": {
+            "kind": "password_changed"
+          },
+          "id": 93,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "kind": "host"
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757029920000,
+          "event": {
+            "kind": "two_factor_enabled"
+          },
+          "id": 92,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": null,
+          "atMs": 1757029860000,
+          "event": {
+            "kind": "two_factor_disabled"
+          },
+          "id": 91,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757029800000,
+          "event": {
+            "kind": "recovery_codes_replaced"
+          },
+          "id": 90,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "host"
+          },
+          "address": null,
+          "atMs": 1757029740000,
+          "event": {
+            "email": "kitchen@example.com",
+            "kind": "account_created",
+            "role": "listener"
+          },
+          "id": 89,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757029680000,
+          "event": {
+            "email": "kitchen@example.com",
+            "kind": "account_removed"
+          },
+          "id": 88,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": null,
+          "atMs": 1757029620000,
+          "event": {
+            "email": "kitchen@example.com",
+            "from": "listener",
+            "kind": "role_changed",
+            "to": "admin"
+          },
+          "id": 87,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "kind": "host"
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757029560000,
+          "event": {
+            "email": "kitchen@example.com",
+            "kind": "password_set"
+          },
+          "id": 86,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": null,
+          "atMs": 1757029500000,
+          "event": {
+            "email": "kitchen@example.com",
+            "kind": "two_factor_removed"
+          },
+          "id": 85,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757029440000,
+          "event": {
+            "kind": "accounts_disabled"
+          },
+          "id": 84,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "host"
+          },
+          "address": null,
+          "atMs": 1757029380000,
+          "event": {
+            "connectedMs": 600000,
+            "earliestMs": 1789990000000,
+            "kind": "listened",
+            "playedBack": true,
+            "playedMs": 540000,
+            "startedAtMs": 1790000000000
+          },
+          "id": 83,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757029320000,
+          "event": {
+            "fromMs": 1789990000000,
+            "kind": "exported",
+            "toMs": 1789993600000
+          },
+          "id": 82,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": null,
+          "atMs": 1757029260000,
+          "event": {
+            "kind": "capture_started"
+          },
+          "id": 81,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "kind": "host"
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757029200000,
+          "event": {
+            "kind": "capture_stopped"
+          },
+          "id": 80,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": null,
+          "atMs": 1757029140000,
+          "event": {
+            "deviceId": "Scarlett Solo USB",
+            "kind": "device_selected"
+          },
+          "id": 79,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757029080000,
+          "event": {
+            "changes": [
+              {
+                "from": 24,
+                "key": "retentionHours",
+                "to": null
+              }
+            ],
+            "kind": "settings_changed"
+          },
+          "id": 78,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "host"
+          },
+          "address": null,
+          "atMs": 1757029020000,
+          "event": {
+            "kind": "settings_reset"
+          },
+          "id": 77,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757028960000,
+          "event": {
+            "kind": "bookmark_added",
+            "label": "Door",
+            "timestampMs": 1789990000000
+          },
+          "id": 76,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": null,
+          "atMs": 1757028900000,
+          "event": {
+            "kind": "bookmark_removed",
+            "label": "Door"
+          },
+          "id": 75,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "kind": "host"
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757028840000,
+          "event": {
+            "kind": "metrics_token_created",
+            "replaced": false
+          },
+          "id": 74,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": null,
+          "atMs": 1757028780000,
+          "event": {
+            "kind": "metrics_token_revoked"
+          },
+          "id": 73,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757028720000,
+          "event": {
+            "email": null,
+            "kind": "sign_in_failed"
+          },
+          "id": 72,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "host"
+          },
+          "address": null,
+          "atMs": 1757028660000,
+          "event": {
+            "email": "owner@example.com",
+            "kind": "sign_in_blocked"
+          },
+          "id": 71,
+          "userAgent": null
+        },
+        {
+          "actor": {
+            "email": "owner@example.com",
+            "kind": "account",
+            "userId": 1
+          },
+          "address": "192.168.1.20",
+          "atMs": 1757028600000,
+          "event": {
+            "deviceId": null,
+            "kind": "device_selected"
+          },
+          "id": 70,
+          "userAgent": "Mozilla/5.0 (iPad)"
+        },
+        {
+          "actor": {
+            "kind": "guest"
+          },
+          "address": null,
+          "atMs": 1757028540000,
+          "event": {
+            "connectedMs": 60000,
+            "earliestMs": null,
+            "kind": "listened",
+            "playedBack": false,
+            "playedMs": 0,
+            "startedAtMs": 1757030400000
+          },
+          "id": 69,
+          "userAgent": null
+        }
+      ]
+    }
+  ],
   "authState": [
     {
       "mode": "accounts",
@@ -244,6 +694,7 @@
   ],
   "settings": [
     {
+      "activityRetentionDays": 30,
       "autoStart": true,
       "autoStartDelaySeconds": 20,
       "checkForUpdates": true,
@@ -258,6 +709,7 @@
       "soundSensitivity": "high"
     },
     {
+      "activityRetentionDays": 90,
       "autoStart": false,
       "autoStartDelaySeconds": 0,
       "checkForUpdates": false,

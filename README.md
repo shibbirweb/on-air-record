@@ -549,6 +549,8 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Failed login throttling per client address
 - [x] Account management page, self service password change, and host side recovery commands
 - [x] Two factor sign in with an authenticator app, recovery codes, and admin and host side reset
+- [x] Activity log for admins: sign ins and failed attempts, account changes, listening sessions and
+      downloads, and changes to the recorder, filterable, kept 90 days by default, never holding a secret
 
 ## Testing
 

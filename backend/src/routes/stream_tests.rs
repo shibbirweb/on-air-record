@@ -1354,3 +1354,137 @@ async fn a_client_that_answers_pings_stays_connected_past_the_idle_timeout() {
     }
     assert_eq!(server.state().listeners.count(), 1);
 }
+
+// The activity log.
+
+/// Every listening session in the log so far, waiting for at least `count` of them: the session writes
+/// its entry as it ends, which is a moment after the client's side of the socket closes.
+async fn listening_sessions(
+    server: &Server,
+    count: usize,
+) -> Vec<crate::models::activity::ActivityEntry> {
+    use crate::models::activity::{ActivityEvent, ActivityQuery};
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let found: Vec<_> = server
+            .state()
+            .activity
+            .list(ActivityQuery::default())
+            .expect("list")
+            .into_iter()
+            .filter(|entry| matches!(entry.event, ActivityEvent::Listened { .. }))
+            .collect();
+        if found.len() >= count || Instant::now() > deadline {
+            return found;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+fn listened(entry: &crate::models::activity::ActivityEntry) -> (i64, i64, i64, bool, Option<i64>) {
+    match entry.event {
+        crate::models::activity::ActivityEvent::Listened {
+            started_at_ms,
+            connected_ms,
+            played_ms,
+            played_back,
+            earliest_ms,
+        } => (
+            started_at_ms,
+            connected_ms,
+            played_ms,
+            played_back,
+            earliest_ms,
+        ),
+        _ => panic!("not a listening session"),
+    }
+}
+
+#[tokio::test]
+async fn a_listening_session_is_logged_once_when_it_ends_with_how_far_back_it_went() {
+    use crate::models::activity::Actor;
+    let server = serve(app("stream-activity")).await;
+    let t0 = recent_start();
+    seed_recording(&server.app, &[steady(t0, 60, 40)]);
+    let before = crate::util::time::now_ms();
+    let mut client = connect(&server, None).await;
+    greeting(&mut client).await;
+    send(&mut client, json!({ "type": "player", "state": "playing" })).await;
+
+    for target in [t0 + 30_000, t0 + 5_000, t0 + 20_000] {
+        send(
+            &mut client,
+            json!({ "type": "seek", "timestampMs": target }),
+        )
+        .await;
+        until_control(&mut client, "mode").await;
+    }
+    assert!(
+        listening_sessions(&server, 0).await.is_empty(),
+        "nothing is logged while the session is still open"
+    );
+    client.close(None).await.expect("close");
+
+    let sessions = listening_sessions(&server, 1).await;
+    assert_eq!(
+        sessions.len(),
+        1,
+        "one entry for the whole session, not one per seek"
+    );
+    let entry = &sessions[0];
+    let (started, connected, played, played_back, earliest) = listened(entry);
+    assert!(started >= before, "started when the socket opened");
+    assert!(
+        connected >= 0 && played <= connected,
+        "{connected} {played}"
+    );
+    assert!(played_back);
+    let earliest = earliest.expect("the furthest point back");
+    assert!(
+        (t0 + 5_000..t0 + 5_500).contains(&earliest),
+        "the earliest seek, not the last: {}",
+        earliest - t0
+    );
+    assert_eq!(entry.actor, Actor::Guest);
+    assert_eq!(entry.address.as_deref(), Some("127.0.0.1"));
+}
+
+#[tokio::test]
+async fn following_live_only_is_logged_as_not_played_back() {
+    let server = serve(app("stream-activity-live")).await;
+    let mut client = connect(&server, None).await;
+    greeting(&mut client).await;
+    client.close(None).await.expect("close");
+    let sessions = listening_sessions(&server, 1).await;
+    assert_eq!(sessions.len(), 1);
+    let (_, _, _, played_back, earliest) = listened(&sessions[0]);
+    assert!(!played_back);
+    assert_eq!(earliest, None);
+}
+
+/// A phone that walks out of Wi-Fi range never says goodbye. The session still ends, and is still logged.
+#[tokio::test]
+async fn a_connection_that_drops_without_closing_is_logged_too() {
+    let server = serve(app("stream-activity-dropped")).await;
+    let mut client = connect(&server, None).await;
+    greeting(&mut client).await;
+    drop(client);
+    assert_eq!(listening_sessions(&server, 1).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_signed_in_listener_is_logged_as_their_account() {
+    use crate::models::activity::Actor;
+    let server = serve(app("stream-activity-account")).await;
+    let admin = set_up_admin(&server.app).await;
+    let mut client = connect(&server, Some(&admin)).await;
+    greeting(&mut client).await;
+    client.close(None).await.expect("close");
+    let sessions = listening_sessions(&server, 1).await;
+    assert_eq!(sessions.len(), 1);
+    assert!(
+        matches!(&sessions[0].actor, Actor::Account { email, .. } if email == "owner@example.com"),
+        "{:?}",
+        sessions[0].actor
+    );
+}

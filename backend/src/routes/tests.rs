@@ -8,7 +8,8 @@ use axum::http::{Method, StatusCode};
 use serde_json::{json, Value};
 
 use super::test_support::{
-    app, call, call_from, call_with_challenge, get_raw_with, send, set_up_admin, Reply, TestApp,
+    app, call, call_from, call_with_challenge, code_for, enable_two_factor, get_raw_with, log_in,
+    send, set_up_admin, TestApp,
 };
 
 #[tokio::test]
@@ -311,17 +312,6 @@ async fn add_account(app: &TestApp, admin: &str, email: &str, password: &str, ro
     created.body["id"].as_i64().expect("id")
 }
 
-async fn log_in(app: &TestApp, email: &str, password: &str) -> Reply {
-    call(
-        app,
-        Method::POST,
-        "/api/auth/login",
-        None,
-        Some(json!({ "email": email, "password": password })),
-    )
-    .await
-}
-
 #[tokio::test]
 async fn an_admin_can_promote_a_listener_who_then_administers() {
     let app = app("promote");
@@ -477,49 +467,6 @@ async fn accounts_cannot_be_added_to_an_install_that_stayed_open() {
     )
     .await;
     assert_eq!(reply.status, StatusCode::CONFLICT);
-}
-
-/// Switch on two factor sign in for the signed in account over HTTP, the way the page does, and
-/// return the secret the phone would hold plus the recovery codes shown at the end.
-async fn enable_two_factor(app: &TestApp, session: &str) -> (Vec<u8>, Vec<String>) {
-    let setup = call(
-        app,
-        Method::POST,
-        "/api/auth/two-factor/setup",
-        Some(session),
-        None,
-    )
-    .await;
-    assert_eq!(setup.status, StatusCode::OK, "{}", setup.body);
-    assert!(setup.body["qrSvg"]
-        .as_str()
-        .is_some_and(|svg| svg.contains("<svg")));
-    let secret =
-        crate::services::totp::base32_decode(setup.body["secretKey"].as_str().expect("key"));
-
-    let enabled = call(
-        app,
-        Method::POST,
-        "/api/auth/two-factor/enable",
-        Some(session),
-        Some(json!({ "code": code_for(&secret, 0) })),
-    )
-    .await;
-    assert_eq!(enabled.status, StatusCode::OK, "{}", enabled.body);
-    let codes = enabled.body["recoveryCodes"]
-        .as_array()
-        .expect("codes")
-        .iter()
-        .filter_map(|code| code.as_str().map(str::to_string))
-        .collect();
-    (secret, codes)
-}
-
-/// What the phone shows `steps_ahead` steps from now.
-fn code_for(secret: &[u8], steps_ahead: i64) -> String {
-    use crate::services::totp::{code_at, step_at};
-    let now = crate::util::time::now_ms();
-    format!("{:06}", code_at(secret, step_at(now) + steps_ahead))
 }
 
 #[tokio::test]
@@ -890,6 +837,7 @@ const ROUTE_ACCESS: &[(&str, &str, &str, Option<crate::models::Access>)] = {
         ("GET", "/metrics/token", "/metrics/token", Some(ADMIN)),
         ("POST", "/metrics/token", "/metrics/token", Some(ADMIN)),
         ("DELETE", "/metrics/token", "/metrics/token", Some(ADMIN)),
+        ("GET", "/activity", "/activity", Some(ADMIN)),
     ]
 };
 
@@ -1194,4 +1142,25 @@ async fn a_scrape_token_made_before_accounts_keeps_working_after() {
     set_up_admin(&app).await;
     let reply = get_raw_with(&app, "/api/metrics", &[("authorization", &bearer(&token))]).await;
     assert_eq!(reply.status, StatusCode::OK);
+}
+
+/// Who signed in when, from where, and what they listened to is an admin's business only. A listener
+/// asking is refused by the server, not just by a hidden link.
+#[tokio::test]
+async fn only_an_admin_reads_the_activity_log() {
+    let app = app("activity-admin-only");
+    let admin = set_up_admin(&app).await;
+    let listener = sign_in_listener(&app, &admin).await;
+
+    let signed_out = call(&app, Method::GET, "/api/activity", None, None).await;
+    assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED);
+    let listening = call(&app, Method::GET, "/api/activity", Some(&listener), None).await;
+    assert_eq!(listening.status, StatusCode::FORBIDDEN);
+    let administering = call(&app, Method::GET, "/api/activity", Some(&admin), None).await;
+    assert_eq!(administering.status, StatusCode::OK);
+
+    // The scrape token opens the metrics only, never the log.
+    let token = make_scrape_token(&app, Some(&admin)).await;
+    let scraped = get_raw_with(&app, "/api/activity", &[("authorization", &bearer(&token))]).await;
+    assert_eq!(scraped.status, StatusCode::UNAUTHORIZED);
 }

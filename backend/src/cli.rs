@@ -11,8 +11,9 @@ use crate::config::{AppConfig, AuthCommand, Command};
 use crate::db::Database;
 use crate::error::AppResult;
 use crate::health_probe;
-use crate::repositories::AuthRepository;
-use crate::services::AuthService;
+use crate::models::activity::{ActivityEvent, Actor, Origin};
+use crate::repositories::{ActivityRepository, AuthRepository};
+use crate::services::{ActivityService, AuthService};
 
 pub fn run(config: &AppConfig, command: Command) -> AppResult<()> {
     match command {
@@ -25,22 +26,34 @@ pub fn run(config: &AppConfig, command: Command) -> AppResult<()> {
 
 fn run_auth(config: &AppConfig, command: AuthCommand) -> AppResult<()> {
     let database = Arc::new(Database::open(&config.database_path())?);
+    let activity = ActivityService::new(Arc::new(ActivityRepository::new(database.clone())));
     let auth = AuthService::new(Arc::new(AuthRepository::new(database)));
+    // Logged as done on the host, with no address: shell access is what proved who it was.
+    let log = |event| activity.record(Actor::Host, &Origin::default(), event);
 
     match command {
         AuthCommand::ResetPassword { email } => {
+            let account = account_email(&auth, &email);
             let password = auth.reset_password_by_email(&email)?;
+            if let Some(email) = account {
+                log(ActivityEvent::PasswordSet { email });
+            }
             println!("New password for {}: {password}", email.trim());
             println!("Every session of that account has been signed out.");
             println!("Sign in with it, then change it under Account settings.");
         }
         AuthCommand::ResetTwoFactor { email } => {
+            let account = account_email(&auth, &email);
             auth.reset_two_factor_by_email(&email)?;
+            if let Some(email) = account {
+                log(ActivityEvent::TwoFactorRemoved { email });
+            }
             println!("Two factor sign in is off for {}.", email.trim());
             println!("They sign in with their password alone, and can set up a new app under Account settings.");
         }
         AuthCommand::Disable => {
             auth.disable_accounts()?;
+            log(ActivityEvent::AccountsDisabled);
             println!("Accounts are switched off and every account has been deleted.");
             println!("Anyone who can reach the page can now use it without signing in.");
             println!("Switch accounts back on from the settings page.");
@@ -48,6 +61,16 @@ fn run_auth(config: &AppConfig, command: AuthCommand) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+/// The account's email as stored, for the log, however the command's argument was typed.
+fn account_email(auth: &AuthService, typed: &str) -> Option<String> {
+    let typed = typed.trim();
+    auth.list_users()
+        .ok()?
+        .into_iter()
+        .find(|user| user.email.eq_ignore_ascii_case(typed))
+        .map(|user| user.email)
 }
 
 #[cfg(test)]
@@ -88,6 +111,79 @@ mod tests {
         Command::Auth(AuthCommand::ResetPassword {
             email: email.to_string(),
         })
+    }
+
+    /// The activity log as the running service would read it.
+    fn activity_log(config: &AppConfig) -> Vec<crate::models::activity::ActivityEntry> {
+        let database = Arc::new(Database::open(&config.database_path()).expect("database"));
+        crate::repositories::ActivityRepository::new(database)
+            .list(&crate::models::activity::ActivityQuery {
+                limit: 50,
+                ..Default::default()
+            })
+            .expect("list")
+    }
+
+    #[test]
+    fn each_recovery_command_is_logged_as_done_on_the_host() {
+        use crate::models::activity::{ActivityEvent, Actor};
+        use crate::services::totp;
+        use crate::util::time::now_ms;
+        let temp = temp_data("logged");
+        let running = service(&temp.config);
+        let signed_in = running
+            .set_up("owner@example.com", "a long password")
+            .expect("set up");
+        let setup = running
+            .begin_two_factor_setup(&signed_in.user)
+            .expect("begin");
+        let secret = totp::base32_decode(&setup.secret_key);
+        let code = format!("{:06}", totp::code_at(&secret, totp::step_at(now_ms())));
+        running
+            .enable_two_factor(signed_in.user.id, &code)
+            .expect("enable");
+
+        run(&temp.config, reset("Owner@Example.com ")).expect("reset");
+        let newest = activity_log(&temp.config).remove(0);
+        assert_eq!(newest.actor, Actor::Host);
+        assert_eq!(newest.address, None, "no request, so no address");
+        assert_eq!(
+            newest.event,
+            ActivityEvent::PasswordSet {
+                email: "owner@example.com".to_string()
+            },
+            "the account's own email, not the text typed"
+        );
+
+        run(
+            &temp.config,
+            Command::Auth(AuthCommand::ResetTwoFactor {
+                email: "owner@example.com".to_string(),
+            }),
+        )
+        .expect("reset 2fa");
+        assert_eq!(
+            activity_log(&temp.config).remove(0).event,
+            ActivityEvent::TwoFactorRemoved {
+                email: "owner@example.com".to_string()
+            }
+        );
+
+        run(&temp.config, Command::Auth(AuthCommand::Disable)).expect("disable");
+        let newest = activity_log(&temp.config).remove(0);
+        assert_eq!(newest.event, ActivityEvent::AccountsDisabled);
+        assert_eq!(newest.actor, Actor::Host);
+    }
+
+    #[test]
+    fn a_refused_recovery_command_is_not_logged() {
+        let temp = temp_data("refused-not-logged");
+        service(&temp.config)
+            .set_up("owner@example.com", "a long password")
+            .expect("set up");
+        let before = activity_log(&temp.config).len();
+        assert!(run(&temp.config, reset("nobody@example.com")).is_err());
+        assert_eq!(activity_log(&temp.config).len(), before);
     }
 
     #[test]

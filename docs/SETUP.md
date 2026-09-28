@@ -1000,6 +1000,18 @@ host's clock first; `timedatectl` on Linux shows whether it is kept in sync.
 After five wrong passwords or codes from one device, that device has to wait 15 minutes. Restarting the
 service clears the wait, which is worth knowing if it was you.
 
+### What the recorder keeps a record of
+
+Every sign in, failed attempt and sign out, every change to an account, every listening session and
+download, and every change to the recorder is written to an activity log that admins read under
+**Activity**; the [user guide](USER_GUIDE.md#the-activity-log) lists it all. Each entry keeps the account's
+email, the address it came from and the browser's description of itself, for 90 days unless Settings,
+Activity log says otherwise. Passwords, codes and tokens are never written to it. The recovery commands above
+are logged too, as done from the host.
+
+Behind a reverse proxy, every entry's address is the proxy's, because the recorder does not trust a
+forwarded address header from the network. The login throttle works the same way.
+
 ### Behind a reverse proxy with HTTPS
 
 Logins work over plain HTTP on your network. If you put the recorder behind a reverse proxy that serves it

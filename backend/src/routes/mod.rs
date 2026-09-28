@@ -17,6 +17,8 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
 #[cfg(test)]
+mod activity_tests;
+#[cfg(test)]
 mod bookmark_tests;
 #[cfg(test)]
 mod contract_tests;
@@ -41,9 +43,10 @@ mod web_tests;
 
 use crate::app::AppState;
 use crate::controllers::{
-    auth_controller, bookmark_controller, capture_controller, device_controller, export_controller,
-    metrics_controller, session_controller, settings_controller, status_controller,
-    stream_controller, timeline_controller, update_controller, user_controller,
+    activity_controller, auth_controller, bookmark_controller, capture_controller,
+    device_controller, export_controller, metrics_controller, session_controller,
+    settings_controller, status_controller, stream_controller, timeline_controller,
+    update_controller, user_controller,
 };
 
 /// Build the complete application router.
@@ -128,6 +131,7 @@ pub fn build(state: Arc<AppState>) -> Router {
         .route("/export", get(export_controller::download))
         .route("/export/plan", get(export_controller::plan))
         .route("/ws/stream", get(stream_controller::stream))
+        .route("/activity", get(activity_controller::list))
         .route("/metrics", get(metrics_controller::scrape))
         .route(
             "/metrics/token",

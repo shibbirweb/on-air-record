@@ -3,12 +3,14 @@
 //! One repository per aggregate. Repositories own every SQL string in the codebase and translate rows into
 //! domain models, so no other layer needs to know that the store happens to be SQLite.
 
+pub mod activity_repository;
 pub mod auth_repository;
 pub mod bookmark_repository;
 pub mod segment_repository;
 pub mod session_repository;
 pub mod settings_repository;
 
+pub use activity_repository::ActivityRepository;
 pub use auth_repository::AuthRepository;
 pub use bookmark_repository::BookmarkRepository;
 pub use segment_repository::{DaySummary, SegmentRepository, SegmentStorageStats};

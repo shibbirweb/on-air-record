@@ -76,6 +76,8 @@ export type Settings = {
   checkForUpdates: boolean;
   /** How readily the timeline marks a moment as a sound. */
   soundSensitivity: SoundSensitivity;
+  /** How many days the activity log keeps an entry. */
+  activityRetentionDays: number;
 };
 
 /** How far above the room's own background a moment must rise to count as a sound. */
@@ -400,4 +402,84 @@ export type ErrorEnvelope = {
     code: string;
     message: string;
   };
+};
+
+// The activity log. Each event carries exactly the details it needs, told apart by `kind`, and none of
+// them has anywhere to hold a password, a code or a token.
+
+export type SignInMethod = 'password' | 'code' | 'recovery_code';
+
+/** The four headings the log's filter offers. */
+export type ActivityGroup = 'access' | 'accounts' | 'listening' | 'recorder';
+
+/** Who did it: an account, as named when it happened, a guest on an open recorder, or the host's shell. */
+export type Actor = { kind: 'account'; userId: number; email: string } | { kind: 'guest' } | { kind: 'host' };
+
+/** One setting a save changed, named as the settings page names it. */
+export type SettingChange = { key: string; from: unknown; to: unknown };
+
+export type ActivityEvent =
+  | { kind: 'signed_in'; method: SignInMethod }
+  /** `email` is what was typed when it looked like an email, and `null` otherwise. */
+  | { kind: 'sign_in_failed'; email: string | null }
+  | { kind: 'second_factor_failed' }
+  | { kind: 'sign_in_blocked'; email: string | null }
+  | { kind: 'signed_out' }
+  | { kind: 'accounts_set_up' }
+  | { kind: 'stayed_open' }
+  | { kind: 'password_changed' }
+  | { kind: 'two_factor_enabled' }
+  | { kind: 'two_factor_disabled' }
+  | { kind: 'recovery_codes_replaced' }
+  | { kind: 'account_created'; email: string; role: Role }
+  | { kind: 'account_removed'; email: string }
+  | { kind: 'role_changed'; email: string; from: Role; to: Role }
+  | { kind: 'password_set'; email: string }
+  | { kind: 'two_factor_removed'; email: string }
+  | { kind: 'accounts_disabled' }
+  | {
+      kind: 'listened';
+      startedAtMs: number;
+      connectedMs: number;
+      playedMs: number;
+      playedBack: boolean;
+      earliestMs: number | null;
+    }
+  | { kind: 'exported'; fromMs: number; toMs: number }
+  | { kind: 'capture_started' }
+  | { kind: 'capture_stopped' }
+  | { kind: 'device_selected'; deviceId: string | null }
+  | { kind: 'settings_changed'; changes: SettingChange[] }
+  | { kind: 'settings_reset' }
+  | { kind: 'bookmark_added'; label: string; timestampMs: number }
+  | { kind: 'bookmark_removed'; label: string }
+  | { kind: 'metrics_token_created'; replaced: boolean }
+  | { kind: 'metrics_token_revoked' };
+
+export type ActivityKind = ActivityEvent['kind'];
+
+export type ActivityEntry = {
+  id: number;
+  atMs: number;
+  actor: Actor;
+  /** Where the request came from. Behind a reverse proxy, the proxy. */
+  address: string | null;
+  userAgent: string | null;
+  event: ActivityEvent;
+};
+
+export type ActivityList = {
+  entries: ActivityEntry[];
+};
+
+/** What to read of the log. Every filter is optional. */
+export type ActivityFilter = {
+  /** Only entries older than this one, for the next page. */
+  beforeId?: number;
+  limit?: number;
+  /** Only what this account did. */
+  email?: string;
+  group?: ActivityGroup;
+  fromMs?: number;
+  toMs?: number;
 };

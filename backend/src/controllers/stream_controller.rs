@@ -4,18 +4,16 @@ use std::sync::Arc;
 
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::State;
-use axum::http::{header, HeaderMap};
+use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::Extension;
 
 use crate::app::AppState;
-use crate::controllers::auth_context::{Caller, ClientAddr};
+#[cfg(test)]
+use crate::controllers::auth_context::USER_AGENT_LIMIT;
+use crate::controllers::auth_context::{user_agent, Caller, ClientAddr};
 use crate::models::ListenerAccount;
 use crate::ws::{ListenerIdentity, StreamSession};
-
-/// Longer than any real browser sends, short enough that a hostile client cannot park a large string in
-/// every admin's listener list.
-const USER_AGENT_LIMIT: usize = 512;
 
 /// `GET /api/ws/stream`
 ///
@@ -29,7 +27,9 @@ pub async fn stream(
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
+    let actor = caller.actor();
     let identity = ListenerIdentity {
+        actor,
         account: caller.user.map(|user| ListenerAccount {
             email: user.email,
             role: user.role,
@@ -40,18 +40,10 @@ pub async fn stream(
     upgrade.on_upgrade(move |socket| StreamSession::new(state, caller.token, identity).run(socket))
 }
 
-fn user_agent(headers: &HeaderMap) -> Option<String> {
-    let sent = headers.get(header::USER_AGENT)?.to_str().ok()?.trim();
-    if sent.is_empty() {
-        return None;
-    }
-    Some(sent.chars().take(USER_AGENT_LIMIT).collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::HeaderValue;
+    use axum::http::{header, HeaderValue};
 
     fn with_agent(value: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();

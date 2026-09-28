@@ -11,7 +11,7 @@ use std::time::Duration;
 use crate::config::AppConfig;
 use crate::error::AppResult;
 use crate::repositories::{BookmarkRepository, SegmentRepository, SessionRepository};
-use crate::services::SettingsService;
+use crate::services::{ActivityService, SettingsService};
 use crate::util::time::now_ms;
 
 /// How often the janitor wakes up. A minute is far shorter than the shortest retention window of an hour,
@@ -29,6 +29,7 @@ pub struct SweepReport {
     pub bytes_reclaimed: i64,
     pub sessions_deleted: usize,
     pub bookmarks_deleted: usize,
+    pub activity_deleted: usize,
 }
 
 pub struct RetentionService {
@@ -37,6 +38,8 @@ pub struct RetentionService {
     segments: Arc<SegmentRepository>,
     sessions: Arc<SessionRepository>,
     bookmarks: Arc<BookmarkRepository>,
+    /// The activity log, pruned on its own window. `None` in tests that only concern the recordings.
+    activity: Option<Arc<ActivityService>>,
 }
 
 impl RetentionService {
@@ -53,7 +56,14 @@ impl RetentionService {
             segments,
             sessions,
             bookmarks,
+            activity: None,
         }
+    }
+
+    /// Also prune the activity log, on its own window.
+    pub fn with_activity(mut self, activity: Arc<ActivityService>) -> Self {
+        self.activity = Some(activity);
+        self
     }
 
     /// Run one pass against the current retention setting.
@@ -62,11 +72,24 @@ impl RetentionService {
     /// the disk becomes the only limit. Expressing that as an early return rather than an enormous cutoff
     /// means there is no date far enough in the future to accidentally delete something.
     pub fn sweep(&self) -> AppResult<SweepReport> {
-        let Some(retention_ms) = self.settings.current().retention_ms() else {
-            return Ok(SweepReport::default());
+        let settings = self.settings.current();
+        // The log has its own window, pruned whether or not recordings are, and first, so a failure in the
+        // recordings below never leaves the log growing past it.
+        let activity_deleted = match &self.activity {
+            Some(activity) => activity.prune_before(now_ms() - settings.activity_retention_ms())?,
+            None => 0,
         };
 
-        self.sweep_before(now_ms() - retention_ms)
+        let Some(retention_ms) = settings.retention_ms() else {
+            return Ok(SweepReport {
+                activity_deleted,
+                ..SweepReport::default()
+            });
+        };
+
+        let mut report = self.sweep_before(now_ms() - retention_ms)?;
+        report.activity_deleted = activity_deleted;
+        Ok(report)
     }
 
     /// Delete everything that ended before `cutoff_ms`, up to `BATCH_SIZE` segments.
@@ -137,13 +160,16 @@ impl RetentionService {
 
                     match outcome {
                         Ok(Ok(report))
-                            if report.segments_deleted > 0 || report.bookmarks_deleted > 0 =>
+                            if report.segments_deleted > 0
+                                || report.bookmarks_deleted > 0
+                                || report.activity_deleted > 0 =>
                         {
                             tracing::info!(
                                 segments = report.segments_deleted,
                                 bytes = report.bytes_reclaimed,
                                 sessions = report.sessions_deleted,
                                 bookmarks = report.bookmarks_deleted,
+                                activity = report.activity_deleted,
                                 "retention sweep reclaimed space"
                             );
                         }
@@ -211,6 +237,8 @@ mod tests {
 
     struct Fixture {
         service: RetentionService,
+        activity: Arc<ActivityService>,
+        database: Arc<Database>,
         bookmarks: Arc<crate::repositories::BookmarkRepository>,
         settings: Arc<SettingsService>,
         segments: Arc<SegmentRepository>,
@@ -246,7 +274,12 @@ mod tests {
         );
         let segments = Arc::new(SegmentRepository::new(database.clone()));
         let sessions = Arc::new(SessionRepository::new(database.clone()));
-        let bookmarks = Arc::new(crate::repositories::BookmarkRepository::new(database));
+        let bookmarks = Arc::new(crate::repositories::BookmarkRepository::new(
+            database.clone(),
+        ));
+        let activity = Arc::new(ActivityService::new(Arc::new(
+            crate::repositories::ActivityRepository::new(database.clone()),
+        )));
 
         let session = sessions
             .create(&SessionDraft {
@@ -266,7 +299,10 @@ mod tests {
                 segments.clone(),
                 sessions,
                 bookmarks.clone(),
-            ),
+            )
+            .with_activity(activity.clone()),
+            activity,
+            database,
             bookmarks,
             settings,
             segments,
@@ -274,6 +310,67 @@ mod tests {
             config,
             data_dir,
         }
+    }
+
+    /// Log entries at these ages, in days before now.
+    fn log_entries_aged(fixture: &Fixture, days: &[i64]) {
+        use crate::models::activity::{ActivityEvent, Actor, Origin};
+        for age in days {
+            fixture
+                .activity
+                .record(Actor::Guest, &Origin::default(), ActivityEvent::SignedOut);
+            fixture
+                .database
+                .with_connection(|conn| {
+                    conn.execute(
+                        "UPDATE activity SET at_ms = ?1 WHERE id = (SELECT MAX(id) FROM activity)",
+                        rusqlite::params![now_ms() - age * 86_400_000],
+                    )?;
+                    Ok(())
+                })
+                .expect("age");
+        }
+    }
+
+    fn log_ages_left(fixture: &Fixture) -> usize {
+        fixture
+            .activity
+            .list(crate::models::activity::ActivityQuery::default())
+            .expect("list")
+            .len()
+    }
+
+    #[test]
+    fn the_janitor_prunes_activity_past_its_own_window() {
+        let fixture = fixture("activity-window");
+        fixture
+            .settings
+            .update(&crate::models::SettingsPatch {
+                activity_retention_days: Some(30),
+                ..Default::default()
+            })
+            .expect("window");
+        log_entries_aged(&fixture, &[45, 31, 29, 1]);
+        let report = fixture.service.sweep().expect("sweep");
+        assert_eq!(report.activity_deleted, 2);
+        assert_eq!(log_ages_left(&fixture), 2);
+    }
+
+    /// Keeping recordings forever keeps the audio, not the log: it still has its own window.
+    #[test]
+    fn activity_is_pruned_even_while_recordings_are_kept_forever() {
+        let fixture = fixture("activity-forever");
+        fixture
+            .settings
+            .update(&crate::models::SettingsPatch {
+                retention_hours: Some(None),
+                ..Default::default()
+            })
+            .expect("forever");
+        log_entries_aged(&fixture, &[200, 10]);
+        let report = fixture.service.sweep().expect("sweep");
+        assert_eq!(report.activity_deleted, 1, "the default is ninety days");
+        assert_eq!(log_ages_left(&fixture), 1);
     }
 
     /// Writes a real file under the day based layout and indexes it, the way the recorder would.

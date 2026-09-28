@@ -4,6 +4,7 @@
 //! how a listener seeks. They depend on repositories and on the audio layer, never on HTTP, so the same
 //! logic would serve a CLI or a gRPC front end unchanged.
 
+pub mod activity_service;
 pub mod auth_service;
 pub mod bookmark_service;
 pub mod broadcast_hub;
@@ -23,6 +24,7 @@ pub mod timeline_service;
 pub mod totp;
 pub mod update_service;
 
+pub use activity_service::ActivityService;
 pub use auth_service::{AuthService, LoginOutcome, SignedIn, TwoFactorSetup};
 pub use bookmark_service::BookmarkService;
 pub use broadcast_hub::BroadcastHub;

@@ -24,6 +24,7 @@ const STORED: Settings = {
   effectiveRecordingsDir: '/srv/oar/recordings',
   checkForUpdates: true,
   soundSensitivity: 'medium',
+  activityRetentionDays: 90,
 };
 
 const server = vi.hoisted(() => ({

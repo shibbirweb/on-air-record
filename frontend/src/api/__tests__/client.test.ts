@@ -336,6 +336,20 @@ const METHODS: MethodCase[] = [
   },
   { name: 'updates', call: () => api.updates(), path: '/updates', method: 'GET' },
   { name: 'checkForUpdates', call: () => api.checkForUpdates(), path: '/updates/check', method: 'POST' },
+  {
+    name: 'activity with no filters',
+    call: () => api.activity({}),
+    path: '/activity',
+    method: 'GET',
+    answer: { entries: [] },
+  },
+  {
+    name: 'activity, filtered and paged',
+    call: () => api.activity({ email: 'kitchen@example.com', group: 'listening', beforeId: 12, limit: 50 }),
+    path: '/activity?beforeId=12&limit=50&email=kitchen%40example.com&group=listening',
+    method: 'GET',
+    answer: { entries: [] },
+  },
   { name: 'metricsToken', call: () => api.metricsToken(), path: '/metrics/token', method: 'GET' },
   {
     name: 'createMetricsToken',

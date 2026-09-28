@@ -6,7 +6,7 @@ use serde::Serialize;
 ///
 /// Two roles rather than a permission matrix, because there are exactly two kinds of people using a
 /// recorder: whoever runs it, and whoever listens to it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     /// Controls capture, settings, bookmarks and accounts.

@@ -335,6 +335,7 @@ mod tests {
                 recordings_dir: None,
                 check_for_updates: false,
                 sound_sensitivity: crate::models::SoundSensitivity::High,
+                activity_retention_days: 7,
             })
             .expect("configure");
 
