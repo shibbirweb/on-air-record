@@ -39,6 +39,7 @@ flowchart LR
 - [Keeping it running: Linux](#keeping-it-running-linux)
 - [Keeping it running: Windows](#keeping-it-running-windows)
 - [Letting other machines reach it](#letting-other-machines-reach-it)
+- [Monitoring with Prometheus](#monitoring-with-prometheus)
 - [Upgrading](#upgrading)
 - [Trying a beta](#trying-a-beta)
 - [Uninstalling](#uninstalling)
@@ -1273,6 +1274,77 @@ purpose.
 them, anyone who can reach the address can listen to the microphone and change the settings. With them, a
 password is all that stands between the internet and the microphone, and the service has not been built or
 tested to face the open internet. If you need access from elsewhere, use a VPN into that network.
+
+## Monitoring with Prometheus
+
+A recorder left alone for weeks is worth watching. If you run [Prometheus](https://prometheus.io/), it can
+read the recorder's state from `/api/metrics`: whether it is recording, whether writing to disk works, how
+loud the microphone is, how much disk the recordings take, how far back they reach, and who is listening.
+The [API reference](API.md#metrics) lists every metric.
+
+Settings, **Monitoring**, has a scrape config ready to copy, built from the address you opened the page on.
+It looks like this:
+
+```yaml
+scrape_configs:
+  - job_name: on-air-record
+    metrics_path: /api/metrics
+    scheme: http
+    static_configs:
+      - targets: ['recorder.local:8080']
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/on-air-record.token
+```
+
+The path is under `/api`, not the usual `/metrics`, so keep the `metrics_path` line. The port must be the
+one the recorder listens on, see [Choosing a port](#choosing-a-port).
+
+**With logins on**, Prometheus needs a scrape token, because it cannot sign in. An admin makes one on the
+Monitoring card; it is shown once. Save it on the Prometheus machine, readable by Prometheus only:
+
+```sh
+sudo sh -c 'printf %s "the-token" > /etc/prometheus/on-air-record.token'
+sudo chown prometheus /etc/prometheus/on-air-record.token
+sudo chmod 600 /etc/prometheus/on-air-record.token
+```
+
+The token opens the metrics and nothing else: it cannot listen, read recordings or change a setting. A
+wrong or revoked one is refused with `401`, even on a recorder without logins, so a mistake shows up as a
+failing target straight away. **Without logins** leave out the `authorization` lines, or make a token
+anyway so nothing needs changing if logins are switched on later.
+
+Prometheus in Docker on the same host reaches the recorder by the host's address, not `localhost`, which
+inside a container is the container itself.
+
+Three alerts cover what goes wrong on an unattended recorder:
+
+```yaml
+groups:
+  - name: on-air-record
+    rules:
+      - alert: RecorderNotRecording
+        expr: oar_capture_state{state="recording"} == 0
+        for: 5m
+        annotations:
+          summary: The recorder on {{ $labels.instance }} has not been recording for 5 minutes.
+      - alert: RecorderDiskFailing
+        expr: oar_recorder_disk_healthy == 0
+        for: 1m
+        annotations:
+          summary: Recording to disk is failing on {{ $labels.instance }}; only the live feed continues.
+      - alert: RecorderNoNewAudio
+        expr: time() - oar_recordings_newest_timestamp_seconds > 600 and on(instance) oar_capture_state{state="recording"} == 1
+        annotations:
+          summary: No new audio has been saved on {{ $labels.instance }} for 10 minutes.
+```
+
+Only closed segments count as saved, and a segment can be up to five minutes long, which is why the last
+rule allows ten.
+
+Free disk space is not among the metrics, because the operating system reports it better:
+[node_exporter](https://github.com/prometheus/node_exporter), which most Prometheus setups already run,
+has `node_filesystem_avail_bytes` for the disk the recordings are on.
 
 ## Upgrading
 

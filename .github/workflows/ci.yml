@@ -579,6 +579,16 @@ jobs:
           curl -fsS http://127.0.0.1:8099/api/updates | grep -q '"kind":"docker"' \
             || { echo "the image does not report itself as a container"; exit 1; }
 
+          # What a Prometheus scraper reads, served by the shipped binary in the format it parses.
+          curl -fsS -D metrics.headers http://127.0.0.1:8099/api/metrics -o metrics.txt
+          grep -qi '^content-type: text/plain; version=0.0.4' metrics.headers \
+            || { echo "the metrics are not in the Prometheus text format"; cat metrics.headers; exit 1; }
+          # Which state it is in depends on the runner having no sound card, so only that exactly one is set.
+          grep -q '^oar_build_info{version="' metrics.txt \
+            || { echo "the metrics do not name the version"; cat metrics.txt; exit 1; }
+          [ "$(grep -c '^oar_capture_state{state="[a-z]*"} 1$' metrics.txt)" = "1" ] \
+            || { echo "the metrics do not report exactly one recorder state"; cat metrics.txt; exit 1; }
+
           # Never root, and zone data present, or TZ is ignored and every recording lands on a UTC day.
           [ "$(docker exec on-air-record id -u)" = "10001" ] || { echo "the image runs as the wrong user"; exit 1; }
           docker exec on-air-record test -f /usr/share/zoneinfo/Europe/London \

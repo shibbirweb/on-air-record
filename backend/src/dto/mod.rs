@@ -7,6 +7,7 @@
 pub mod auth_dto;
 pub mod bookmark_dto;
 pub mod device_dto;
+pub mod metrics_dto;
 pub mod session_dto;
 pub mod settings_dto;
 pub mod status_dto;
@@ -22,6 +23,7 @@ pub use bookmark_dto::{
     BookmarkDto, BookmarkListResponse, CreateBookmarkRequest, UpdateBookmarkRequest,
 };
 pub use device_dto::{DeviceDto, DeviceListResponse, SelectDeviceRequest};
+pub use metrics_dto::{MetricsSnapshot, MetricsTokenResponse, NewMetricsTokenResponse};
 pub use session_dto::{SessionDto, SessionListResponse, StorageResponse};
 pub use settings_dto::{
     SettingsDto, SettingsPatchRequest, TestDirectoryRequest, TestDirectoryResponse,

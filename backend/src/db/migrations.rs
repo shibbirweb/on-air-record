@@ -151,6 +151,20 @@ const MIGRATIONS: &[Migration] = &[
         CREATE INDEX idx_recovery_codes_user ON recovery_codes (user_id);
     "#,
     },
+    Migration {
+        version: 6,
+        name: "metrics scrape token",
+        // One token for a Prometheus scraper, which cannot sign in. Like a session it is high entropy and
+        // shown once, so only its SHA-256 is kept. The single row is enforced by the key, so rotating is a
+        // replace and there is never a second token nobody remembers creating.
+        sql: r#"
+        CREATE TABLE metrics_token (
+            id            INTEGER PRIMARY KEY CHECK (id = 1),
+            token_hash    BLOB NOT NULL,
+            created_at_ms INTEGER NOT NULL
+        );
+    "#,
+    },
 ];
 
 /// Apply every migration newer than the database's recorded version.

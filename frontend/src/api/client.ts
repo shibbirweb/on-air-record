@@ -15,6 +15,8 @@ import type {
   ErrorEnvelope,
   ExportPlan,
   Health,
+  MetricsToken,
+  NewMetricsToken,
   NextSound,
   Peaks,
   RecordingDayList,
@@ -217,6 +219,13 @@ export const api = {
   updates: () => request<UpdateStatus>('/updates'),
 
   checkForUpdates: () => request<UpdateStatus>('/updates/check', { method: 'POST' }),
+
+  metricsToken: () => request<MetricsToken>('/metrics/token'),
+
+  /** Makes a scrape token, replacing any old one, which stops working at once. */
+  createMetricsToken: () => request<NewMetricsToken>('/metrics/token', { method: 'POST' }),
+
+  revokeMetricsToken: () => request<MetricsToken>('/metrics/token', { method: 'DELETE' }),
 
   testRecordingsDir: (path: string | null) =>
     request<DirectoryTest>('/settings/test-recordings-dir', {

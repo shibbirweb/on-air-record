@@ -10,6 +10,7 @@ import { Navigate } from 'react-router';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AccessSettings } from '@/features/settings/AccessSettings';
+import { MetricsSettings } from '@/features/settings/MetricsSettings';
 import { RecordingLocation } from '@/features/settings/RecordingLocation';
 import { RecordingQuality } from '@/features/settings/RecordingQuality';
 import { SettingsActionBar } from '@/features/settings/SettingsActionBar';
@@ -118,6 +119,19 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent>
           <AccessSettings />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Monitoring</CardTitle>
+          <CardDescription>
+            Metrics for Prometheus, and the token a scraper uses when sign in is on. Tokens are made and
+            revoked as soon as you confirm.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <MetricsSettings />
         </CardContent>
       </Card>
 

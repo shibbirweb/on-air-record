@@ -8,7 +8,7 @@ use axum::http::{Method, StatusCode};
 use serde_json::{json, Value};
 
 use super::test_support::{
-    app, call, call_from, call_with_challenge, send, set_up_admin, Reply, TestApp,
+    app, call, call_from, call_with_challenge, get_raw_with, send, set_up_admin, Reply, TestApp,
 };
 
 #[tokio::test]
@@ -886,6 +886,10 @@ const ROUTE_ACCESS: &[(&str, &str, &str, Option<crate::models::Access>)] = {
         ("GET", "/export", "/export", Some(LISTEN)),
         ("GET", "/export/plan", "/export/plan", Some(LISTEN)),
         ("GET", "/ws/stream", "/ws/stream", Some(LISTEN)),
+        ("GET", "/metrics", "/metrics", Some(LISTEN)),
+        ("GET", "/metrics/token", "/metrics/token", Some(ADMIN)),
+        ("POST", "/metrics/token", "/metrics/token", Some(ADMIN)),
+        ("DELETE", "/metrics/token", "/metrics/token", Some(ADMIN)),
     ]
 };
 
@@ -953,4 +957,241 @@ fn the_guard_asks_each_route_for_the_access_decided_for_it() {
             "{method} {route}"
         );
     }
+}
+
+/// A listener account signed in, returning its session cookie.
+async fn sign_in_listener(app: &TestApp, admin: &str) -> String {
+    let created = call(
+        app,
+        Method::POST,
+        "/api/users",
+        Some(admin),
+        Some(json!({ "email": "scraper@example.com", "password": "listen only", "role": "listener" })),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
+    call(
+        app,
+        Method::POST,
+        "/api/auth/login",
+        None,
+        Some(json!({ "email": "scraper@example.com", "password": "listen only" })),
+    )
+    .await
+    .cookie
+    .expect("listener cookie")
+}
+
+async fn make_scrape_token(app: &TestApp, admin: Option<&str>) -> String {
+    let made = call(app, Method::POST, "/api/metrics/token", admin, None).await;
+    assert_eq!(made.status, StatusCode::OK, "{}", made.body);
+    made.body["token"].as_str().expect("token").to_string()
+}
+
+fn bearer(token: &str) -> String {
+    format!("Bearer {token}")
+}
+
+#[tokio::test]
+async fn metrics_are_open_on_an_open_recorder() {
+    let app = app("metrics-open");
+    let undecided = get_raw_with(&app, "/api/metrics", &[]).await;
+    assert_eq!(undecided.status, StatusCode::OK);
+
+    call(&app, Method::POST, "/api/auth/open", None, None).await;
+    let open = get_raw_with(&app, "/api/metrics", &[]).await;
+    assert_eq!(open.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn with_accounts_metrics_need_a_session_or_the_scrape_token() {
+    let app = app("metrics-accounts");
+    let admin = set_up_admin(&app).await;
+    let listener = sign_in_listener(&app, &admin).await;
+
+    let signed_out = get_raw_with(&app, "/api/metrics", &[]).await;
+    assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED);
+
+    for cookie in [&admin, &listener] {
+        let session = format!("oar_session={cookie}");
+        let reply = get_raw_with(&app, "/api/metrics", &[("cookie", &session)]).await;
+        assert_eq!(reply.status, StatusCode::OK);
+    }
+
+    let token = make_scrape_token(&app, Some(&admin)).await;
+    let scraped = get_raw_with(&app, "/api/metrics", &[("authorization", &bearer(&token))]).await;
+    assert_eq!(scraped.status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&scraped.bytes).contains("oar_build_info"));
+
+    // The scheme name is case insensitive in HTTP, and Prometheus writes it as `Bearer`.
+    let lower = format!("bearer {token}");
+    let reply = get_raw_with(&app, "/api/metrics", &[("authorization", &lower)]).await;
+    assert_eq!(reply.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_wrong_or_revoked_scrape_token_is_refused() {
+    let app = app("metrics-wrong-token");
+    let admin = set_up_admin(&app).await;
+    let token = make_scrape_token(&app, Some(&admin)).await;
+
+    for header in [
+        bearer("0000"),
+        bearer(""),
+        "Bearer".to_string(),
+        format!("Basic {token}"),
+        token.clone(),
+    ] {
+        let reply = get_raw_with(&app, "/api/metrics", &[("authorization", &header)]).await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{header}");
+    }
+
+    let revoked = call(
+        &app,
+        Method::DELETE,
+        "/api/metrics/token",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(revoked.status, StatusCode::OK);
+    let reply = get_raw_with(&app, "/api/metrics", &[("authorization", &bearer(&token))]).await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+}
+
+/// A wrong token is a misconfigured scraper, and it is better found now than on the day accounts go on,
+/// so it is refused on an open recorder too, where no token is needed at all.
+#[tokio::test]
+async fn a_wrong_scrape_token_is_refused_even_on_an_open_recorder() {
+    let app = app("metrics-open-wrong-token");
+    call(&app, Method::POST, "/api/auth/open", None, None).await;
+    let reply = get_raw_with(&app, "/api/metrics", &[("authorization", &bearer("nope"))]).await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+}
+
+/// The token opens the metrics and nothing else: not what they summarise, not the audio, and not a single
+/// change. A leaked Prometheus config must never be a key to the recorder.
+#[tokio::test]
+async fn the_scrape_token_opens_nothing_but_the_metrics() {
+    let app = app("metrics-token-scope");
+    let admin = set_up_admin(&app).await;
+    let token = make_scrape_token(&app, Some(&admin)).await;
+    let authorization = bearer(&token);
+
+    for path in [
+        "/api/status",
+        "/api/storage",
+        "/api/settings",
+        "/api/sessions",
+        "/api/timeline/range",
+        "/api/users",
+        "/api/updates",
+        "/api/metrics/token",
+        "/api/ws/stream",
+        "/api/export?fromMs=0&toMs=1000",
+    ] {
+        let reply = get_raw_with(&app, path, &[("authorization", &authorization)]).await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{path}");
+    }
+
+    let changed =
+        raw_with_authorization(&app, Method::POST, "/api/capture/stop", &authorization).await;
+    assert_eq!(changed, StatusCode::UNAUTHORIZED);
+    let rotated =
+        raw_with_authorization(&app, Method::POST, "/api/metrics/token", &authorization).await;
+    assert_eq!(rotated, StatusCode::UNAUTHORIZED);
+    let revoked =
+        raw_with_authorization(&app, Method::DELETE, "/api/metrics/token", &authorization).await;
+    assert_eq!(revoked, StatusCode::UNAUTHORIZED);
+
+    let still = get_raw_with(&app, "/api/metrics", &[("authorization", &authorization)]).await;
+    assert_eq!(
+        still.status,
+        StatusCode::OK,
+        "the token itself is untouched"
+    );
+}
+
+async fn raw_with_authorization(
+    app: &TestApp,
+    method: Method,
+    path: &str,
+    authorization: &str,
+) -> StatusCode {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+    let request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("host", super::test_support::HOST_NAME)
+        .header("authorization", authorization)
+        .body(Body::empty())
+        .expect("request");
+    app.router
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("response")
+        .status()
+}
+
+#[tokio::test]
+async fn only_an_admin_manages_the_scrape_token() {
+    let app = app("metrics-token-admin");
+    let admin = set_up_admin(&app).await;
+    let listener = sign_in_listener(&app, &admin).await;
+
+    for method in [Method::GET, Method::POST, Method::DELETE] {
+        let signed_out = call(&app, method.clone(), "/api/metrics/token", None, None).await;
+        assert_eq!(signed_out.status, StatusCode::UNAUTHORIZED, "{method}");
+        let listening = call(
+            &app,
+            method.clone(),
+            "/api/metrics/token",
+            Some(&listener),
+            None,
+        )
+        .await;
+        assert_eq!(listening.status, StatusCode::FORBIDDEN, "{method}");
+        let administering = call(
+            &app,
+            method.clone(),
+            "/api/metrics/token",
+            Some(&admin),
+            None,
+        )
+        .await;
+        assert_eq!(administering.status, StatusCode::OK, "{method}");
+    }
+}
+
+#[tokio::test]
+async fn another_website_cannot_make_or_revoke_the_scrape_token() {
+    let app = app("metrics-token-origin");
+    for method in [Method::POST, Method::DELETE] {
+        let reply = call_from(
+            &app,
+            method.clone(),
+            "/api/metrics/token",
+            None,
+            None,
+            Some("http://elsewhere.example"),
+        )
+        .await;
+        assert_eq!(reply.status, StatusCode::FORBIDDEN, "{method}");
+    }
+    let status = call(&app, Method::GET, "/api/metrics/token", None, None).await;
+    assert_eq!(status.body["createdAtMs"], Value::Null, "nothing was made");
+}
+
+/// A scraper set up while the recorder was open keeps working when accounts are turned on, so securing
+/// the recorder does not quietly blind its monitoring.
+#[tokio::test]
+async fn a_scrape_token_made_before_accounts_keeps_working_after() {
+    let app = app("metrics-token-before-accounts");
+    let token = make_scrape_token(&app, None).await;
+    set_up_admin(&app).await;
+    let reply = get_raw_with(&app, "/api/metrics", &[("authorization", &bearer(&token))]).await;
+    assert_eq!(reply.status, StatusCode::OK);
 }

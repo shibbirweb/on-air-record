@@ -536,8 +536,8 @@ running service on macOS, see [Testing](#testing) for what that covers and what 
 - [x] Container image for Linux on amd64 and arm64, published to ghcr.io and Docker Hub with each release, a health check, and a compose file passing the host's sound cards through
 - [ ] Local alerts, opt in: a webhook on your own network (Home Assistant, a self hosted ntfy) called for a
       sustained loud sound, recording stopping unexpectedly, or the disk nearly full; never the internet
-- [ ] A `/metrics` endpoint for Prometheus: recorder state, dropped frames, disk use, history depth and
-      listener count, with a way for a scraper to authenticate when accounts are on
+- [x] Prometheus metrics at `/api/metrics`: recorder state, dropped frames, disk health, input level, disk
+      use, history depth and listeners, with a scrape token for when accounts are on
 
 ### Milestone 7: access control
 

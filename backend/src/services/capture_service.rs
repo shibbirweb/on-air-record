@@ -17,7 +17,7 @@ use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
 use crate::models::{CaptureSnapshot, CaptureState, SessionDraft};
 use crate::repositories::{SegmentRepository, SessionRepository};
-use crate::services::recorder_service::{RecorderContext, RecorderHealth};
+use crate::services::recorder_service::{RecorderContext, RecorderHealth, RecorderReport};
 use crate::services::{BroadcastHub, RecorderHandle, RecorderService, SettingsService};
 use crate::util::time::now_ms;
 
@@ -96,6 +96,11 @@ impl CaptureService {
             Ok(guard) => guard.clone(),
             Err(_) => CaptureSnapshot::default(),
         }
+    }
+
+    /// How recording to disk is going, for the metrics endpoint.
+    pub fn recorder_report(&self) -> RecorderReport {
+        self.recorder_health.report()
     }
 
     /// The recorder's trouble with the disk and the index, for the fault tests.

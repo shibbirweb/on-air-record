@@ -8,6 +8,7 @@ pub mod bookmark;
 pub mod capture_state;
 pub mod device;
 pub mod listener;
+pub mod metrics;
 pub mod segment;
 pub mod session;
 pub mod settings;

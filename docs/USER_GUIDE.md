@@ -695,6 +695,32 @@ accident.
 admin. Give them the email and password yourself, since nothing is sent to them. They can change the
 password under [Account settings](#your-account-settings) once they are in.
 
+### Monitoring with Prometheus
+
+The **Monitoring** card, the last on the page, is for anyone who already runs
+[Prometheus](https://prometheus.io/) to watch the machines on their network. Like the Access card, it acts
+as soon as you confirm, without Save. If you do not use Prometheus, you can ignore it.
+
+It shows the address Prometheus reads from, and a scrape config to paste into Prometheus's own
+configuration, built from the address you opened this page on. If Prometheus runs on another machine,
+change `localhost` in it to an address that machine can reach.
+
+Prometheus cannot sign in, so while logins are on it needs a **scrape token**:
+
+- **Create token** makes one and shows it once. Copy it into the file the scrape config names,
+  `/etc/prometheus/on-air-record.token`, on the Prometheus machine. It is never shown again; if it is lost,
+  make a new one.
+- **Rotate** makes a new token in place of the old, which stops working at once, so update the file straight
+  after. Use it if the token may have been seen by someone who should not have it.
+- **Revoke** removes the token, and Prometheus stops reading the metrics until it has a new one.
+
+Rotate and Revoke ask you to confirm first. The token only lets Prometheus read the metrics: it cannot
+listen, see recordings or change anything. On a recorder without logins no token is needed, but one made
+now keeps Prometheus working if logins are turned on later.
+
+What Prometheus can watch, and alerts worth setting up, are in the setup guide under
+[Monitoring with Prometheus](SETUP.md#monitoring-with-prometheus).
+
 ## On a phone or a tablet
 
 ![The full interface on a narrow phone screen, stacked into a single column](https://raw.githubusercontent.com/shibbirweb/on-air-record/master/docs/images/user-guide/phone.png)

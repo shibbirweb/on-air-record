@@ -472,6 +472,33 @@ impl AuthService {
         exhausted
     }
 
+    /// When the scrape token was made, for the settings card; the token itself is never shown again.
+    pub fn metrics_token_created_at(&self) -> AppResult<Option<i64>> {
+        self.repository.metrics_token_created_at()
+    }
+
+    /// Make a new scrape token, replacing any old one, and return it with its creation time. This is the
+    /// only time it is ever readable.
+    pub fn create_metrics_token(&self) -> AppResult<(String, i64)> {
+        let token = generate_token();
+        let created_at_ms = now_ms();
+        self.repository
+            .replace_metrics_token(&hash_token(&token), created_at_ms)?;
+        Ok((token, created_at_ms))
+    }
+
+    pub fn revoke_metrics_token(&self) -> AppResult<()> {
+        self.repository.delete_metrics_token()
+    }
+
+    /// Whether a scraper's bearer token is the current one. An empty token never is.
+    pub fn verify_metrics_token(&self, token: &str) -> AppResult<bool> {
+        if token.trim().is_empty() {
+            return Ok(false);
+        }
+        self.repository.metrics_token_matches(&hash_token(token))
+    }
+
     pub fn log_out(&self, token: &str) -> AppResult<()> {
         self.repository.delete_session(&hash_token(token))
     }
@@ -766,6 +793,90 @@ mod tests {
     fn service() -> AuthService {
         let database = Arc::new(Database::open_in_memory().expect("database"));
         AuthService::new(Arc::new(AuthRepository::new(database)))
+    }
+
+    #[test]
+    fn a_scrape_token_is_long_random_and_verifies() {
+        let service = service();
+        let before = now_ms();
+        let (token, created_at_ms) = service.create_metrics_token().expect("create");
+        assert_eq!(token.len(), 64, "256 bits as hex: {token}");
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()), "{token}");
+        assert!(created_at_ms >= before, "made now");
+        assert!(service.verify_metrics_token(&token).expect("verify"));
+        assert_eq!(
+            service.metrics_token_created_at().expect("read"),
+            Some(created_at_ms)
+        );
+        let (other, _) = service.create_metrics_token().expect("again");
+        assert_ne!(token, other, "every token is new");
+    }
+
+    #[test]
+    fn only_the_hash_of_a_scrape_token_is_stored() {
+        let service = service();
+        let (token, _) = service.create_metrics_token().expect("create");
+        let stored: Vec<u8> = service
+            .repository
+            .database()
+            .with_connection(|conn| {
+                Ok(conn.query_row("SELECT token_hash FROM metrics_token", [], |row| row.get(0))?)
+            })
+            .expect("row");
+        assert_eq!(stored, hash_token(&token));
+        assert_ne!(stored, token.as_bytes());
+    }
+
+    #[test]
+    fn rotating_a_scrape_token_stops_the_old_one() {
+        let service = service();
+        let (old, _) = service.create_metrics_token().expect("create");
+        let (new, _) = service.create_metrics_token().expect("rotate");
+        assert!(!service.verify_metrics_token(&old).expect("old"));
+        assert!(service.verify_metrics_token(&new).expect("new"));
+    }
+
+    #[test]
+    fn a_revoked_scrape_token_stops_working() {
+        let service = service();
+        let (token, _) = service.create_metrics_token().expect("create");
+        service.revoke_metrics_token().expect("revoke");
+        assert!(!service.verify_metrics_token(&token).expect("verify"));
+        assert_eq!(service.metrics_token_created_at().expect("read"), None);
+    }
+
+    #[test]
+    fn wrong_or_empty_scrape_tokens_never_verify() {
+        let service = service();
+        assert!(
+            !service.verify_metrics_token("").expect("none yet"),
+            "nothing made yet"
+        );
+        let (token, _) = service.create_metrics_token().expect("create");
+        assert!(!service.verify_metrics_token("").expect("empty"));
+        assert!(!service.verify_metrics_token("   ").expect("blank"));
+        assert!(!service
+            .verify_metrics_token(&token.to_uppercase())
+            .expect("case"));
+        assert!(!service.verify_metrics_token(&token[..63]).expect("short"));
+        assert!(!service
+            .verify_metrics_token(&format!("{token}0"))
+            .expect("long"));
+    }
+
+    /// A session token is never a scrape token, and the other way round, so neither can stand in for the
+    /// other.
+    #[test]
+    fn a_session_token_is_not_a_scrape_token() {
+        let service = service();
+        let signed_in = service
+            .set_up("owner@example.com", "a long enough password")
+            .expect("set up");
+        assert!(!service
+            .verify_metrics_token(&signed_in.token)
+            .expect("verify"));
+        let (scrape, _) = service.create_metrics_token().expect("create");
+        assert!(service.resolve(Some(&scrape)).expect("resolve").is_none());
     }
 
     #[test]

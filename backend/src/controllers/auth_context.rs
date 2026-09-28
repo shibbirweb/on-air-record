@@ -6,7 +6,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use axum::extract::{ConnectInfo, FromRequestParts};
-use axum::http::header::{COOKIE, HOST, ORIGIN};
+use axum::http::header::{AUTHORIZATION, COOKIE, HOST, ORIGIN};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue};
 
@@ -40,6 +40,34 @@ impl Caller {
 /// Read our session cookie out of the `Cookie` header.
 pub fn session_token(headers: &HeaderMap) -> Option<String> {
     read_cookie(headers, SESSION_COOKIE)
+}
+
+/// What an `Authorization` header holds, for the one route a scraper calls.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Presented<'a> {
+    /// No header: the request stands on its cookie, or on the recorder being open.
+    Nothing,
+    /// `Bearer <token>`, with the scheme in any case as HTTP allows.
+    Bearer(&'a str),
+    /// A header that is not a bearer token, or one with nothing after the scheme.
+    Malformed,
+}
+
+pub fn presented_credentials(headers: &HeaderMap) -> Presented<'_> {
+    let Some(value) = headers.get(AUTHORIZATION) else {
+        return Presented::Nothing;
+    };
+    let Ok(value) = value.to_str() else {
+        return Presented::Malformed;
+    };
+    match value.trim().split_once(' ') {
+        Some((scheme, token))
+            if scheme.eq_ignore_ascii_case("bearer") && !token.trim().is_empty() =>
+        {
+            Presented::Bearer(token.trim())
+        }
+        _ => Presented::Malformed,
+    }
 }
 
 /// The pending two factor sign in, between a right password and the code.

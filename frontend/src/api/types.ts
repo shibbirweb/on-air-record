@@ -349,6 +349,18 @@ export type TwoFactorSetup = {
   qrSvg: string;
 };
 
+/** Whether a Prometheus scrape token exists. The token itself is only ever in `NewMetricsToken`. */
+export type MetricsToken = {
+  /** When the current token was made, `null` when there is none. */
+  createdAtMs: number | null;
+};
+
+/** A scrape token just made or rotated: the only time the server sends it. */
+export type NewMetricsToken = {
+  token: string;
+  createdAtMs: number;
+};
+
 /** The recovery codes, shown once when two factor sign in is turned on or the codes are replaced. */
 export type RecoveryCodes = {
   recoveryCodes: string[];
